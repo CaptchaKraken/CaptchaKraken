@@ -159,3 +159,49 @@ jobs:
         with:
           packages-dir: python/dist
           skip-existing: true
+
+  # THE VERSION NUMBER DOES NOT IDENTIFY THE BUILD, so the tag has to.
+  #
+  # The manifests are bumped when a release is OPENED, not when its content
+  # lands, so every commit between the bump and the merge reports the version
+  # that eventually ships. Measured on 3.1.0: the pre-fix commit and the
+  # published one both read `3.1.0` in both manifests, six commits apart — and
+  # "what version am I on" is the first thing anyone checks, so it hands back
+  # the number they hoped for either way. A tag is created HERE, by the job that
+  # publishes, so the only thing that can carry it is the commit that shipped.
+  #
+  # Not `needs: publish-mcp`: the MCP server is on its own version line, and the
+  # header explains why its publish can legitimately fail while the client's
+  # succeeds. The client's tag must not be hostage to that.
+  tag:
+    name: Tag the release
+    needs: [publish-npm, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Tag this commit as its version, once
+        # Idempotent like the publishes above, and for the same reason: a push to
+        # main that changes nothing else re-runs this job, and a release that is
+        # already tagged is done, not broken. The check asks the REMOTE rather
+        # than the local refs, because this checkout is shallow and carries no
+        # tags — asking locally would answer "no tag" every time and then fail on
+        # the push.
+        run: |
+          set -euo pipefail
+          VER=$(node -p "require('./js/package.json').version")
+          PY=$(sed -nE 's/^version *= *"(.*)"/\1/p' python/pyproject.toml | head -1)
+          if [ "$VER" != "$PY" ]; then
+            echo "::error::js/package.json says $VER and python/pyproject.toml says $PY. Both ports publish from this commit, so one tag cannot name two versions."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
+            echo "v$VER is already tagged — nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VER" -m "$VER" -m "Published to npm and PyPI by the publish workflow from this commit."
+          git push origin "v$VER"
+          echo "tagged v$VER at $(git rev-parse --short HEAD)"

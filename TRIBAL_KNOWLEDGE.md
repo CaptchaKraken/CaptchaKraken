@@ -51,6 +51,18 @@ required check is the only place to put it. There is no bypass inside
 `promote.yml` on purpose: a check with its own escape hatch is a check that gets
 escaped.
 
+**The version number does not identify the build, so the release is tagged by
+the job that publishes it.** Manifests are bumped when a release is OPENED, not
+when its content lands, so every commit from the bump to the merge reports the
+version that eventually ships. Measured across 3.1.0: the pre-fix commit and the
+published one both read `3.1.0` in `js/package.json` AND `python/pyproject.toml`,
+six commits apart. "What version am I on" is the first question anyone asks and
+it returns the hoped-for number either way, so it cannot be the answer. The tag
+is created in `publish.yml`, beside the publish, which is the only place that
+knows which commit actually shipped. It is idempotent and asks the REMOTE
+whether the tag exists, because that job's checkout is shallow and carries no
+tags of its own.
+
 **A push to `main` publishes, so `main` is the most irreversible branch here.**
 `publish.yml` fires on push and puts both ports on npm and PyPI within minutes,
 at a version number that can never be reused. There is no rollback for a
