@@ -10,12 +10,13 @@ percentage that blurs them is worth nothing to anyone deciding whether to buy.
   held-out set of real captured puzzles. This is the number that says which
   *kinds* of puzzle it is good at.
 
-The browser number is always the lower of the two, and always the more honest
-one: a correct answer still has to be clicked, in the right place, before the
-widget's own timeout, past whatever the vendor thinks of the mouse that moved.
+The browser number is the more honest one: a correct answer still has to be
+clicked, in the right place, before the widget's own timeout, past whatever the
+vendor thinks of the mouse that moved.
 
 Every figure here is a count over a dated run against a named model. Nothing is
-extrapolated and nothing is rounded up.
+extrapolated and nothing is rounded up. Each table covers the vendors listed in
+it, and its totals are computed over the rows shown.
 
 ---
 
@@ -92,7 +93,7 @@ with three figures behind them.
 
 <!-- BEGIN GENERATED: static-image table -->
 
-Measured **2026-09-11** on **678 held-out captures** across **18 puzzle types**, including the ones both models are weakest on.
+Measured **2026-09-11** on **678 held-out captures** across **18 puzzle types** — every one we publish, including the ones both models are bad at. The totals below cover these rows only.
 
 | Vendor | Puzzle | n | Twilight | Abyss | Twilight, est. widget | Abyss, est. widget |
 |---|---|---:|---:|---:|---:|---:|
