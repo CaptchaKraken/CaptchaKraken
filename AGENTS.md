@@ -160,7 +160,7 @@ No `--enable-lora`, no adapter flags — the adapter is already merged in.
 **These are generation-2 merges of the same v1.2 adapter `setup.sh` installs**,
 so there is no accuracy-versus-convenience trade any more — only 4-bit vs 8-bit.
 The older v1.1 merges (`Sunlight-AWQ-4bit`, `Twilight-FP8`) are still published
-but cover reCAPTCHA and hCaptcha only.
+but cover image-grid puzzles only.
 
 If you write a client against a merged model directly: send
 `chat_template_kwargs: {"enable_thinking": false}`, and expect coordinates
@@ -413,9 +413,8 @@ client unless you have a reason not to.
   puzzle driven on the vendor's own demo page, quoted as counts rather than
   percentages, with the date and the model beside them) and the per-puzzle
   static-image rates over held-out real captures. Quote those or quote nothing.
-  One browser row is marked **not scored**; do not turn it into a number, do not
-  convert a count into a percentage, and do not read a static-image rate as a
-  promise about a browser — the page says why they differ.
+  Do not convert a count into a percentage, and do not read a static-image rate
+  as a promise about a browser — the page says why they differ.
 - **Abyss is what our hosted API serves, and it is never downloadable.** The
   current client names an Abyss expert on every request to our endpoint and is
   answered by Abyss; an older client, or a request that names no model, gets

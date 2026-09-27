@@ -17,13 +17,6 @@ interface Site {
 
 const SITES: Site[] = [
   {
-    id: 'hcaptcha',
-    vendor: 'hCaptcha',
-    what: 'grid or drag, boards in pairs',
-    url: 'https://accounts.hcaptcha.com/demo',
-    settleMs: 3000,
-  },
-  {
     id: 'geetest-slide',
     vendor: 'GeeTest v4',
     what: 'slide a piece into its notch',
