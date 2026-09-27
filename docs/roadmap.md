@@ -10,7 +10,7 @@ Where CaptchaKraken is headed. Legend: 🟢 shipped · 🟡 in progress · ⚪ p
 | ⬇️ **Unified `fetch` command** | 🟢 shipped | `captchakraken fetch` pulls the latest weights from HF **and** upgrades vLLM in one step. See [Self-hosting → Updating](./self-hosting.md#updating). |
 | ♻️ **Per-solve solution dedup** | 🟢 shipped | Byte-identical frames are never re-sent to vLLM. |
 | ☁️ **Hosted cloud API** | 🟢 shipped | `api.captchakraken.com`. Self-serve signup with GitHub, free credits on the account, metered per inference round. Answers with **Twilight v1.2**. |
-| 🧩 **hCaptcha click / drag puzzles** | 🟢 shipped | Full-puzzle model → pixel-space click/drag actions. Click, drag, path/connect and tetris-fit all route and are driven. |
+| 🧩 **Click / drag puzzles** | 🟢 shipped | Full-puzzle model → pixel-space click/drag actions. Click, drag, path/connect and tetris-fit all route and are driven. |
 | 🪶 **Sunlight / Twilight merges** | 🟢 shipped | The adapter merged into the base at 4-bit (11 GB) and 8-bit (13 GB), so self-hosting is one download instead of two. Published for both v1.1 and v1.2, all public on [HuggingFace](https://huggingface.co/CaptchaKraken). |
 | 🎥 **Video challenge support** | 🟢 shipped | **Both halves are out.** A challenge that never settles is recorded (4 s @ 10 fps), cut into keyframes, and sent to the model as one multi-image prompt; the answer names which keyframe it acted on, and the driver waits for the widget to return to that frame before clicking. The model half shipped with **v1.2** — trained on the keyframe format, installed by `setup.sh`, and what the hosted API answers with. |
 | ⬛ **Abyss** | 🟢 shipped | Hosted-only, trained against the open weights' measured failures. What the hosted API serves the current client, which names an expert on every request; there is nothing to download. An older client, or a request that names no model, still gets **Twilight v1.2**. |
@@ -26,7 +26,7 @@ Where CaptchaKraken is headed. Legend: 🟢 shipped · 🟡 in progress · ⚪ p
 
 | Item | Status | Notes |
 |---|---|---|
-| 🎯 **Freehand hCaptcha accuracy** | ⚪ planned | Connect-the-path and the numbered-line / missing-piece drags are the families the model is least reliable on. They are routed and driven today; this is about how often they land. |
+| 🎯 **Freehand drag/path accuracy** | ⚪ planned | Connect-the-path and the numbered-line / missing-piece drags are the families the model is least reliable on. They are routed and driven today; this is about how often they land. |
 
 ---
 

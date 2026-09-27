@@ -24,8 +24,7 @@ def spec_from_argv(default: DemoSpec, argv=None) -> DemoSpec:
     ap.add_argument("url", nargs="?", default=default.url,
                     help=f"page to solve (default: {default.url})")
     ap.add_argument("--vendor", default=default.vendor,
-                    choices=("hcaptcha", "recaptcha"),
-                    help="only affects failure wording; the solver auto-detects")
+                    help="label recorded in the report; the solver auto-detects")
     ap.add_argument("--name", default=None, help="label for the report")
     ap.add_argument("--headed", action="store_true",
                     help="show the browser (same as HEADLESS=0)")
@@ -74,12 +73,9 @@ def _tokens(usage) -> tuple[int, int]:
     return inp, out
 
 
-def _explain(vendor: str, solved: bool, err) -> str:
+def _explain(solved: bool, err) -> str:
     msg = str(err or "").lower()
     if "unsupported" in msg or "cannot solve" in msg:
-        if vendor == "hcaptcha":
-            return ("hCaptcha served a challenge type the solver does not handle "
-                    "yet (drag / video / choose-the-card) — re-run for a grid.")
         return "Not a supported challenge type — re-run to try again."
     if "no captcha" in msg or "nocaptchafound" in msg:
         return ("No captcha widget was found on that page. Check the URL, or "
@@ -128,15 +124,15 @@ def run_demo(spec: DemoSpec) -> None:
                 ok = bool(result.is_solved)
                 inp, out = _tokens(result.token_usage)
                 if not ok:
-                    reason = _explain(spec.vendor, ok, None)
+                    reason = _explain(ok, None)
             except CaptchaSolveError as e:
                 err = e
-                reason = _explain(spec.vendor, False, e)
+                reason = _explain(False, e)
             finally:
                 video_path = _finish_video(page)
     except Exception as e:
         err = e
-        reason = _explain(spec.vendor, False, e)
+        reason = _explain(False, e)
 
     tps = out / solve_s if out and solve_s > 0 else 0.0
     _report(spec, ok=ok, total_s=time.time() - t0, solve_s=solve_s,

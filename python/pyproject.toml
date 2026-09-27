@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Jake Writer" }]
 keywords = [
-  "captcha", "captcha-solver", "recaptcha", "hcaptcha", "geetest", "turnstile",
+  "captcha", "captcha-solver", "recaptcha", "geetest", "turnstile",
   "yidun", "tencent-captcha", "playwright", "browser-automation", "scraping",
   "anti-bot", "vllm", "qwen", "computer-vision", "ocr",
 ]

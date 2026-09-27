@@ -5,16 +5,13 @@ import type { SolveResult } from '../src/types';
 export interface DemoSpec {
   name: string;
   url: string;
-  vendor: 'recaptcha' | 'hcaptcha';
 }
 
 export function specFromArgv(base: DemoSpec, argv: string[] = process.argv.slice(2)): DemoSpec {
   const spec = { ...base };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--vendor' && argv[i + 1]) {
-      spec.vendor = argv[++i] as DemoSpec['vendor'];
-    } else if (argv[i] === '--name' && argv[i + 1]) {
+    if (argv[i] === '--name' && argv[i + 1]) {
       spec.name = argv[++i];
     } else if (argv[i] === '--headed') {
       process.env.HEADLESS = '0';
@@ -33,7 +30,7 @@ function fmtMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
-function explain(vendor: string, result: SolveResult | void, err: unknown): string {
+function explain(result: SolveResult | void, err: unknown): string {
   const msg = err instanceof Error ? err.message : err ? String(err) : '';
   const low = msg.toLowerCase();
 
@@ -41,9 +38,7 @@ function explain(vendor: string, result: SolveResult | void, err: unknown): stri
     return 'Could not reach the vLLM server — is it running and is VLLM_BASE_URL correct? (It auto-starts locally only if captchakraken[serve] is installed.)';
   }
   if (low.includes('unsupported') || low.includes('cannot solve')) {
-    return vendor === 'hcaptcha'
-      ? 'The model could not produce a usable action for this challenge — most likely a video challenge (not supported) or a frame that had not finished rendering. Reload to try again.'
-      : 'The model could not produce a usable action for this captcha — reload to try again.';
+    return 'The model could not produce a usable action for this captcha — reload to try again.';
   }
   if (low.includes('timeout')) {
     return 'Timed out — the page or the challenge iframe never became interactable (slow network, or the widget was blocked).';
@@ -116,18 +111,18 @@ export async function runDemo(baseSpec: DemoSpec): Promise<void> {
       result = await new CaptchaKrakenSolver().solve(page);
     } catch (err) {
       const solveMs = Date.now() - s0;
-      report(spec, { ok: false, totalMs: Date.now() - t0, solveMs, reason: explain(spec.vendor, undefined, err) });
+      report(spec, { ok: false, totalMs: Date.now() - t0, solveMs, reason: explain(undefined, err) });
       process.exitCode = 1;
       return;
     }
     const solveMs = Date.now() - s0;
 
     const ok = !!result && result.isSolved;
-    if (!ok) reason = explain(spec.vendor, result, undefined);
+    if (!ok) reason = explain(result, undefined);
     report(spec, { ok, totalMs: Date.now() - t0, solveMs, result, reason });
     process.exitCode = ok ? 0 : 1;
   } catch (err) {
-    report(spec, { ok: false, totalMs: Date.now() - t0, solveMs: 0, reason: explain(spec.vendor, undefined, err) });
+    report(spec, { ok: false, totalMs: Date.now() - t0, solveMs: 0, reason: explain(undefined, err) });
     process.exitCode = 1;
   } finally {
     try { await context?.close(); } catch {  }
