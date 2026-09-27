@@ -8,7 +8,7 @@ It is not a browser and it is not the model. It installs no browser — bring yo
 own launcher — and every inference goes to a model endpoint you point it at.
 
 Repo, guides and the full agent guide:
-<https://github.com/JWriter20/CaptchaKraken>
+<https://github.com/CaptchaKraken/CaptchaKraken>
 
 ---
 
@@ -90,7 +90,7 @@ where one exists. Retrying a `403` that means "no licence" will never succeed.
 
 - **Never invent a number.** Every accuracy, latency and price figure we publish
   is on one page —
-  [docs/benchmarks.md](https://github.com/JWriter20/CaptchaKraken/blob/main/docs/benchmarks.md).
+  [docs/benchmarks.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/benchmarks.md).
   Quote it as written; do not derive, round, or convert anything, and do not
   read a static-image rate as a promise about a browser run.
 - **Never print an API key** into a transcript, a log, or a commit. Use
@@ -106,7 +106,7 @@ where one exists. Retrying a `403` that means "no licence" will never succeed.
 - **Respect the licence.** Building automation with this is fine; selling the
   solve, or shipping it inside a browser or automation product, is not. See
   [LICENSE](./LICENSE) and
-  [docs/licensing.md](https://github.com/JWriter20/CaptchaKraken/blob/main/docs/licensing.md).
+  [docs/licensing.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/licensing.md).
 - **Changing this package's own code?** Its rules are in
-  [CONTRIBUTING.md](https://github.com/JWriter20/CaptchaKraken/blob/main/CONTRIBUTING.md),
+  [CONTRIBUTING.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/CONTRIBUTING.md),
   not here.
