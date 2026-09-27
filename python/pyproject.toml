@@ -92,10 +92,10 @@ captchakraken = "captchakraken.cli:main"
 
 [project.urls]
 Homepage = "https://captchakraken.com"
-Documentation = "https://github.com/JWriter20/CaptchaKraken#readme"
-Source = "https://github.com/JWriter20/CaptchaKraken"
-Issues = "https://github.com/JWriter20/CaptchaKraken/issues"
-Changelog = "https://github.com/JWriter20/CaptchaKraken/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/CaptchaKraken/CaptchaKraken#readme"
+Source = "https://github.com/CaptchaKraken/CaptchaKraken"
+Issues = "https://github.com/CaptchaKraken/CaptchaKraken/issues"
+Changelog = "https://github.com/CaptchaKraken/CaptchaKraken/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/captchakraken"]

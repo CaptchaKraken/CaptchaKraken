@@ -24,7 +24,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/JWriter20/CaptchaKraken.git",
+    "url": "git+https://github.com/CaptchaKraken/CaptchaKraken.git",
     "directory": "js"
   },
   "keywords": [
@@ -49,9 +49,9 @@
   "license": "SEE LICENSE IN LICENSE",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/JWriter20/CaptchaKraken/issues"
+    "url": "https://github.com/CaptchaKraken/CaptchaKraken/issues"
   },
-  "homepage": "https://github.com/JWriter20/CaptchaKraken#readme",
+  "homepage": "https://github.com/CaptchaKraken/CaptchaKraken#readme",
   "dependencies": {
     "cursory-js": "2.0.1"
   },

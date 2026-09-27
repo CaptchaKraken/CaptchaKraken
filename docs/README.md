@@ -5,7 +5,7 @@ guides. Start here.
 
 > One repo, two published ports — the TypeScript browser driver
 > (npm: `captchakraken`) and the Python engine (PyPI: `captchakraken`). ⭐ **Star
-> & watch** [the repo](https://github.com/JWriter20/CaptchaKraken) for smaller
+> & watch** [the repo](https://github.com/CaptchaKraken/CaptchaKraken) for smaller
 > models and new puzzle types.
 
 ## 📚 Guides

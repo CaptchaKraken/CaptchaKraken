@@ -95,7 +95,7 @@ One command. It reads your GPU/Apple memory, picks a model size that fits,
 downloads it, and writes a config file.
 
 ```bash
-git clone https://github.com/JWriter20/CaptchaKraken
+git clone https://github.com/CaptchaKraken/CaptchaKraken
 cd CaptchaKraken
 ./setup.sh
 ```

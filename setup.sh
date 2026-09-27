@@ -43,7 +43,7 @@ BASE_AWQ="cyankiwi/Qwen3.5-9B-AWQ-4bit"         # 4-bit, ~6 GB, lighter / lower 
 LORA_ADAPTER="CaptchaKraken/CaptchaKraken-Lora-v1.2"   # the unified captcha adapter
 LORA_NAME="captcha-v12"                         # served name the client requests as `model`
 PORT="${VLLM_PORT:-8000}"
-REPO_URL="https://github.com/JWriter20/CaptchaKraken"
+REPO_URL="https://github.com/CaptchaKraken/CaptchaKraken"
 
 FP8_MIN=22   # GB — comfortable FP8 serve (weights + KV + bf16 ViT + LoRA)
 AWQ_MIN=11   # GB — comfortable AWQ serve

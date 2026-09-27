@@ -32,7 +32,7 @@ Where CaptchaKraken is headed. Legend: 🟢 shipped · 🟡 in progress · ⚪ p
 
 > 📣 **Watch the repo to hear about these as they ship**, and ⭐ star if the
 > project is useful to you — it genuinely helps:
-> [**CaptchaKraken**](https://github.com/JWriter20/CaptchaKraken). Use GitHub's
+> [**CaptchaKraken**](https://github.com/CaptchaKraken/CaptchaKraken). Use GitHub's
 > **Watch → All Activity** for release notifications.
 
 ---
