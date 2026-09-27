@@ -105,7 +105,6 @@ answers with a frame number the driver then waits for on screen.
 | `docs/assets/logo-light.svg` | Logo for light backgrounds; the root README's default. |
 | `docs/assets/logo-dark.svg` | Logo for dark backgrounds, picked by `prefers-color-scheme`. |
 | `docs/assets/logo-card.png` | Square raster logo, used by the npm, PyPI and MCP package READMEs, which cannot rely on relative paths. |
-| `docs/assets/demo/hcaptcha_grid.webp` | Animated still of an hCaptcha image-select solve, embedded in the package READMEs. |
 | `docs/assets/demo/recaptcha_4x4.webp` | The same, for a reCAPTCHA 4×4 grid. |
 | `docs/assets/demo/geetest_slide.webp` | The same, for a GeeTest slide jigsaw. |
 
@@ -218,7 +217,6 @@ Runnable demos. Not published to npm.
 | `js/examples/withPuppeteer.ts` | The same, through the Puppeteer adapter. |
 | `js/examples/watchPlaywright.ts` | The watcher: install once, and captchas are solved as they appear. |
 | `js/examples/demoRecaptcha.ts` | End to end against Google's public reCAPTCHA v2 demo page. |
-| `js/examples/demoHcaptcha.ts` | End to end against hCaptcha's public demo page. |
 | `js/examples/demoSites.ts` | Several vendors in one browser run, with a printed comparison. |
 
 ## `mcp/` — the account MCP server (npm `captchakraken-mcp`)
@@ -383,4 +381,3 @@ Runnable demos. Not published to PyPI.
 | `python/examples/watch_playwright.py` | The watcher: install once, and captchas are solved as they appear. |
 | `python/examples/with_local_gguf.py` | Solve one image against a local GGUF server (Ollama, LM Studio, llama.cpp): the shortest check that the endpoint, the model name and the prompt resolution are wired up, with no browser. |
 | `python/examples/demoRecaptcha.py` | The engine run against Google's public reCAPTCHA v2 demo page. |
-| `python/examples/demoHcaptcha.py` | The engine run against hCaptcha's public demo page. |

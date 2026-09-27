@@ -27,7 +27,7 @@ browser ─▶ detect captcha ─▶ screenshot frame
 
 ### Freshness guard (no acting on a stale frame)
 
-reCAPTCHA and hCaptcha fade fresh tiles in over ~1 second — on first load and on
+Grid vendors fade fresh tiles in over ~1 second — on first load and on
 the in-place dynamic refresh after a click. If the frame changes **while the
 model is generating**, the answer that comes back describes a stale
 ("undeveloped") frame: its tile picks and bounding boxes no longer line up with

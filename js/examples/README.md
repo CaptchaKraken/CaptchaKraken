@@ -1,8 +1,8 @@
 # Examples (TypeScript)
 
-Two runnable, end-to-end demos that drive a real stealth browser
-([camoufox](https://github.com/JWriter20/camoufox)) against the standard captcha
-demo sites, run the full solver, and print token speed / total time / outcome:
+Runnable, end-to-end demos. `demoRecaptcha.ts` drives a real stealth browser
+([camoufox](https://github.com/JWriter20/camoufox)) against Google's reCAPTCHA
+demo page, runs the full solver, and prints token speed / total time / outcome:
 
 | File | What it shows |
 |---|---|
@@ -10,7 +10,6 @@ demo sites, run the full solver, and print token speed / total time / outcome:
 | `withPuppeteer.ts` | Puppeteer — `fromPuppeteer(page)`, 2 added lines |
 | `watchPlaywright.ts` | The auto-solver: install once, solves as they appear |
 | `demoRecaptcha.ts` | Google reCAPTCHA v2 demo, via camoufox |
-| `demoHcaptcha.ts` | hCaptcha demo, via camoufox |
 
 The first three take an optional URL, so you can point them at your own page:
 
@@ -92,7 +91,6 @@ forwards `process.env` to the engine unchanged.
 
 ```bash
 npx tsx examples/demoRecaptcha.ts
-npx tsx examples/demoHcaptcha.ts
 HEADLESS=0 npx tsx examples/demoRecaptcha.ts   # watch it solve
 ```
 
@@ -108,6 +106,6 @@ HEADLESS=0 npx tsx examples/demoRecaptcha.ts   # watch it solve
 
 `gen speed` is end-to-end (output tokens ÷ solve seconds), so it includes browser
 + subprocess overhead, not just raw model decode. Common failure reasons the
-harness reports: unreachable vLLM server, an unsupported hCaptcha puzzle
-(drag/video), a timeout, or the provider rejecting a correct answer (usually IP
+harness reports: unreachable vLLM server, a challenge the model could not
+produce a usable action for, a timeout, or the provider rejecting a correct answer (usually IP
 reputation / fingerprint flagging).

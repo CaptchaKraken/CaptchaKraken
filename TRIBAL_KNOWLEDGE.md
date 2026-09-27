@@ -389,11 +389,11 @@ leaves a compositor-painted gutter (noise about 0) at exactly the old
 thresholds: 13/20 fixtures, corpus 144/144, false positives 6/355 unchanged.
 
 **Flank contrast is a mean over both sides, gated on the chosen grid only.**
-Under `min` the lowest true hCaptcha grid scored 2.7 against false positives at
+Under `min` the lowest true nine-photo grid scored 2.7 against false positives at
 9.0 and 7.2, so no cutoff existed; the mean gives 17.4 against 18.0 and 14.1.
 Applied as a per-line filter it removed the strays the off-lattice gate counts
 and false positives went 2, 4, 6. The probe distance scales with pitch because
-a fixed offset landed inside hCaptcha's 13 px gutters and read gutter against
+a fixed offset landed inside that grid's 13 px gutters and read gutter against
 gutter as zero contrast.
 
 **`_pick` takes the gutter colour from the cleanest comparable-support member
@@ -427,7 +427,7 @@ ran at 0.72 and detection went to 0/2210 across the corpus. 0.33 would also
 catch an observed video-keyframe false positive at 0.322 but leaves 5%
 headroom; the floor is measured over 2239 real grids.
 
-**The hCaptcha selected-badge detector requires white within 2 px of the teal
+**The teal selected-badge detector requires white within 2 px of the teal
 hull.** Sky with a white pole in it satisfied the old test: 74 phantom
 selections over 3051 corners. Zero slack fragments ringed renderings; 4 px
 doubles the phantoms back to 32 for 1.2 points of recall. The phantom budget in
@@ -476,8 +476,8 @@ gate that can refuse to ever take a picture is worse than the blank picture.
 
 **Bursts are filmed with `animations: 'allow'`.** Playwright's `'disabled'`
 freezes infinite CSS animation, so bursts sliced GeeTest svg to `mode=static`
-forty identical frames at a time; hCaptcha hid the bug because it animates in
-canvas. `shot()` defaults to `'disabled'` and exactly three sites pass
+forty identical frames at a time; canvas-animated boards hid the bug, because
+the flag does not touch canvas. `shot()` defaults to `'disabled'` and exactly three sites pass
 `'allow'`: the burst, the keyframe wait and the freshness anchor.
 
 **`MOVED_DURING_INFERENCE_DIFF = 0.002` is a separate, tighter number than
@@ -485,7 +485,7 @@ canvas. `shot()` defaults to `'disabled'` and exactly three sites pass
 0.001 is the noise floor. Third time this file applied a coarse threshold to a
 fine question.
 
-**`BURST_ANIMATED_SCREENS = 6`.** hCaptcha odd-animal measured 38 distinct
+**`BURST_ANIMATED_SCREENS = 6`.** The odd-animal board measured 38 distinct
 screens in 4 s with no repeat; past 6 (which equals `DEFAULT_MAX_KEYFRAMES`)
 there is already more motion than a keyframe answer can describe. The read is
 safe only because the speculative burst does not wander the cursor: one live
@@ -526,7 +526,7 @@ identical next round by construction: sampling is greedy (`RESAMPLE_TEMPERATURES
 on a screen the window missed therefore had no second chance — the stored plan
 was re-pressed until the no-progress fence tripped at round 3 of 6, with half
 the budget unspent. Measured live on 2026-09-15 against the vendors' own pages,
-hCaptcha's animated board read **2/15 and 6/12** on the two served models, where
+one animated board read **2/15 and 6/12** on the two served models, where
 the driver that still re-filmed every round had recorded **36/36**. Re-filming
 had been retired as a defect — it did exhaust the budget — without anyone
 noticing it was also the only retry an animated board had.

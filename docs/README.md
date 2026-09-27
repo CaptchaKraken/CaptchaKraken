@@ -30,8 +30,6 @@ CaptchaKraken detects the captcha, solves it, clicks, and verifies.
 | ✅ Checkbox / "I'm not a robot" | Works end-to-end |
 | ✅ **reCAPTCHA 3×3** (dynamic) | Works end-to-end |
 | ✅ **reCAPTCHA 4×4** (one-shot) | Works end-to-end |
-| ✅ **hCaptcha 3×3 image grid** | Works end-to-end |
-| ✅ **hCaptcha click / drag puzzles** | Full-puzzle model → pixel click/drag actions |
 | ✅ Cloudflare Turnstile | Works via the checkbox flow |
 | ✅ **GeeTest** (v3 + v4) | Slide, icon, nine, svg, gobang, iconcrush |
 | ✅ **NetEase Yidun** | Jigsaw, picture-click, icon-click |
@@ -39,7 +37,7 @@ CaptchaKraken detects the captcha, solves it, clicks, and verifies.
 | ✅ **Distorted text** | BotDetect, MTCaptcha, Yandex — read and typed, not clicked |
 | ✅ **Animated / video challenges** | Recorded (4 s @ 10 fps), cut into keyframes, solved as one multi-image prompt, then clicked once the widget returns to the chosen frame. The model half shipped with **v1.2**, which `setup.sh` installs and the hosted API serves |
 
-44 puzzle types across those 10 vendors. The per-type record — each puzzle
+44 puzzle types in all. The per-type record — each puzzle
 driven on the vendor's own demo page, with the attempts scored — is in the
 [main README](../README.md#watch-it-work).
 

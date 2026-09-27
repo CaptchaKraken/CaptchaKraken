@@ -44,9 +44,8 @@
 
 ## Watch it work
 
-Thirteen puzzle types, each driven on the vendor's own **public demo page**
-through the hosted API. Twelve of the thirteen had every attempt scored; the one
-that did not is marked. These are the same clips that run on
+Nine puzzle types, each driven on the vendor's own **public demo page**
+through the hosted API, with every attempt scored. These clips also run on
 [captchakraken.com](https://captchakraken.com) — recorded 2026-08-19 against
 **captcha-v12**, the adapter the hosted API serves today.
 
@@ -59,59 +58,16 @@ Three things worth knowing before you read the numbers:
   clip is the measured whole-solve time, computed from the run and never from
   the footage — the clip illustrates, the median asserts.
 - **It is the whole widget, not one puzzle.** A tab is named for the puzzle the
-  vendor *opened* with, and the time covers every round after it. hCaptcha
-  usually asks a second, different puzzle; reCAPTCHA keeps going until it is
-  satisfied. That is why one drag attempt takes 6 seconds and the next takes 78.
+  vendor *opened* with, and the time covers every round after it. reCAPTCHA
+  keeps going until it is satisfied, and a later round is often a different
+  shape from the one that opened, so two attempts at one puzzle can differ in
+  length several times over.
 
 A round the vendor waved through without a puzzle is not in these counts, and
 neither is one we could not classify — only rounds where a challenge was on
 screen and had to be solved.
 
-One row is marked **not scored**. hCaptcha deals its drag puzzle too rarely for
-us to have collected a scored run of it, so that clip is a demonstration and
-carries no count or median at all. It is labelled where it appears rather than
-given numbers that would look exactly like the measured ones.
-
 <details open>
-<summary><b>hCaptcha</b> — 4 puzzle types</summary>
-
-**Image select** — 12/12 solved · 10.5s median
-
-Opens on nine separate photos with no fixed answer count. hCaptcha almost always asks a second, different puzzle before it lets you through.
-
-<video src="https://captchakraken.com/art/demo/hcaptcha_grid.webm" width="408" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the hCaptcha image select solve</a>
-</video>
-
-**Canvas puzzle** — 50/50 solved · 15.1s median
-
-One picture instead of tiles: click or drag the pieces the prompt names. hCaptcha almost always asks a second, different puzzle before it lets you through.
-
-<video src="https://captchakraken.com/art/demo/hcaptcha_drag.webm" width="528" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the hCaptcha canvas puzzle solve</a>
-</video>
-
-**Drag puzzle** — ⚠️ *not scored — see above*
-
-Pick a character up and carry it to its match hidden behind the lines. hCaptcha
-deals this one so rarely we have not been able to record a scored run of it. The
-clip is real; there is no count or median to publish beside it yet.
-
-<video src="https://captchakraken.com/art/demo/hcaptcha_truedrag.webm" width="520" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the hCaptcha drag puzzle solve</a>
-</video>
-
-**Animated** — 36/36 solved · 45.0s median
-
-Opens on a board that never holds still — solved from a recorded burst, on a frame the model picks.
-
-<video src="https://captchakraken.com/art/demo/hcaptcha_video.webm" width="528" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the hCaptcha animated solve</a>
-</video>
-
-</details>
-
-<details>
 <summary><b>reCAPTCHA</b> — 3 puzzle types</summary>
 
 **4×4 tile grid** — 9/10 solved · 8.7s median
@@ -351,8 +307,6 @@ CaptchaKraken detects the captcha, solves it, clicks, and verifies — end to en
 | ✅ Checkbox / "I'm not a robot" | Works end-to-end |
 | ✅ **reCAPTCHA 3×3** (dynamic refresh) | Works end-to-end |
 | ✅ **reCAPTCHA 4×4** (one-shot) | Works end-to-end |
-| ✅ **hCaptcha 3×3 image grid** | Works end-to-end |
-| ✅ **hCaptcha click / drag puzzles** | Full-puzzle model → pixel click/drag actions |
 | ✅ Cloudflare Turnstile | Works via the checkbox flow |
 | ✅ **GeeTest** (v3 + v4) | Slide, icon, nine, svg. `gobang` and `iconcrush` are weak — see below |
 | ✅ **NetEase Yidun** | Jigsaw, picture-click, icon-click |
@@ -360,9 +314,9 @@ CaptchaKraken detects the captcha, solves it, clicks, and verifies — end to en
 | ✅ **Distorted text** | BotDetect, MTCaptcha, Yandex — read and typed, not clicked |
 | ✅ **Animated / video challenges** | Recorded, cut into keyframes, solved as one multi-image prompt, then clicked once the widget returns to the chosen frame |
 
-The non-Google/hCaptcha vendors are driven end-to-end in CI against generated
-fixtures in **both** ports. Per-vendor accuracy varies more than the headline
-grids do, and the clips above are the per-type record: each one is that puzzle
+Beyond reCAPTCHA, the vendors in this table are driven end-to-end in CI against
+generated fixtures in **both** ports. Per-vendor accuracy varies more than the
+headline grids do, and the clips above are the per-type record: each one is that puzzle
 driven on the vendor's own demo page, with every attempt scored. GeeTest's
 gobang and icon-crush boards were long the two weakest — both drive to
 completion now (10/10 and 9/10 above) but they are the least exercised of the
@@ -405,7 +359,7 @@ captures the adapter has never trained on.
 
 **Both tables, one page: [docs/benchmarks.md](./docs/benchmarks.md).** That is
 the canonical benchmark page — the browser runs above in full, and beside them
-the per-puzzle model accuracy over 1,715 held-out real captures, scored the way a
+the per-puzzle model accuracy over held-out real captures, scored the way a
 widget scores. Two measurements, because they answer two different questions; a
 figure quoted anywhere else in this repo is a copy of one of them.
 
@@ -425,10 +379,10 @@ and no GPU.
 
 ### v1.2 — current
 
-**Covers every vendor we solve**: 44 puzzle types across reCAPTCHA, hCaptcha,
-GeeTest, NetEase Yidun, BotDetect, MTCaptcha, Yandex, Tencent, Lemin and
-Prosopo — and it is the first generation to handle **animated challenges** and
-**typed text**. Prompt generation 2; needs `captchakraken >= 2.5.0`.
+**Covers every vendor we solve**: 44 puzzle types across ten vendors, among
+them reCAPTCHA, GeeTest, NetEase Yidun, BotDetect, MTCaptcha, Yandex, Tencent,
+Lemin and Prosopo — and it is the first generation to handle **animated
+challenges** and **typed text**. Prompt generation 2; needs `captchakraken >= 2.5.0`.
 
 | | Precision | Size | Min VRAM | Weights |
 |---|---|---|---|---|
@@ -449,8 +403,8 @@ answers with** — the same LoRA on the same base, merged.
 
 ### v1.1 — previous
 
-**reCAPTCHA and hCaptcha only.** Not "worse at" the other vendors — it was
-never shown them, and will not attempt a GeeTest slider or a typed-text captcha
+**Image-grid puzzles only.** Not "worse at" everything else — it was
+never shown it, and will not attempt a GeeTest slider or a typed-text captcha
 at all. Prompt generation 1. Still published and supported; take it if that is
 all you face and you want the smaller stack.
 
@@ -469,7 +423,7 @@ one each for grids, pixel-precision work, animation and text, chosen per
 request by the shape of the puzzle. Trained against the failures of the open
 weights, and **hosted-only**. Every puzzle the open model gets wrong on the held-out set is a
 labelled example of a weakness, and Abyss is trained specifically to close
-them, starting with the non-grid hCaptcha puzzles. Keeping it on our own fleet
+them, starting with the non-grid click and drag puzzles. Keeping it on our own fleet
 is what lets it keep learning from production failures without shipping a
 customer's puzzle set to everyone who runs `hf download`.
 
@@ -489,7 +443,7 @@ Which one you want:
 | You want the best open weights, and run vLLM | the **v1.2 LoRA adapter** — `./setup.sh` |
 | You want one file and the simplest serve, 22 GB+ | **Twilight v1.2** |
 | You want one file and the simplest serve, 14–22 GB | **Sunlight v1.2** |
-| You only face reCAPTCHA / hCaptcha and want the older, smaller stack | **v1.1** |
+| You only face image-grid captchas and want the older, smaller stack | **v1.1** |
 
 Serving details for every option: **[docs/self-hosting.md](./docs/self-hosting.md)**.
 
@@ -522,13 +476,6 @@ those labels; it does not infer a numbering.
 // response ────────────────────────────────────────────────────────────
 [2, 8, 9]
 // ground truth [2, 8, 9] ✓   1,796 ms   336 prompt / 10 completion tokens
-```
-
-**hCaptcha 3×3 property puzzle** — same shape, different vendor:
-
-```jsonc
-[3, 5, 8]
-// ground truth [3, 5, 8] ✓   958 ms   348 prompt / 10 completion tokens
 ```
 
 **reCAPTCHA 4×4** — one large image cut into sixteen tiles, "select ALL parts":
@@ -591,8 +538,8 @@ npx tsx examples/demoRecaptcha.ts https://your.site/   # or your own page
 ```
 
 Add `--headed` to watch it happen in a visible window. The Python engine ships
-the same two demos — `cd python && python examples/demoRecaptcha.py` — and both
-take the same arguments.
+the same demo — `cd python && python examples/demoRecaptcha.py` — and it takes
+the same arguments.
 
 ---
 
@@ -624,11 +571,11 @@ Most of the detail lives in the docs hub — start at **[docs/](./docs/README.md
 - 🟢 **Shipped** — **Abyss**, hosted-only: what the hosted API serves the current
   client, never downloadable. An older client, or a request that names no model,
   still gets **Twilight v1.2**.
-- ⚪ **Planned** — 🎯 higher accuracy on the **freehand hCaptcha puzzles**
+- ⚪ **Planned** — 🎯 higher accuracy on the **freehand drag and path puzzles**
   (connect-the-path and the numbered-line / missing-piece drags), which are the
-  families the model is least reliable on. Every hCaptcha family we ship is
-  already routed and driven — this is about how often they land, not whether
-  they are attempted.
+  families the model is least reliable on. Every family we ship is already
+  routed and driven — this is about how often they land, not whether they are
+  attempted.
 
 The visual, always-current version is in **[docs/roadmap.md](./docs/roadmap.md)**.
 📣 **[Watch the repo](https://github.com/JWriter20/CaptchaKraken)** to hear about
