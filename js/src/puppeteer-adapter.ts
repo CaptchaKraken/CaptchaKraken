@@ -40,6 +40,7 @@ interface PuppeteerPage {
   };
   waitForSelector(selector: string, options?: any): Promise<PuppeteerElementHandle | null>;
   viewport(): ViewportSize | null;
+  screenshot(options?: { type?: 'png' }): Promise<Uint8Array>;
   evaluate<R>(pageFunction: () => R): Promise<R>;
   $$(selector: string): Promise<PuppeteerElementHandle[]>;
   isClosed(): boolean;
@@ -125,6 +126,8 @@ export function fromPuppeteer(page: PuppeteerPage): PlaywrightPage {
     waitForSelector: async (selector, options) =>
       wrapHandle(await page.waitForSelector(selector, toPuppeteerSelectorOptions(options))),
     viewportSize: () => page.viewport(),
+    // Puppeteer has no `animations` option, and its own timeout; the capture is PNG either way.
+    screenshot: async () => Buffer.from(await page.screenshot({ type: 'png' })),
     evaluate: (pageFunction) => page.evaluate(pageFunction),
     locator: (selector) => locatorOver(() => page.$$(selector)),
     // Forwarded explicitly: without it the watcher polls a dead page forever.

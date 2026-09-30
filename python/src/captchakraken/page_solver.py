@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import itertools
 import json
+import math
 import os
 import random
 import re
@@ -73,6 +75,57 @@ def _unlink(path: Optional[str]) -> None:
 def _sha1(path: str) -> str:
     with open(path, "rb") as fh:
         return hashlib.sha1(fh.read()).hexdigest()
+
+
+class CaptureRect(NamedTuple):
+    """Whole CSS pixels, in viewport coordinates."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+def enclosing_rect(box: Dict[str, float]) -> CaptureRect:
+    """The whole pixels a bounding box covers: the rect Playwright's element screenshot clips to."""
+    x, y = math.floor(box["x"] + 1e-3), math.floor(box["y"] + 1e-3)
+    return CaptureRect(x, y, math.ceil(box["x"] + box["width"] - 1e-3) - x,
+                       math.ceil(box["y"] + box["height"] - 1e-3) - y)
+
+
+def crop_png(png: bytes, rect: CaptureRect, css_width: float) -> bytes:
+    """Cut `rect` out of a viewport capture `css_width` CSS pixels wide, at the capture's own device pixel ratio."""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png)) as img:
+        scale = img.width / css_width
+        out = io.BytesIO()
+        img.crop((round(rect.x * scale), round(rect.y * scale), round((rect.x + rect.width) * scale),
+                  round((rect.y + rect.height) * scale))).save(out, format="PNG", compress_level=1)
+        return out.getvalue()
+
+
+_VIEWPORT_JS = "() => ({ width: window.innerWidth, height: window.innerHeight })"
+
+
+def _viewport_of(page: Any) -> Dict[str, float]:
+    """`viewport_size` is None on a context launched without one (camoufox), where only the window knows."""
+    return page.viewport_size or page.evaluate(_VIEWPORT_JS)
+
+
+def _within(rect: CaptureRect, view: Dict[str, float]) -> bool:
+    return rect.x >= 0 and rect.y >= 0 and rect.x + rect.width <= view["width"] and rect.y + rect.height <= view["height"]
+
+
+def _off_board_point(box: Dict[str, float], at: Tuple[float, float],
+                     view: Dict[str, float]) -> Optional[Tuple[float, float]]:
+    """A point just outside the board, past the edge nearest the pointer, that is still inside the viewport."""
+    x, y = at
+    gap = 24 + random.random() * 40
+    right, bottom = box["x"] + box["width"], box["y"] + box["height"]
+    exits = sorted([(x - box["x"], (box["x"] - gap, y)), (right - x, (right + gap, y)),
+                    (y - box["y"], (x, box["y"] - gap)), (bottom - y, (x, bottom + gap))])
+    return next((p for _, p in exits if 0 <= p[0] < view["width"] and 0 <= p[1] < view["height"]), None)
 
 
 class CaptchaSolveError(Exception):
@@ -185,6 +238,9 @@ def measured_fps(frames: int, elapsed_ms: float, nominal_fps: float) -> float:
 _MOVED_DURING_INFERENCE_DIFF = 0.002
 _NOT_THIS_BOARD_DIFF = 0.5
 _NOT_THIS_BOARD_POLLS = 3
+# How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read
+# inside this window is wearing our own feedback, which is not a screen it ever showed by itself.
+INPUT_SETTLE_MS = 400
 
 
 @dataclass
@@ -363,6 +419,10 @@ class PageSolver:
         # and has no cycle left to find, so a re-ask neither re-films it at length nor throws its film away.
         self._film_cycled: bool = False
         self._verdicts: Optional[VerdictLog] = None
+        # The page being solved: every capture is taken of its viewport. Set by `solve`.
+        self._page: Any = None
+        # When our last gesture ended; the board's reaction to it is never read as the board's own motion.
+        self._last_input_ms: float = -math.inf
         self._reset_animated_state()
 
     @property
@@ -380,6 +440,15 @@ class PageSolver:
             return
         with self._budget.phase(name):
             yield
+
+    @contextmanager
+    def _gesture(self):
+        """A pointer gesture, timed as MOUSE and remembered: see `INPUT_SETTLE_MS`."""
+        try:
+            with self._phase(Phase.MOUSE):
+                yield
+        finally:
+            self._last_input_ms = _now()
 
     # ── per-solve state ──────────────────────────────────────────────────
 
@@ -534,7 +603,7 @@ class PageSolver:
     # ── gestures ─────────────────────────────────────────────────────────
 
     def _smooth_move(self, page: Any, x: float, y: float) -> None:
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.move(page, (x, y))
 
     def _move_to_element(self, page: Any, element: Any, padding_percentage: float = 25.0) -> None:
@@ -559,7 +628,7 @@ class PageSolver:
 
     def _move_and_click(self, page: Any, element: Any) -> None:
         self._move_to_element(page, element)
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.click(page, self._last_mouse)
 
     @staticmethod
@@ -589,11 +658,11 @@ class PageSolver:
         at = (element_box["x"] + rel[0], element_box["y"] + rel[1])
         if await_keyframe:
             # Park on the target first, so only a mouse-down separates the right screen from the click.
-            with self._phase(Phase.MOUSE):
+            with self._gesture():
                 self._human.move(page, at)
             self._wait_for_keyframe(element, await_keyframe,
                                     (rel[0] / element_box["width"], rel[1] / element_box["height"]))
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.click(page, at)
 
     def _click_when_frame_matches(self, page: Any, element: Any, action: Dict[str, Any],
@@ -607,7 +676,7 @@ class PageSolver:
             return (element_box["x"] + (float(bbox[0]) + float(bbox[2])) / 2 * element_box["width"],
                     element_box["y"] + (float(bbox[1]) + float(bbox[3])) / 2 * element_box["height"])
 
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.drag(page, center(action["source_bounding_box"]), center(action["target_bounding_box"]))
 
     def _find_control(self, scope: Any, selectors: Sequence[str]) -> Optional[Any]:
@@ -650,7 +719,9 @@ class PageSolver:
             _log("type action, but no text box in the widget; skipping")
             return False
         self._move_and_click(page, field_el)
-        if not self._human.type_text(page, field_el, text):
+        typed = self._human.type_text(page, field_el, text)
+        self._last_input_ms = _now()
+        if not typed:
             return False
         _log(f"typed {len(text)} character(s) into the captcha field")
         return True
@@ -689,7 +760,7 @@ class PageSolver:
                 _log("slide action, but the widget has neither a slider nor a draggable piece")
                 return False
             target_y = (float(tb[1]) + float(tb[3])) / 2 * element_box["height"]
-            with self._phase(Phase.MOUSE):
+            with self._gesture():
                 self._human.drag(page, (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2),
                                  (element_box["x"] + target_x, element_box["y"] + target_y))
             return True
@@ -753,6 +824,7 @@ class PageSolver:
                 self._human.release(page)
             except Exception:
                 pass
+            self._last_input_ms = _now()
             for shot in shots:
                 _unlink(shot)
         return True
@@ -945,6 +1017,69 @@ class PageSolver:
             pass
         return None
 
+    def _click_checkbox(self, page: Any, widget: Widget, frame: Any) -> None:
+        """Tick the box and wait for what it opens. A checkbox is not a board: it is never polled, filmed or asked about.
+
+        Treated as a board it cost 70 screenshots and three model calls in one measured solve, two of them answering
+        the checkbox picture with a drag.
+        """
+        box = self._checkbox_box(frame, widget.vendor)
+        if box is not None:
+            self._move_to_element(page, box)
+        else:
+            self._smooth_move(page, *self._find_checkbox_on_screen(widget.element))
+        self._human.pause(PauseKind.BETWEEN)
+        with self._gesture():
+            self._human.click(page, self._last_mouse)
+        self._await_what_the_checkbox_opened(page)
+
+    def _checkbox_box(self, frame: Any, vendor: Vendor) -> Optional[Any]:
+        """The box in a checkbox frame once the frame has drawn it; None when the DOM cannot reach it.
+
+        Turnstile's box is in a closed shadow root, and a frame can refuse access; both are found on screen instead.
+        """
+        box = SELECTORS[vendor].box
+        if frame is None or not box:
+            return None
+        try:
+            return frame.wait_for_selector(", ".join(box), state="visible", timeout=self.config.detection_timeout_ms)
+        except Exception as exc:
+            _log(f"[checkbox] the box is out of the DOM's reach ({str(exc).splitlines()[0]}); finding it on screen")
+            return None
+
+    def _find_checkbox_on_screen(self, element: Any) -> Tuple[float, float]:
+        """One capture and OpenCV: a point inside the tick box, in page coordinates. No model is asked."""
+        from .tool_calls.find_checkbox import find_checkbox
+
+        box = element.bounding_box()
+        if not box:
+            raise CaptchaSolveError("could not get bounding box of captcha element")
+        shot = _tmp_png("checkbox")
+        try:
+            with self._phase(Phase.SCREENSHOT):
+                self._screenshot(element, shot, timeout_ms=self.config.element_screenshot_timeout_ms)
+            found = find_checkbox(shot)
+            scale = self._shot_scale(shot, box["width"])
+        finally:
+            _unlink(shot)
+        if found is None:
+            raise UnsupportedCaptchaError("the checkbox widget shows no tick box to click")
+        x, y, w, h = (v / scale for v in found)
+        return box["x"] + x + w * (0.3 + random.random() * 0.4), box["y"] + y + h * (0.3 + random.random() * 0.4)
+
+    def _await_what_the_checkbox_opened(self, page: Any) -> None:
+        """A clicked checkbox passes or opens a challenge, and both show in the DOM.
+
+        Without this wait the next round found the same checkbox still up and clicked it again.
+        """
+        deadline = _now() + self.config.post_submit_change_timeout_ms
+        with self._phase(Phase.AWAIT_NEXT_ROUND):
+            while _now() < deadline and not self.is_captcha_solved(page):
+                widget = self.detect_captcha(page)
+                if widget is None or widget.role != FrameRole.CHECKBOX:
+                    return
+                _delay(self.config.post_solve_outcome_poll_ms)
+
     def _get_verify_button(self, scope: Any) -> Optional[Any]:
         return self._find_control(scope, SUBMIT_SELECTORS)
 
@@ -952,9 +1087,56 @@ class PageSolver:
 
     def _screenshot(self, element: Any, path: str, timeout_ms: Optional[int] = None,
                     animations: str = "disabled") -> None:
-        """Short timeout; `disabled` freezes CSS animation, so bursts and the keyframe gate pass `allow`."""
-        element.screenshot(path=path, timeout=2_500 if timeout_ms is None else timeout_ms,
-                           animations=animations)
+        """Every capture the driver takes: the whole viewport, cropped here to the element.
+
+        Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at
+        the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
+        capture repaints nothing, and measured twice as fast. Short timeout; `disabled` freezes CSS animation,
+        so bursts and the keyframe gate pass `allow`.
+        """
+        timeout = 2_500 if timeout_ms is None else timeout_ms
+        page = self._page
+        view = _viewport_of(page)
+        rect = self._rect_in_view(element, view)
+        if rect is None:
+            # Bigger than the viewport: no viewport capture holds all of it, so the element photographs itself.
+            element.screenshot(path=path, timeout=timeout, animations=animations)
+            return
+        png = crop_png(page.screenshot(timeout=timeout, animations=animations), rect, view["width"])
+        with open(path, "wb") as fh:
+            fh.write(png)
+
+    @staticmethod
+    def _rect_of(element: Any) -> CaptureRect:
+        box = element.bounding_box()
+        rect = enclosing_rect(box) if box else None
+        if rect is None or rect.width <= 0 or rect.height <= 0:
+            raise CaptchaSolveError("the element is not visible: it has no bounding box to photograph")
+        return rect
+
+    def _rect_in_view(self, element: Any, view: Dict[str, float]) -> Optional[CaptureRect]:
+        """Where the element sits in the viewport, scrolled in when it is merely off screen; None when it cannot fit."""
+        rect = self._rect_of(element)
+        if rect.width > view["width"] or rect.height > view["height"]:
+            return None
+        if not _within(rect, view):
+            element.scroll_into_view_if_needed(timeout=2_000)
+            rect = self._rect_of(element)
+        return rect if _within(rect, view) else None
+
+    def _step_off_the_board(self, page: Any, element: Any) -> None:
+        """Take the pointer off the board and let our own feedback fade before the board is judged still or animated.
+
+        A hovered or pressed control repaints, and a board wearing our highlight read as motion: a still board
+        was filmed as animated because of the Verify button under the cursor.
+        """
+        box = element.bounding_box()
+        x, y = self._last_mouse
+        if box and self._human.hovers and box["x"] <= x <= box["x"] + box["width"] and box["y"] <= y <= box["y"] + box["height"]:
+            spot = _off_board_point(box, (x, y), _viewport_of(page))
+            if spot is not None:
+                self._smooth_move(page, *spot)
+        _delay(self._last_input_ms + INPUT_SETTLE_MS - _now())
 
     def _element_frame_hash(self, element: Any) -> Optional[str]:
         path = _tmp_png("fh")
@@ -1192,12 +1374,14 @@ class PageSolver:
                     raise CaptchaSolveError(
                         f"the animated recording stalled: {len(frames)} frames in "
                         f"{burst_hang_deadline_ms(cfg):.0f}ms. The widget is not screenshotting.")
-                try:
-                    self._screenshot(element, shot, animations="allow")
-                    img = cv2.imread(shot)
-                except Exception as exc:
-                    _debug(f"burst frame failed: {exc}")
-                    img = None
+                img = None
+                # A frame taken while the board still wears our last gesture is not a screen it showed by itself.
+                if _now() - self._last_input_ms >= INPUT_SETTLE_MS:
+                    try:
+                        self._screenshot(element, shot, animations="allow")
+                        img = cv2.imread(shot)
+                    except Exception as exc:
+                        _debug(f"burst frame failed: {exc}")
                 if img is not None:
                     frames.append(img)
                     d = _sha1(shot)
@@ -1634,6 +1818,10 @@ class PageSolver:
         frame = element.content_frame()
         scope = frame or widget.at
 
+        if role == FrameRole.CHECKBOX:
+            self._click_checkbox(page, widget, frame)
+            return True, []
+
         if frame and role == FrameRole.CHALLENGE and SELECTORS[puzzle_source].images:
             if self._last_submit_frame_hash:
                 with self._phase(Phase.AWAIT_NEXT_ROUND):
@@ -1658,8 +1846,10 @@ class PageSolver:
         if text_mode:
             _log("widget has a text box; solving as a distorted-text captcha")
 
-        # A checkbox is clicked, not filmed, and a reCAPTCHA board is read by its grid below.
-        filmable = role != FrameRole.CHECKBOX and puzzle_source != Vendor.RECAPTCHA and not text_mode
+        # A reCAPTCHA board is read by its grid below, not filmed.
+        filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode
+        if filmable and not self._known_animated:
+            self._step_off_the_board(page, element)
         is_animated = filmable and self._settle_or_animated(element)
         # hCaptcha keeps its challenge iframe visible ~2s after the final submit; read as a fresh puzzle it burned ~18s.
         if role == FrameRole.CHALLENGE and self.is_captcha_solved(page):
@@ -1814,6 +2004,7 @@ class PageSolver:
         usage: List[Dict[str, Any]] = []
         self._last_submit_frame_hash = None
         self._deadline_ms = start + self.config.overall_solve_timeout_ms
+        self._page = page
         self._human.reset(page)
         self._reset_animated_state()
         self._budget = PhaseBudget()

@@ -485,6 +485,41 @@ blue sky plus something white.
 
 ## Rounds, bursts and gates
 
+**Every capture is the whole viewport, cropped locally — never a clip.** An
+element screenshot, `page.screenshot({ clip })` and a raw CDP capture with any
+`clip` all make a headed Chromium paint frames at the clip's size: measured with
+`Page.startScreencast` on a static page, 1-38 off-size frames per twelve to thirty
+captures, which a user watches as the page flashing. An unclipped viewport
+capture painted 0 changed frames, with `animations: 'disabled'` as with
+`'allow'`, so `disabled` keeps its meaning (freeze CSS animation for a still) at
+no visual cost. The crop reproduces the element screenshot exactly — Playwright
+clips to the enclosing whole-pixel rect at the device pixel ratio, and so does
+`crop_png` / `cropPng`; `test_browser_compat` compares the two on a real page at
+DPR 1 and 2. It is also faster (no actionability wait): 35 ms against 69 ms on a
+small widget. JS decodes the PNG with `node:zlib` rather than take an image
+dependency. The one element screenshot left is a widget larger than the
+viewport, which no viewport capture can hold; an element merely off screen is
+scrolled in once, not per shot.
+
+**A checkbox is never a board.** It used to take the board round: the paint
+poll, the classifier's film and — when OpenCV missed the box on a half-drawn
+frame — an inference on the checkbox picture, which the model answered with a
+drag. The box is clicked through the DOM (`SELECTORS[v].box`), and found by
+`find_checkbox` on ONE capture only where the DOM cannot reach it (Turnstile's
+closed shadow root, a frame that refuses access); the model is never asked.
+After the click the round waits, on DOM signals, for the challenge frame or the
+checked state — without that wait the next round found the checkbox still up and
+clicked it again.
+
+**Our own gesture is not the board moving.** A hovered tile or button repaints,
+and a film that catches the highlight arrive and leave sees "a screen came back"
+and calls a still board a cycle — measured, a still board filmed as animated
+after a refused answer, because the cursor was left on Verify. Before a board is
+judged the pointer leaves it past the nearest edge, and any frame taken within
+`INPUT_SETTLE_MS` (400 ms, longer than a CSS hover transition) of our last
+gesture is dropped. The JS idle wander hovers the board during inference, so a
+change seen across it is not counted as evidence the board cycles.
+
 **The board paints before the round asks anything about it.** A round opens on
 two questions — which expert answers it, read out of the DOM as "is there a text
 box in here", and whether the board cycles, read off its motion — and both were

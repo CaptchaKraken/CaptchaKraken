@@ -149,6 +149,8 @@ def _solver(**overrides: Any) -> PageSolver:
     config = PageSolverConfig(**{"detection_timeout_ms": 0, "stale_element_backoff_ms": 0, **overrides})
     solver = PageSolver(config=config, solver=_NO_MODEL)
     solver._solver = None
+    # These fakes photograph themselves; the viewport capture has its own tests.
+    solver._screenshot = lambda element, path, **_: element.screenshot(path=path)
     if hasattr(solver._human, "_cursor_seeded"):
         solver._human._cursor_seeded = True
     return solver

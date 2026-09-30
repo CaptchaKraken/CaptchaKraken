@@ -70,6 +70,7 @@ def _round(*, vendor=Vendor.UNKNOWN, has_text_box=True, grid=False):
     solver._should_speculate = should_speculate
     solver.is_captcha_solved = lambda page: False
     solver._screenshot = lambda *a, **k: None
+    solver._step_off_the_board = lambda page, element: None
     if grid:
         def solve_grid(*a, **kw):
             trace.append("grid")

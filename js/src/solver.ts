@@ -8,6 +8,7 @@ import {
   PlaywrightFrame as Frame,
   PlaywrightLocator as Locator,
   PlaywrightScope as Scope,
+  ViewportSize,
 } from './playwright-types';
 import { watchPage, CaptchaWatcher, WatchOptions } from './watcher';
 import { Humanizer, resolveHumanizer } from './humanize.js';
@@ -18,6 +19,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { PhaseBudget, timingsEnabled } from './timing';
+import { CaptureRect, cropPng, enclosingRect } from './png';
 import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
 import { ActionKind, FrameRole, KeyframeMode, Outcome, PaintVerdict, PauseKind, Phase, RecaptchaBanner, RetryMode, SettleVerdict, SolveStage, Vendor, Verdict, isOneOf } from './kinds';
 import { VerdictLog } from './verdicts';
@@ -160,6 +162,32 @@ const MOVED_DURING_INFERENCE_DIFF = 0.002;
 // hCaptcha odd-animal showed 38 screens in 4s with no repeat; past DEFAULT_MAX_KEYFRAMES a keyframe answer cannot describe the motion.
 const BURST_ANIMATED_SCREENS = 6;
 const NOT_THIS_BOARD_POLLS = 3;
+// How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read inside
+// this window is wearing our own feedback, which is not a screen it ever showed by itself.
+export const INPUT_SETTLE_MS = 400;
+
+/** `viewportSize()` is null on a context launched without one (camoufox), where only the window knows. */
+async function viewportOf(page: Page): Promise<ViewportSize> {
+  const view = page.viewportSize() ?? await page.evaluate?.(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  if (!view) throw new Error('the page reports no viewport size and cannot evaluate one');
+  return view;
+}
+
+const within = (r: CaptureRect, view: ViewportSize): boolean =>
+  r.x >= 0 && r.y >= 0 && r.x + r.width <= view.width && r.y + r.height <= view.height;
+
+/** A point just outside the board, past the edge nearest the pointer, that is still inside the viewport. */
+function offBoardPoint(box: Box, at: readonly [number, number], view: ViewportSize): [number, number] | null {
+  const [x, y] = at;
+  const gap = 24 + Math.random() * 40;
+  const right = box.x + box.width;
+  const bottom = box.y + box.height;
+  const exits: Array<[number, [number, number]]> = [
+    [x - box.x, [box.x - gap, y]], [right - x, [right + gap, y]], [y - box.y, [x, box.y - gap]], [bottom - y, [x, bottom + gap]],
+  ];
+  return exits.sort((a, b) => a[0] - b[0]).map(([, p]) => p)
+    .find(([px, py]) => px >= 0 && px < view.width && py >= 0 && py < view.height) ?? null;
+}
 
 export const SOLVE_DEFAULTS = {
   maxSolveLoops: 6,
@@ -232,9 +260,18 @@ export class CaptchaKrakenSolver {
   private cliCache: { cliRoot: string; py: string } | null = null;
   private loraNameCache: string | null = null;
   budget: PhaseBudget | null = null;
+  /** The page being solved: every capture is taken of its viewport. Set by `solve`. */
+  private page: Page | null = null;
+  /** When our last gesture ended; the board's reaction to it is never read as the board's own motion. */
+  private lastInputAt = -Infinity;
 
   private ph<T>(name: Phase, fn: () => Promise<T>): Promise<T> {
     return this.budget ? this.budget.phase(name, fn) : fn();
+  }
+
+  /** A pointer gesture, timed as MOUSE and remembered: see `INPUT_SETTLE_MS`. */
+  private gesture<T>(fn: () => Promise<T>): Promise<T> {
+    return this.ph(Phase.MOUSE, fn).finally(() => { this.lastInputAt = Date.now(); });
   }
 
   constructor(config: CaptchaKrakenConfig = {}) {
@@ -250,14 +287,64 @@ export class CaptchaKrakenSolver {
     this.human.at = [v.x, v.y];
   }
 
-  /** `disabled` freezes CSS animation, which once sliced GeeTest svg to a static clip; callers filming motion pass `allow`. */
-  private shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled'): Promise<Buffer> {
-    return el.screenshot({ path: p, timeout, animations });
+  /**
+   * Every capture the driver takes: the whole viewport, cropped here to the element.
+   *
+   * Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at the
+   * clip's size for that frame, which the user watches as the page flashing and jumping; a viewport capture
+   * repaints nothing, and measured twice as fast. `disabled` freezes CSS animation, which once sliced GeeTest svg to
+   * a static clip; callers filming motion pass `allow`.
+   */
+  private async shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled'): Promise<void> {
+    const page = this.page as Page;
+    const view = await viewportOf(page);
+    const rect = await this.rectInView(el, view);
+    if (!rect) {
+      // Bigger than the viewport: no viewport capture holds all of it, so the element photographs itself.
+      await el.screenshot({ path: p, timeout, animations });
+      return;
+    }
+    fs.writeFileSync(p, cropPng(await page.screenshot({ timeout, animations }), rect, view.width));
+  }
+
+  private async rectOf(el: ElementHandle): Promise<CaptureRect> {
+    const box = await el.boundingBox();
+    const rect = box ? enclosingRect(box) : null;
+    if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('the element is not visible: it has no bounding box to photograph');
+    return rect;
+  }
+
+  /** Where the element sits in the viewport, scrolled in when it is merely off screen; null when it cannot fit. */
+  private async rectInView(el: ElementHandle, view: ViewportSize): Promise<CaptureRect | null> {
+    let rect = await this.rectOf(el);
+    if (rect.width > view.width || rect.height > view.height) return null;
+    if (!within(rect, view)) {
+      await el.scrollIntoViewIfNeeded({ timeout: 2000 });
+      rect = await this.rectOf(el);
+    }
+    return within(rect, view) ? rect : null;
+  }
+
+  /**
+   * Take the pointer off the board and let our own feedback fade before the board is judged still or animated.
+   *
+   * A hovered or pressed control repaints, and a board wearing our highlight read as motion: a still board was
+   * filmed as animated because of the Verify button under the cursor.
+   */
+  private async stepOffTheBoard(page: Page, el: ElementHandle): Promise<void> {
+    const box = await el.boundingBox();
+    const [x, y] = this.human.at;
+    if (box && this.human.hovers && x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
+      const spot = offBoardPoint(box, [x, y], await viewportOf(page));
+      if (spot) await this.performSmoothMove(page, ...spot);
+    }
+    await delay(this.lastInputAt + INPUT_SETTLE_MS - Date.now());
   }
 
   async solve(page: Page): Promise<SolveResult | void> {
     // One session id per solve groups its inference rounds into one billable attempt.
     this.solveSessionId = randomUUID();
+    this.page = page;
     this.solveVendor = null;
     this.solveSite = hostname(page);
     this.budget = new PhaseBudget();
@@ -567,6 +654,11 @@ export class CaptchaKrakenSolver {
     const frame = await captchaElement.contentFrame();
     const scope: Scope = frame ?? widget.at;
 
+    if (frameRole === FrameRole.CHECKBOX) {
+      await this.clickCheckbox(page, widget, frame);
+      return { didInteract: true, tokenUsage: [] };
+    }
+
     if (frame && frameRole === FrameRole.CHALLENGE && SELECTORS[puzzleSource].images) {
       if (this.lastSubmitFrameHash) {
         await this.ph(Phase.AWAIT_NEXT_ROUND, () => this.waitForChangeSince(captchaElement, this.lastSubmitFrameHash as string));
@@ -589,8 +681,9 @@ export class CaptchaKrakenSolver {
     const textMode = !VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) && (await this.answerBox(scope, widget.at)) !== null;
     if (textMode) console.log('Widget has a text box; solving as a distorted-text captcha.');
 
-    // A checkbox is clicked, not filmed, and a reCAPTCHA board is read by its grid below.
-    const filmable = frameRole !== FrameRole.CHECKBOX && puzzleSource !== Vendor.RECAPTCHA && !textMode;
+    // A reCAPTCHA board is read by its grid below, not filmed.
+    const filmable = puzzleSource !== Vendor.RECAPTCHA && !textMode;
+    if (filmable && !this.knownAnimated) await this.stepOffTheBoard(page, captchaElement);
     let isAnimated = false;
     if (filmable && cfg.videoSolveEnabled === false) {
       if (await this.ph(Phase.SETTLE, () => this.waitForElementSettled(captchaElement)) === SettleVerdict.ANIMATED) {
@@ -838,6 +931,74 @@ export class CaptchaKrakenSolver {
     }
 
     return { didInteract: performedAction, tokenUsage: allTokenUsage };
+  }
+
+  /**
+   * Tick the box and wait for what it opens. A checkbox is not a board: it is never polled, filmed or asked about.
+   *
+   * Treated as a board it cost 70 screenshots and three model calls in one measured solve, two of them answering the
+   * checkbox picture with a drag.
+   */
+  private async clickCheckbox(page: Page, widget: Widget, frame: Frame | null): Promise<void> {
+    const box = await this.checkboxBox(frame, widget.vendor);
+    if (box) await this.move(page, box);
+    else await this.performSmoothMove(page, ...await this.findCheckboxOnScreen(widget.el));
+    await this.human.pause(PauseKind.BETWEEN);
+    await this.gesture(() => this.human.click(page, this.human.at));
+    await this.awaitWhatTheCheckboxOpened(page);
+  }
+
+  /**
+   * The box in a checkbox frame once the frame has drawn it; null when the DOM cannot reach it. Turnstile's box is in
+   * a closed shadow root, and a frame can refuse access; both are found on screen instead.
+   */
+  private async checkboxBox(frame: Frame | null, vendor: Vendor): Promise<ElementHandle | null> {
+    const box = SELECTORS[vendor].box;
+    if (!frame || !box?.length) return null;
+    try {
+      return await frame.waitForSelector(box.join(', '), { state: 'visible', timeout: this.config.detectionTimeoutMs ?? SOLVE_DEFAULTS.detectionTimeoutMs });
+    } catch (e) {
+      console.log(`[checkbox] the box is out of the DOM's reach (${String((e as Error)?.message ?? e).split('\n')[0]}); finding it on screen`);
+      return null;
+    }
+  }
+
+  /** One capture and OpenCV: a point inside the tick box, in page coordinates. No model is asked. */
+  private async findCheckboxOnScreen(el: ElementHandle): Promise<[number, number]> {
+    const box = await el.boundingBox();
+    if (!box) throw new Error('Could not get bounding box of captcha element');
+    const shot = tmp('checkbox');
+    let found: [number, number, number, number] | null;
+    let scale: number;
+    try {
+      await this.ph(Phase.SCREENSHOT, () => this.shot(el, shot, this.config.elementScreenshotTimeoutMs ?? 8000));
+      found = await this.runCvTool('find-checkbox', { image: shot }, ['find-checkbox', shot]);
+      scale = this.shotScale(shot, box.width);
+    } finally {
+      unlink(shot);
+    }
+    if (!found) {
+      const e: any = new Error('UNSUPPORTED_CAPTCHA: the checkbox widget shows no tick box to click');
+      e.unsupported = true;
+      throw e;
+    }
+    const [x, y, w, h] = found.map((v) => v / scale);
+    return [box.x + x + w * (0.3 + Math.random() * 0.4), box.y + y + h * (0.3 + Math.random() * 0.4)];
+  }
+
+  /**
+   * A clicked checkbox passes or opens a challenge, and both show in the DOM.
+   * Without this wait the next round found the same checkbox still up and clicked it again.
+   */
+  private async awaitWhatTheCheckboxOpened(page: Page): Promise<void> {
+    const deadline = Date.now() + (this.config.postSubmitChangeTimeoutMs ?? 4000);
+    await this.ph(Phase.AWAIT_NEXT_ROUND, async () => {
+      while (Date.now() < deadline && !(await this.isCaptchaSolved(page))) {
+        const widget = await this.detectCaptcha(page);
+        if (widget?.role !== FrameRole.CHECKBOX) return;
+        await delay(this.config.postSolveOutcomePollMs ?? 75);
+      }
+    });
   }
 
   private getVerifyButton(scope: Scope): Promise<ElementHandle | null> {
@@ -1465,7 +1626,8 @@ export class CaptchaKrakenSolver {
           break;
         }
         const frame = path.join(dir, `frame_${String(seq).padStart(4, '0')}.png`); // zero-padded: the slicer sorts by name
-        try {
+        // A frame taken while the board still wears our last gesture is not a screen it showed by itself.
+        if (Date.now() - this.lastInputAt >= INPUT_SETTLE_MS) try {
           await this.shot(captchaElement, frame, cfg.elementScreenshotTimeoutMs ?? 8000, 'allow');
           captured++;
           seq++;
@@ -1980,12 +2142,16 @@ export class CaptchaKrakenSolver {
         await this.shot(captchaElement, liveAnchor, 2500, 'allow');
         haveAnchor = true;
       } catch { /* no anchor, no movement check */ }
+      // The idle wander hovers the board while the model reads it, and a board reacting to our pointer has not moved
+      // by itself: once we have touched it since the anchor, a change is no evidence that it cycles.
+      const anchoredAt = Date.now();
+      const untouched = () => this.lastInputAt < anchoredAt;
 
       let response = await runQuery(currentPath);
       mergedUsage.push(...response.token_usage);
       if (!enabled) return response;
 
-      if (!this.actedOnBoard && !this.repeatedAnswerSeen && haveAnchor
+      if (!this.actedOnBoard && !this.repeatedAnswerSeen && haveAnchor && untouched()
           && await this.captchaFrameChangedSince(captchaElement, liveAnchor, MOVED_DURING_INFERENCE_DIFF, 'allow')) {
         this.repeatedAnswerSeen = true;
         console.log('[freshness] the widget moved while the model was reading it, with nothing clicked — recording it rather than answering another still.');
@@ -1996,7 +2162,7 @@ export class CaptchaKrakenSolver {
       let changedDuringInference = 0;
       for (let i = 0; i < maxReSolves; i++) {
         if (!(await this.captchaFrameChangedSince(captchaElement, currentPath, threshold))) break;
-        if (++changedDuringInference >= 2 && !this.actedOnBoard) {
+        if (++changedDuringInference >= 2 && !this.actedOnBoard && untouched()) {
           this.repeatedAnswerSeen = true;
           console.log('[freshness] the frame changed twice during inference with nothing clicked — this board cycles; recording it rather than re-solving a screen that has gone.');
           return { actions: response.actions, token_usage: mergedUsage };
@@ -2148,11 +2314,11 @@ export class CaptchaKrakenSolver {
 
   async moveAndClick(page: Page, element: ElementHandle) {
     await this.move(page, element);
-    await this.ph(Phase.MOUSE, () => this.human.click(page, this.human.at));
+    await this.gesture(() => this.human.click(page, this.human.at));
   }
 
   private async performSmoothMove(page: Page, x: number, y: number) {
-    await this.ph(Phase.MOUSE, () => this.human.move(page, [x, y]));
+    await this.gesture(() => this.human.move(page, [x, y]));
   }
 
   /** Element-relative click point: a random spot inside the box, inset 10% off its border. */
@@ -2175,10 +2341,10 @@ export class CaptchaKrakenSolver {
       return;
     }
     const at: [number, number] = [elementBox.x + rel[0], elementBox.y + rel[1]];
-    await this.ph(Phase.MOUSE, () => this.human.move(page, at));
+    await this.gesture(() => this.human.move(page, at));
     await this.waitForKeyframe(element, awaitKeyframe, rel[0] / elementBox.width, rel[1] / elementBox.height);
     this.actedOnBoard = true;
-    await this.ph(Phase.MOUSE, () => this.human.click(page, at));
+    await this.gesture(() => this.human.click(page, at));
   }
 
   private async executeClick(page: Page, _element: ElementHandle, action: ClickAction, elementBox: Box) {
@@ -2188,7 +2354,7 @@ export class CaptchaKrakenSolver {
       console.warn('Click action received without coordinates or bounding box', action);
       return;
     }
-    await this.ph(Phase.MOUSE, () => this.human.click(page, [elementBox.x + rel[0], elementBox.y + rel[1]]));
+    await this.gesture(() => this.human.click(page, [elementBox.x + rel[0], elementBox.y + rel[1]]));
   }
 
   private async executeDrag(page: Page, _element: ElementHandle,
@@ -2197,7 +2363,7 @@ export class CaptchaKrakenSolver {
     this.actedOnBoard = true;
     const center = (bbox: [number, number, number, number]): [number, number] =>
       [elementBox.x + ((bbox[0] + bbox[2]) / 2) * elementBox.width, elementBox.y + ((bbox[1] + bbox[3]) / 2) * elementBox.height];
-    await this.ph(Phase.MOUSE, () => this.human.drag(page, center(action.source_bounding_box), center(action.target_bounding_box)));
+    await this.gesture(() => this.human.drag(page, center(action.source_bounding_box), center(action.target_bounding_box)));
   }
 
   /**
@@ -2235,7 +2401,9 @@ export class CaptchaKrakenSolver {
       return false;
     }
     await this.moveAndClick(page, field);
-    if (!(await this.human.typeText(page, field, text))) return false;
+    const typed = await this.human.typeText(page, field, text);
+    this.lastInputAt = Date.now();
+    if (!typed) return false;
     console.log(`Typed ${text.length} character(s) into the captcha field.`);
     return true;
   }
@@ -2273,7 +2441,7 @@ export class CaptchaKrakenSolver {
       }
       const targetY = ((tb[1] + tb[3]) / 2) * elementBox.height;
       console.log('No slider track; dragging the piece to the slot directly.');
-      await this.human.drag(page, [box.x + box.width / 2, box.y + box.height / 2], [elementBox.x + targetX, elementBox.y + targetY]);
+      await this.gesture(() => this.human.drag(page, [box.x + box.width / 2, box.y + box.height / 2], [elementBox.x + targetX, elementBox.y + targetY]));
       return true;
     }
 
@@ -2340,6 +2508,7 @@ export class CaptchaKrakenSolver {
       await this.human.pause(PauseKind.SETTLE);
     } finally {
       try { await this.human.release(page); } catch { /* the page may have navigated */ }
+      this.lastInputAt = Date.now();
       for (const s of shots) unlink(s);
     }
     return true;

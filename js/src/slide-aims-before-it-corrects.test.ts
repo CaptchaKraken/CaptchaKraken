@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { CaptchaKrakenSolver } from './solver';
-import { fakeDom } from './fake-dom.test';
+import { fakeDom, photographsItself } from './fake-dom.test';
 
 const WIDGET_W = 400;
 const WIDGET_H = 400;
@@ -43,7 +43,7 @@ async function drive(pieceInDom: boolean): Promise<number[]> {
   const page: any = { mouse: { move: async () => {}, down: async () => {}, up: async () => {} } };
   const scope = fakeDom(pieceInDom ? [handle, piece] : [handle]);
 
-  const solver: any = new CaptchaKrakenSolver({});
+  const solver: any = photographsItself(new CaptchaKrakenSolver({}));
 
   solver.move = async () => {};
   solver.performSmoothMove = async (_page: unknown, x: number) => {
@@ -87,7 +87,7 @@ async function driveOvershoot(): Promise<{ sweeps: number[], finalCentre: number
   const page: any = { mouse: { move: async () => {}, down: async () => {}, up: async () => {} } };
   const scope = fakeDom([{ matches: ['.geetest_slider_button'], box: { x: 15, y: 297, width: 54, height: 28 } }]);
 
-  const solver: any = new CaptchaKrakenSolver({});
+  const solver: any = photographsItself(new CaptchaKrakenSolver({}));
   solver.move = async () => {};
   solver.performSmoothMove = async (_p: unknown, x: number) => {
     state.offset = x - OVER.startX;

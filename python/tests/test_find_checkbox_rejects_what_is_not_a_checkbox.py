@@ -67,3 +67,18 @@ def test_a_square_full_of_detail_is_not_a_checkbox(tmp_path):
 def test_a_square_larger_than_a_widget_is_not_a_checkbox(tmp_path):
     img = _draw_square(_canvas(tmp_path), 20, 20, 200)
     assert find_checkbox(_save(tmp_path / "huge.png", img)) is None
+
+
+def test_a_square_on_the_right_of_the_widget_is_not_its_tick_box(tmp_path):
+    """The vendors put the box at the left and a logo or badge at the right."""
+    img = _draw_square(_canvas(tmp_path), 300, 120, 40)
+    assert find_checkbox(_save(tmp_path / "right.png", img)) is None
+
+
+def test_the_box_is_found_on_a_checkbox_widget_s_own_proportions(tmp_path):
+    """A 300x74 strip, box at the left and a square logo at the right: the shape a checkbox widget photographs as."""
+    img = np.full((74, 300, 3), 249, dtype=np.uint8)
+    _draw_square(img, 16, 23, 28, thickness=2, colour=(140, 140, 140))
+    _draw_square(img, 250, 22, 30, thickness=2, colour=(90, 90, 90))
+    x, y, w, h = find_checkbox(_save(tmp_path / "widget.png", img))
+    assert abs(x - 16) <= 3 and abs(y - 23) <= 3 and 24 <= w <= 34, f"found {(x, y, w, h)}, not the box at (16, 23)"

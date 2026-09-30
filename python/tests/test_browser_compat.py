@@ -86,6 +86,7 @@ def test_a_real_page_provides_every_member_the_driver_duck_types(page: Any) -> N
     assert target.bounding_box()["width"] > 0, "bounding_box"
     target.scroll_into_view_if_needed()
     assert len(target.screenshot()) > 0, "element screenshot"
+    assert len(page.screenshot(timeout=5000, animations="disabled")) > 0, "viewport screenshot"
 
     assert page.evaluate("() => document.title") == "", "evaluate"
     assert target.evaluate("el => el.id") == "target", "handle.evaluate"
@@ -187,3 +188,44 @@ def test_one_watcher_covers_every_navigation_on_the_page(page: Any) -> None:
     page.goto("data:text/html,<body><div id='c'></div>four</body>")
     watcher.run(timeout_ms=800)
     assert len(solved) == 2, "the watcher stopped arming after its first solve"
+
+
+CAPTURE_FIXTURE = """
+<body style="margin:0;height:2400px;background:#fafafa;font:14px sans-serif">
+  <div id="board" style="position:absolute;left:37.5px;top:61.25px;width:301.3px;height:151.6px;border:3px solid #222;
+       background:linear-gradient(90deg,#c33,#3c3 40%,#33c)">a still board</div>
+  <iframe id="framed" style="position:absolute;left:420px;top:40px;width:260px;height:180px;border:1px solid #888"
+          srcdoc="<body style='margin:0;background:#fe9'><div style='margin:20px;width:90px;height:60px;background:#069'></div>framed</body>">
+  </iframe>
+  <div id="below" style="position:absolute;left:50px;top:1500px;width:200px;height:120px;background:#9c6">below the fold</div>
+</body>
+"""
+
+
+@pytest.mark.parametrize("dpr", [1, 2])
+def test_the_viewport_crop_is_what_an_element_screenshot_shows(page: Any, dpr: int, tmp_path: Path) -> None:
+    """The model-facing picture did not change when the capture did: same rect, same scale, same pixels."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from captchakraken.page_solver import PageSolver
+
+    context = page.context.browser.new_context(viewport={"width": 1280, "height": 720}, device_scale_factor=dpr)
+    try:
+        real = context.new_page()
+        real.set_content(CAPTURE_FIXTURE)
+        real.locator("#framed").element_handle().content_frame().wait_for_selector("div")
+        solver = PageSolver()
+        solver._page = real
+        for selector in ("#board", "#framed", "#below"):
+            handle = real.locator(selector).element_handle()
+            path = tmp_path / f"{selector[1:]}.png"
+            solver._screenshot(handle, str(path))
+            ours = np.array(Image.open(path))
+            theirs = np.array(Image.open(io.BytesIO(handle.screenshot(animations="disabled"))))
+            assert ours.shape == theirs.shape, f"{selector} at dpr {dpr}: {ours.shape} against {theirs.shape}"
+            assert (ours == theirs).all(), f"{selector} at dpr {dpr}: the crop differs from the element screenshot"
+    finally:
+        context.close()

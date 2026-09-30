@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { CaptchaKrakenSolver } from './solver';
+import { photographsItself } from './fake-dom.test';
 
 /** The gap a real round has between answering and being told no: the outer loop's verdict wait. */
 const verdictWait = () => new Promise((r) => setTimeout(r, 150));
@@ -32,12 +33,12 @@ const ANSWER = {
 };
 
 function cyclingSolver() {
-  const solver: any = new CaptchaKrakenSolver({
+  const solver: any = photographsItself(new CaptchaKrakenSolver({
     // A 3-screen cycle at 50fps closes in well under the floor, so the test costs ~0.3s rather than ~4s.
     videoBurstDurationMs: 120,
     videoBurstFps: 50,
     speculativeBurstEnabled: false,
-  });
+  }));
   const slices: number[] = [];
   const films: { events: string[] }[] = [];
   let frame = 0;
@@ -50,6 +51,8 @@ function cyclingSolver() {
   solver.captchaFrameChangedSince = async () => false;
   solver.executeClick = async () => {};
   solver.emitStep = async () => {};
+  // The pointer leaving the board before it is judged has tests of its own; these fakes have no viewport.
+  solver.stepOffTheBoard = async () => {};
   // Three distinct screens on a loop: enough for the recorder to see a screen come back and call it a cycle.
   solver.shot = async (_el: any, dest: string) => fs.writeFileSync(dest, `screen-${frame++ % 3}`);
   solver.getSolution = async () => ANSWER;
@@ -150,12 +153,12 @@ test('a film that never cycles does not hold the first slice to the camera ceili
   // MEASURED: a board took 121.9s against a 20s gate ceiling, because the wait before slicing ran until the
   // recorder loop ended and a continuous loop ends at videoFilmMaxMs. How long to wait before slicing and
   // how long the camera may run are different numbers; this pins the first to the burst ceiling.
-  const solver: any = new CaptchaKrakenSolver({
+  const solver: any = photographsItself(new CaptchaKrakenSolver({
     videoBurstDurationMs: 60,
     videoBurstMaxMs: 200,        // the slice wait
     videoFilmMaxMs: 60_000,      // the camera, deliberately far longer
     videoBurstFps: 50,
-  });
+  }));
   let n = 0;
   // Every frame a brand new screen: never a closed cycle, never a settle.
   solver.shot = async (_el: any, dest: string) => fs.writeFileSync(dest, `unique-${n++}`);
@@ -180,11 +183,11 @@ test('a film that never cycles does not hold the first slice to the camera ceili
 
 /** A board that deals a fresh set of screens each time it refuses an answer. */
 function reshufflingSolver() {
-  const solver: any = new CaptchaKrakenSolver({
+  const solver: any = photographsItself(new CaptchaKrakenSolver({
     videoBurstDurationMs: 120,
     videoBurstFps: 50,
     speculativeBurstEnabled: false,
-  });
+  }));
   const asks: string[][] = [];
   let board = 0;
   let frame = 0;
@@ -196,6 +199,8 @@ function reshufflingSolver() {
   solver.getVerifyButton = async () => null;
   solver.captchaFrameChangedSince = async () => false;
   solver.emitStep = async () => {};
+  // The pointer leaving the board before it is judged has tests of its own; these fakes have no viewport.
+  solver.stepOffTheBoard = async () => {};
   solver.shot = async (_el: any, dest: string) => fs.writeFileSync(dest, `board${board}-screen-${frame++ % 3}`);
   // The refusal: every answer deals a new puzzle, so nothing filmed before it is on screen any more.
   solver.executeClick = async () => { board += 1; };
@@ -248,13 +253,13 @@ test('a board that never repeats a screen is not mistaken for a new board', asyn
   // away every round and waited out the burst ceiling to do it. Measured: 110.3s and 78.4s boards against a
   // 49s gate ceiling. A replacement has to be PROVED, not assumed.
   const asks: number[] = [];
-  const solver: any = new CaptchaKrakenSolver({
+  const solver: any = photographsItself(new CaptchaKrakenSolver({
     videoBurstDurationMs: 120,
     videoBurstMaxMs: 3_000,     // the ceiling this must not wait out on the re-ask
     videoFilmMaxMs: 60_000,
     videoBurstFps: 50,
     speculativeBurstEnabled: false,
-  });
+  }));
   let n = 0;
   solver.answerBox = async () => null;
   solver.classifyByRecording = async () => 'animated';
@@ -264,6 +269,8 @@ test('a board that never repeats a screen is not mistaken for a new board', asyn
   solver.captchaFrameChangedSince = async () => false;
   solver.executeClick = async () => {};
   solver.emitStep = async () => {};
+  // The pointer leaving the board before it is judged has tests of its own; these fakes have no viewport.
+  solver.stepOffTheBoard = async () => {};
   solver.shot = async (_el: any, dest: string) => fs.writeFileSync(dest, `unique-${n++}`);
   solver.getSolution = async () => ANSWER;
   solver.getAnimatedSolution = async (dir: string) => { asks.push(fs.readdirSync(dir).length); return ANSWER; };

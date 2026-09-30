@@ -56,6 +56,37 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Fixed
 
+- **The page no longer flickers while the solver looks at it.** Every picture
+  the solver took was an element screenshot, and in a headed Chromium each one
+  made the whole page repaint at the element's size for a frame — the page
+  visibly flashed and jumped on every look, dozens of times a solve. Both
+  drivers now take one screenshot of the whole viewport and cut the widget out
+  of it themselves, which repaints nothing and is about twice as fast (35 ms
+  against 69 ms measured on a checkbox, 68 ms against 91-103 ms on a challenge
+  board). The picture the model sees is unchanged: same region, same size, same
+  pixels, at any device pixel ratio. A widget larger than the viewport is still
+  photographed on its own. The structural `Page` type gains `screenshot()`,
+  which every Playwright page already has; `fromPuppeteer()` supplies it.
+
+- **A checkbox is ticked, not studied.** The "I'm not a robot" box used to go
+  through the same round as a puzzle: the solver waited for it to "paint",
+  filmed it for four seconds, and when it could not find the box on the picture
+  asked the model where to click — one measured solve spent 70 screenshots and
+  three model responses on a checkbox before the puzzle had even opened. The box
+  is now clicked through the page itself, and where it cannot be reached that way
+  it is found on a single picture without the model. The solver then waits for the
+  challenge to open or the box to tick instead of clicking it again. On a demo
+  page the challenge now opens about 3.5 s into the solve (12-29 s before), with
+  no model response spent before it.
+
+- **A still puzzle is no longer mistaken for an animated one because the
+  pointer was resting on it.** A button or picture under the cursor changes as
+  it is hovered, and the solver read those changes as the puzzle moving: after a
+  wrong answer, a still puzzle could be filmed as a video and answered as one,
+  adding up to half a minute. The pointer now leaves the puzzle before the
+  solver decides whether it moves, and pictures taken while the puzzle is still
+  reacting to the pointer are left out.
+
 - **A hosted outcome report that fails is reported, every time.** A 404 from
   the hosted API used to switch outcome reporting off silently for the rest of
   the process. It is now a warning on each failure; only a self-hosted endpoint,

@@ -17,6 +17,8 @@ export interface VendorSelectors {
   readonly response?: string;
   /** Inside the checkbox frame: the box shows accepted. Demo pages do not always fill `response`. */
   readonly checked?: string;
+  /** Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph. */
+  readonly box?: readonly string[];
   /** On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md). */
   readonly accepted?: string;
   /** Inside the challenge frame: a new round has painted, with text. */
@@ -46,6 +48,7 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     checkbox: ['iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])'],
     response: '[name="g-recaptcha-response"]',
     checked: '.recaptcha-checkbox-checked',
+    box: ['#recaptcha-anchor'],
     fresh: '.rc-imageselect-instructions, #rc-imageselect',
     submit: ['#recaptcha-verify-button'],
     banners: [
@@ -63,6 +66,7 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     checkbox: ['iframe[src*="hcaptcha"][src*="frame=checkbox"]'],
     response: '[name="h-captcha-response"]',
     checked: '#checkbox[aria-checked="true"]',
+    box: ['#checkbox'],
     fresh: '.prompt-text',
     images: ['.task-image .image', '.task .image', '.challenge-example img', '.image-wrapper img'],
     submit: ['.button-submit'],
