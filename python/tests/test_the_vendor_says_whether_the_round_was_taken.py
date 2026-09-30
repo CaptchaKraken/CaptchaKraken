@@ -34,9 +34,9 @@ class FakeResponse:
         self.url, self.status, self._body = url, status, body
         self.read = False
 
-    def text(self) -> str:
+    def body(self) -> bytes:
         self.read = True
-        return self._body
+        return self._body.encode("utf-8") if isinstance(self._body, str) else self._body
 
 
 class ListeningPage:
@@ -75,6 +75,15 @@ def test_the_log_reads_only_the_bodies_it_can_judge_and_lets_go_of_the_page():
     assert log.decisive() == Verdict.ACCEPTED
     log.close()
     assert page.listeners == []
+
+
+def test_a_body_that_is_not_text_still_yields_its_url_verdict():
+    """Measured live: the encrypted deal response raised on a strict decode, so the Python port dropped a verdict the
+    JS port recorded."""
+    page = ListeningPage()
+    log = VerdictLog(page)
+    page.emit({**_case("hCaptcha deals a board, encrypted"), "body": b"\xff\xfe\x00SYNTHETIC"})
+    assert [v.verdict for v in log.fresh()] == [Verdict.NEW_CHALLENGE]
 
 
 def test_a_page_that_cannot_be_listened_to_records_nothing_and_raises_nothing():

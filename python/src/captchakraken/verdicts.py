@@ -127,7 +127,9 @@ class VerdictLog:
             url, status = response.url, response.status
             if endpoint_for(url) is None:
                 return
-            body = response.text() if status != _TOO_MANY_REQUESTS else ""
+            # Decoded leniently, as a browser's text() is: one deal endpoint answers in ciphertext, and its URL alone
+            # is the signal.
+            body = response.body().decode("utf-8", "replace") if status != _TOO_MANY_REQUESTS else ""
         except Exception:
             return
         verdict = read_verdict(url, status, body)
