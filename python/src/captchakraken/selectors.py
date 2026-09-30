@@ -36,6 +36,10 @@ class VendorSelectors:
     submit: Sequence[str] = ()
     # Inside the challenge frame: verdict banners and what each means.
     banners: Sequence[Tuple[str, RecaptchaBanner]] = ()
+    # Inside the challenge frame: the vendor refusing to serve this client at all. Nothing after it can succeed.
+    blocked: Sequence[str] = ()
+    # On the host page: the vendor's frames that are never interactive, so a page showing only these has no widget.
+    passive: Sequence[str] = ()
     # Inside the widget, and its enclosing fieldset/form: the answer box of a typed captcha.
     text_input: Sequence[str] = ()
     # Inside the widget: the knob a slide must start on; a drag from the piece moves nothing.
@@ -58,6 +62,8 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
             (".rc-imageselect-error-dynamic-more", RecaptchaBanner.DYNAMIC_MORE),
             (".rc-imageselect-incorrect-response", RecaptchaBanner.REJECTED),
         ),
+        blocked=(".rc-doscaptcha-header-text",),
+        passive=('iframe[src*="size=invisible"]',),
     ),
     # Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com.
     Vendor.HCAPTCHA: VendorSelectors(

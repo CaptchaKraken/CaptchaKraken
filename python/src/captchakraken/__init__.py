@@ -30,7 +30,9 @@ from .kinds import (
     PromptFamily,
     RetryMode,
     Vendor,
+    Verdict,
 )
+from .verdicts import RoundVerdict
 
 from .humanize import (
     AppiumTouchBackend,
@@ -96,7 +98,9 @@ __all__ = [
     "PauseKind",
     "PromptFamily",
     "RetryMode",
+    "RoundVerdict",
     "Vendor",
+    "Verdict",
 ]
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"

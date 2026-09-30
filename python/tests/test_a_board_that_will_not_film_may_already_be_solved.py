@@ -5,7 +5,7 @@
 # screenshot at all, and the commonest reason for that is that it is CLOSING, because the answer was
 # accepted.
 #
-# Every other failure in `_solve_impl` asks `is_captcha_solved` before giving up. This one re-raised.
+# Every other failure in `_solve_impl` asked `is_captcha_solved` before giving up; this one re-raised.
 # Measured: prosopo_grid_3x3 solved 8/8 across six runs on 09-12 and 09-13, then lost four attempts
 # on 09-17 to exactly this. Each one had its FIRST board come back from the fixture's own /fx/verify
 # graded `solved: true, score 1.0, pred == gt`, and died on the second board the vendor dealt — so the
@@ -22,22 +22,20 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from captchakraken.page_solver import (  # noqa: E402
-    AnimatedChallengeError, CaptchaSolveError, NothingFilmedError, PageSolver, PageSolverConfig, _now,
+    AnimatedChallengeError, CaptchaSolveError, PageSolver, PageSolverConfig, _now,
 )
 
 
-def _driver(*, rounds_before_blank: int, solved_after: bool, raises=NothingFilmedError,
-            max_stale: int = 3):
-    """A solver whose Nth round cannot film, and whose widget reports `solved_after` afterwards."""
+def _driver(*, rounds_before_blank: int, solved_after: bool, raises=AnimatedChallengeError, every_round: bool = False):
+    """A solver whose Nth round (or every round from it on) cannot film, and whose widget reports `solved_after` afterwards."""
     solver = PageSolver(config=PageSolverConfig(max_solve_loops=6, post_solve_outcome_timeout_ms=1,
-                                                post_solve_delay_ms=1, stale_element_backoff_ms=0,
-                                                max_stale_element_retries=max_stale))
+                                                post_solve_delay_ms=1, stale_element_backoff_ms=0))
     solver._reset_animated_state()
     state = {"rounds": 0, "solved": False}
 
     def solve_single(page, widget, retry_mode):
         state["rounds"] += 1
-        if state["rounds"] == rounds_before_blank + 1:
+        if state["rounds"] == rounds_before_blank + 1 or (every_round and state["rounds"] > rounds_before_blank):
             state["solved"] = solved_after
             raise raises("could not record the animated challenge (no frame screenshotted)")
         solver._acted_on_board = True
@@ -77,43 +75,37 @@ def test_a_board_that_will_not_film_and_is_not_solved_is_re_detected():
     assert state["rounds"] > 2, f"gave up after {state['rounds']} rounds instead of re-detecting"
 
 
-def test_the_retry_is_bounded():
+def test_the_retry_is_bounded_by_the_solve_loops():
     """Without a bound this is an infinite loop on a widget that never screenshots again."""
-    solver, state = _driver(rounds_before_blank=0, solved_after=False, max_stale=2)
+    solver, state = _driver(rounds_before_blank=0, solved_after=False, every_round=True)
+    with pytest.raises(CaptchaSolveError, match="after 6 solve loops"):
+        solver._solve_impl(object(), _now(), [])
+    assert state["rounds"] == 6
+
+
+def test_a_first_round_that_cannot_film_is_not_the_end_of_the_solve():
+    """Nothing has been answered yet, so there is nothing to lose by looking again; the loops are the bound."""
+    solver, state = _driver(rounds_before_blank=0, solved_after=False)
     with pytest.raises(CaptchaSolveError):
         solver._solve_impl(object(), _now(), [])
-    assert state["rounds"] <= 4, f"re-detected {state['rounds']} times against a bound of 2"
+    assert state["rounds"] == 6, f"gave up after {state['rounds']} rounds with loops still in hand"
 
 
-def test_a_first_round_that_cannot_film_still_fails():
-    """The recovery is for a board that FOLLOWS an accepted one. A solve that never interacted has
-    nothing to protect, and swallowing its failure would hide a widget that never films."""
-    solver, state = _driver(rounds_before_blank=0, solved_after=True, max_stale=0)
+def test_a_proven_animated_board_that_will_not_film_is_filmed_again():
+    """It keeps its animated verdict, so the next round films it rather than answering it as a still."""
+    solver, state = _driver(rounds_before_blank=1, solved_after=False, raises=AnimatedChallengeError)
+    with pytest.raises(CaptchaSolveError):
+        solver._solve_impl(object(), _now(), [])
+    assert state["rounds"] == 6
+
+
+def test_a_board_that_will_not_film_with_recording_off_is_a_hard_stop():
+    """A caller who switched recording off asked for animated boards to be refused, and gets that at once."""
+    solver, state = _driver(rounds_before_blank=0, solved_after=False, raises=AnimatedChallengeError)
+    solver.config.video_solve_enabled = False
     with pytest.raises(AnimatedChallengeError):
         solver._solve_impl(object(), _now(), [])
-
-
-def test_a_genuine_animated_dead_end_is_still_a_failure():
-    """`NothingFilmedError` is the narrow case. A board that never settles and cannot be solved from
-    keyframes is a real dead end, and must not be quietly retried into the loop ceiling."""
-    solver, state = _driver(rounds_before_blank=1, solved_after=True, raises=AnimatedChallengeError)
-    with pytest.raises(AnimatedChallengeError):
-        solver._solve_impl(object(), _now(), [])
-
-
-def test_the_narrow_error_is_a_kind_of_the_broad_one():
-    """Callers catching AnimatedChallengeError must keep catching this; it is a recording failure."""
-    assert issubclass(NothingFilmedError, AnimatedChallengeError)
-
-
-# ── which of the two errors a failed film raises ────────────────────────────
-#
-# This is the line the fix turned on, and getting it backwards is not a small mistake: measured on
-# the gate, giving a PROVEN animated board the soft landing took hcaptcha_tile_flip_video and
-# hcaptcha_item_animal_never_touches from 3 solved and 10 keyframe calls to 0 and 0. The first
-# failed film spends `_animated_probe_done`, so every round after it is answered as a still, and the
-# gate's own verdict for it is "THE DRIVER NEVER ASKED ABOUT THE KEYFRAMES ... 0 keyframe calls, on
-# an animated fixture". A soft landing on the wrong branch is silent; the hard error is not.
+    assert state["rounds"] == 1
 
 
 def _solver_that_films_nothing(known_animated: bool):
@@ -125,18 +117,10 @@ def _solver_that_films_nothing(known_animated: bool):
     return solver
 
 
-def test_a_board_only_suspected_animated_gets_the_soft_landing():
-    """The prosopo shape: a still that did not solve, a speculative film, nothing to catch."""
-    solver = _solver_that_films_nothing(known_animated=False)
-    with pytest.raises(NothingFilmedError):
-        solver._record_keyframes(object())
-
-
-def test_a_board_proven_animated_still_fails_hard():
+def test_a_failed_film_keeps_the_boards_animated_verdict():
+    """Measured before: a failed film that dropped the verdict answered every later round as a still, and two video
+    types went from 3 solved and 10 keyframe calls to 0 and 0. The next round must film the board again."""
     solver = _solver_that_films_nothing(known_animated=True)
-    with pytest.raises(AnimatedChallengeError) as caught:
+    with pytest.raises(AnimatedChallengeError):
         solver._record_keyframes(object())
-    assert not isinstance(caught.value, NothingFilmedError), (
-        "a proven animated board took the soft landing; its next round answers as a still and the "
-        "keyframes are never asked about"
-    )
+    assert solver._known_animated is True

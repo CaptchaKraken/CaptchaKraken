@@ -52,6 +52,10 @@ export type PauseKind = (typeof PauseKind)[keyof typeof PauseKind];
 export const Outcome = { SOLVED: 'solved', FAILED: 'failed' } as const;
 export type Outcome = (typeof Outcome)[keyof typeof Outcome];
 
+/** What the vendor's own server answered a round: BLOCKED is a refusal to serve at all, not a wrong answer. */
+export const Verdict = { ACCEPTED: 'accepted', REJECTED: 'rejected', NEW_CHALLENGE: 'new-challenge', BLOCKED: 'blocked' } as const;
+export type Verdict = (typeof Verdict)[keyof typeof Verdict];
+
 /** Timing phases. Only INFERENCE and MOUSE are productive; everything else is waiting. */
 export const Phase = {
   INFERENCE: 'inference',

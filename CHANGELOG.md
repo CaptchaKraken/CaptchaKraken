@@ -3,6 +3,65 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [3.2.0] - 2026-09-30
+
+### Changed
+
+- **A solve gives up only when the vendor refuses to serve you, or when
+  `max_solve_loops` is spent.** A refused answer, a board that would not
+  screenshot, an answer the widget could not use, the same answer twice, a
+  second under-selection banner and a round that pressed nothing each ended the
+  solve early before, often with loops still in hand. Each now counts one loop,
+  pauses `stale_element_backoff_ms` / `staleElementBackoffMs`, and the next
+  round goes again. `UnsupportedChallengeError` is raised once every loop came
+  back unusable; a solve that runs out of loops says what its last failed round
+  was. The time budget, a closed page and hosted API refusals still end a solve
+  at once. `max_no_progress_rounds`, `max_stale_element_retries` and
+  `max_unsupported_resolves` (and their TypeScript twins) are deprecated and
+  ignored; they will be removed in 4.0.
+
+- **`solve()` waits for a widget the page has not drawn yet.** Calling it
+  straight after `goto(..., wait_until="domcontentloaded")` failed every time on
+  a demo page whose frames arrived a moment later. Detection now polls for up
+  to `detection_timeout_ms` / `detectionTimeoutMs` (default 15000) before
+  raising "no captcha", and that wait is not charged to the solve's time budget.
+  A page with no captcha at all now takes that long to say so; set it to `0` for
+  the old fail-fast behaviour.
+
+- **"No captcha" says why.** The error used to claim the vendor's markup had
+  changed whenever its code was loaded. It now says so only when a vendor frame
+  is on screen that no selector matches; loaded code with no widget is reported
+  as that.
+
+- **The npm package ships only what it runs**: the driver and the Python engine
+  source it installs. The engine's examples, Dockerfile and bytecode caches are
+  no longer in the tarball.
+
+### Added
+
+- **The vendor's own verdict decides each round.** Both drivers listen to the
+  page's network for the vendor's answer-check response and read whether the
+  round was accepted or rejected, a new board was dealt, or the vendor refused
+  to serve at all. An accepted verdict ends the solve; a rejected one counts the
+  loop; a refusal ends it with `VendorBlockedError` (Python) or an `Error`
+  saying so (TypeScript). Vendors whose answer is not readable are judged by
+  the page's done-signals, as before. The verdicts are on the result as
+  `SolveResult.verdicts` / `result.verdicts`.
+
+- **Outcome reports carry the vendor's verdict, the vendor and the site.** The
+  hosted API is told whether the vendor accepted the solve, and hosted requests
+  send `X-CK-Vendor` and `X-CK-Site` (the page's hostname only — never its path
+  or query). Neither can be overridden through `CAPTCHA_KRAKEN_EXTRA_HEADERS`.
+
+### Fixed
+
+- **A hosted outcome report that fails is reported, every time.** A 404 from
+  the hosted API used to switch outcome reporting off silently for the rest of
+  the process. It is now a warning on each failure; only a self-hosted endpoint,
+  which has no such route, switches reporting off. The TypeScript driver now
+  surfaces the same warnings and, like Python, stops asking a self-hosted
+  endpoint after its first 404.
+
 ## [3.1.0] - 2026-09-18
 
 ### Fixed

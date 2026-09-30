@@ -61,6 +61,13 @@ export interface PlaywrightFrame extends PlaywrightScope {
   ): Promise<unknown>;
 }
 
+/** A network response as Playwright and Puppeteer both shape it. */
+export interface PlaywrightResponse {
+  url(): string;
+  status(): number;
+  text(): Promise<string>;
+}
+
 /**
  * Structural on purpose: the package depends on no browser library, and the version skew between
  * playwright, patchright and camoufox-js makes a nominal import the wrong one for someone.
@@ -97,6 +104,14 @@ export interface PlaywrightPage extends PlaywrightScope {
   };
 
   isClosed?(): boolean;
+
+  /** Optional: where the vendor's own verdict is read. Without it every round is judged by the DOM. */
+  on?(event: 'response', listener: (response: PlaywrightResponse) => void): unknown;
+
+  off?(event: 'response', listener: (response: PlaywrightResponse) => void): unknown;
+
+  /** Optional: its hostname names the site on hosted requests. */
+  url?(): string;
 }
 
 export type Page = PlaywrightPage;

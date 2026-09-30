@@ -57,11 +57,24 @@ with sync_playwright() as p:
 ```
 
 Errors are typed, because they mean different things about the page:
-`NoCaptchaFoundError` (reCAPTCHA v3 / invisible — nothing to solve),
-`UnsupportedChallengeError` (a settled frame of a kind we don't handle), `AnimatedChallengeError` (an animated challenge we
-could not RECORD — note this no longer means "the challenge moves"; a moving
+`NoCaptchaFoundError` (no widget appeared within `detection_timeout_ms` —
+reCAPTCHA v3 / invisible, nothing to solve), `VendorBlockedError` (the vendor
+refused to serve this client at all), `UnsupportedChallengeError` (the model had
+no usable answer on any round), `AnimatedChallengeError` (an animated challenge
+we could not RECORD — note this no longer means "the challenge moves"; a moving
 challenge is recorded and solved from keyframes), and `CaptchaSolveError` for
-everything else.
+everything else, including every loop spent without a solve.
+
+A solve gives up only when the vendor refuses to serve the client or when
+`max_solve_loops` is spent; any other failed round counts a loop and the next
+one goes again. It also waits up to `detection_timeout_ms` (default 15 s) for a
+widget the page has not drawn yet, so you can call `solve()` straight after
+`goto(..., wait_until="domcontentloaded")`; that wait is not charged to
+`overall_solve_timeout_ms`. Where the vendor's answer-check response is
+readable, `result.verdicts` lists its answer to each round, and an accepted
+verdict is what ends the solve. `max_no_progress_rounds`,
+`max_stale_element_retries` and `max_unsupported_resolves` are still accepted
+but ignored since 3.2.0.
 
 Tune with `PageSolverConfig`. Its fields are the snake_cased names of the
 TypeScript `CaptchaKrakenConfig` keys, so a value tuned on one driver is
