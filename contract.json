@@ -1,6 +1,6 @@
 {
   "python": {
-    "version": "3.1.0",
+    "version": "3.2.0",
     "exports": [
       "ActionKind",
       "ActionPlanner",
@@ -26,6 +26,7 @@
       "PauseKind",
       "PromptFamily",
       "RetryMode",
+      "RoundVerdict",
       "SELECTORS",
       "SolveResult",
       "TouchBackend",
@@ -33,6 +34,7 @@
       "TypeAction",
       "Vendor",
       "VendorSelectors",
+      "Verdict",
       "WaitAction",
       "add_overlays_to_image",
       "solve_captcha",
@@ -58,6 +60,7 @@
       "board_paint_floor",
       "board_paint_poll_ms",
       "board_paint_timeout_ms",
+      "detection_timeout_ms",
       "element_screenshot_timeout_ms",
       "expert",
       "grid_load_poll_interval_ms",
@@ -106,7 +109,8 @@
       "final_mouse_position",
       "is_solved",
       "phases",
-      "token_usage"
+      "token_usage",
+      "verdicts"
     ],
     "config_functions": [
       "api_key",
@@ -231,6 +235,10 @@
       "python/src/captchakraken/page_solver.py",
       "python/src/captchakraken/planner.py"
     ],
+    "CAPTCHA_KRAKEN_SITE": [
+      "python/src/captchakraken/page_solver.py",
+      "python/src/captchakraken/planner.py"
+    ],
     "CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP": [
       "js/scripts/setup-python.js"
     ],
@@ -240,6 +248,10 @@
     "CAPTCHA_KRAKEN_STATE_DIR": [
       "mcp/src/credentials.ts",
       "python/src/captchakraken/config.py"
+    ],
+    "CAPTCHA_KRAKEN_VENDOR": [
+      "python/src/captchakraken/page_solver.py",
+      "python/src/captchakraken/planner.py"
     ],
     "CAPTCHA_LORA_ADAPTER": [
       "python/src/captchakraken/config.py"
@@ -393,7 +405,8 @@
         "dist",
         "NOTICE",
         "python",
-        "scripts",
+        "!python/**/__pycache__",
+        "scripts/setup-python.js",
         "AGENTS.md",
         "LICENSE"
       ],
@@ -427,6 +440,7 @@
       "SolveStage",
       "TouchscreenTouchBackend",
       "Vendor",
+      "Verdict",
       "fromPuppeteer",
       "isOneOf",
       "resolveHumanizer",
@@ -446,6 +460,7 @@
       "boardPaintFloor",
       "boardPaintPollMs",
       "boardPaintTimeoutMs",
+      "detectionTimeoutMs",
       "elementScreenshotTimeoutMs",
       "expert",
       "gridLoadPollIntervalMs",
@@ -498,7 +513,8 @@
       "finalMousePosition",
       "isSolved",
       "phases",
-      "tokenUsage"
+      "tokenUsage",
+      "verdicts"
     ],
     "error_codes": [
       "account_suspended",

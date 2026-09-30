@@ -177,7 +177,10 @@ def _report_outcome(args):
     try:
         from .planner import ActionPlanner
 
-        return {"reported": bool(ActionPlanner().report_outcome(args[0], Outcome(args[1]) == Outcome.SOLVED))}
+        planner = ActionPlanner()
+        reported = planner.report_outcome(args[0], Outcome(args[1]) == Outcome.SOLVED)
+        # `supported` false is the self-hosted 404, which tells the driver to stop spawning this.
+        return {"reported": bool(reported), "supported": planner.outcome_supported}
     except Exception as exc:
         return {"reported": False, "error": str(exc)}
 

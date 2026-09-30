@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { answerNeedsElementBox, isStaleHandleError } from './solver';
+import { answerNeedsElementBox, isClosedTargetError, isStaleHandleError } from './solver';
 
 test('a done-only answer needs no box', () => {
   assert.equal(answerNeedsElementBox([{ action: 'done' }]), false);
@@ -39,9 +39,15 @@ test('the shapes hCaptcha produces are still recognised', () => {
     'Timeout 3000ms exceeded',
     'element is not visible',
     'Element is not attached to the DOM',
-    'Target closed',
   ]) {
     assert.equal(isStaleHandleError(m), true, m);
+  }
+});
+
+test('a closed page is not a stale handle, in the words both engines use', () => {
+  for (const m of ['Target closed', 'Target page, context or browser has been closed', 'Session closed']) {
+    assert.equal(isClosedTargetError(m), true, m);
+    assert.equal(isStaleHandleError(m), false, m);
   }
 });
 

@@ -1,0 +1,117 @@
+{
+ "_about": "Answer-check responses shaped like the ones the vendors' public demo pages return, with every token, key and id replaced. Read by both ports' verdict tests.",
+ "cases": [
+  {
+   "name": "hCaptcha takes the answer",
+   "url": "https://api.hcaptcha.com/checkcaptcha/SITE-KEY/SYNTHETIC-KEY?s=SYNTHETIC",
+   "status": 200,
+   "body": "{\"pass\": true, \"generated_pass_UUID\": \"P1_SYNTHETIC-PASS\"}",
+   "vendor": "hcaptcha",
+   "verdict": "accepted"
+  },
+  {
+   "name": "hCaptcha refuses the answer",
+   "url": "https://api.hcaptcha.com/checkcaptcha/SITE-KEY/SYNTHETIC-KEY?s=SYNTHETIC",
+   "status": 200,
+   "body": "{\"pass\": false, \"c\": {\"type\": \"hsw\", \"req\": \"SYNTHETIC-PROOF\"}}",
+   "vendor": "hcaptcha",
+   "verdict": "rejected"
+  },
+  {
+   "name": "hCaptcha refuses to serve at all",
+   "url": "https://api.hcaptcha.com/checkcaptcha/SITE-KEY/SYNTHETIC-KEY",
+   "status": 429,
+   "body": "",
+   "vendor": "hcaptcha",
+   "verdict": "blocked"
+  },
+  {
+   "name": "hCaptcha deals a board, encrypted",
+   "url": "https://api.hcaptcha.com/getcaptcha/SITE-KEY",
+   "status": 200,
+   "body": "\u0000SYNTHETIC-CIPHERTEXT",
+   "vendor": "hcaptcha",
+   "verdict": "new-challenge"
+  },
+  {
+   "name": "hCaptcha answers something with no pass field",
+   "url": "https://api.hcaptcha.com/checkcaptcha/SITE-KEY/SYNTHETIC-KEY",
+   "status": 200,
+   "body": "{\"c\": {\"type\": \"hsw\"}}",
+   "vendor": null,
+   "verdict": null
+  },
+  {
+   "name": "reCAPTCHA takes the answer",
+   "url": "https://www.google.com/recaptcha/api2/userverify?k=SITE-KEY",
+   "status": 200,
+   "body": ")]}'\n[\"uvresp\", \"SYNTHETIC-TOKEN\", 1, 120, null, null, null, null, null, \"SYNTHETIC-CONTEXT\", null, 0]",
+   "vendor": "recaptcha",
+   "verdict": "accepted"
+  },
+  {
+   "name": "reCAPTCHA refuses the answer and deals the next board",
+   "url": "https://www.google.com/recaptcha/api2/userverify?k=SITE-KEY",
+   "status": 200,
+   "body": ")]}'\n[\"uvresp\", \"SYNTHETIC-CONTEXT\", 0, null, null, null, null, [\"rresp\", \"SYNTHETIC-CONTEXT\", null, 120, [\"pmeta\", [\"/m/synthetic\", null, 3, 3, 3, null, \"bus\"], null, [1, 3000]], \"dynamic\", null, null, null, \"SYNTHETIC\", null, null, \"SYNTHETIC\", null, null, null, 0, null, [null, [0, 10, 2]]], null, null, null, 0]",
+   "vendor": "recaptcha",
+   "verdict": "rejected"
+  },
+  {
+   "name": "reCAPTCHA deals a board",
+   "url": "https://www.google.com/recaptcha/api2/reload?k=SITE-KEY",
+   "status": 200,
+   "body": ")]}'\n[\"rresp\", \"SYNTHETIC-CONTEXT\", null, 120, [\"pmeta\", null], \"multicaptcha\"]",
+   "vendor": "recaptcha",
+   "verdict": "new-challenge"
+  },
+  {
+   "name": "reCAPTCHA replaces one tile, which is no verdict",
+   "url": "https://www.google.com/recaptcha/api2/replaceimage?k=SITE-KEY",
+   "status": 200,
+   "body": ")]}'\n[\"dresp\", \"SYNTHETIC\", [\"0000\"], null, [[\"pmeta\", [\"/m/synthetic\", null, 2, 4, 4]]], \"SYNTHETIC\"]",
+   "vendor": null,
+   "verdict": null
+  },
+  {
+   "name": "reCAPTCHA answers with a server error",
+   "url": "https://www.google.com/recaptcha/api2/userverify?k=SITE-KEY",
+   "status": 500,
+   "body": "",
+   "vendor": null,
+   "verdict": null
+  },
+  {
+   "name": "GeeTest takes the answer",
+   "url": "https://gcaptcha4.geetest.com/verify?callback=geetest_1&captcha_id=SYNTHETIC",
+   "status": 200,
+   "body": "geetest_1({\"status\": \"success\", \"data\": {\"lot_number\": \"SYNTHETIC\", \"result\": \"success\", \"fail_count\": 0, \"seccode\": {\"captcha_id\": \"SYNTHETIC\", \"lot_number\": \"SYNTHETIC\", \"pass_token\": \"SYNTHETIC\"}}})",
+   "vendor": "geetest",
+   "verdict": "accepted"
+  },
+  {
+   "name": "GeeTest refuses the answer",
+   "url": "https://gcaptcha4.geetest.com/verify?callback=geetest_2&captcha_id=SYNTHETIC",
+   "status": 200,
+   "body": "geetest_2({\"status\": \"success\", \"data\": {\"lot_number\": \"SYNTHETIC\", \"result\": \"fail\", \"fail_count\": 1, \"payload\": \"SYNTHETIC\"}})",
+   "vendor": "geetest",
+   "verdict": "rejected"
+  },
+  {
+   "name": "GeeTest deals a board",
+   "url": "https://gcaptcha4.geetest.com/load?callback=geetest_3&captcha_id=SYNTHETIC",
+   "status": 200,
+   "body": "geetest_3({\"status\": \"success\", \"data\": {\"lot_number\": \"SYNTHETIC\", \"captcha_type\": \"slide\"}})",
+   "vendor": "geetest",
+   "verdict": "new-challenge"
+  },
+  {
+   "name": "A page's own traffic is not read",
+   "url": "https://example.com/api/checkout",
+   "status": 200,
+   "body": "{\"pass\": true}",
+   "vendor": null,
+   "verdict": null
+  }
+ ]
+}

@@ -10,6 +10,7 @@ const RESULT: SolveResult = {
   isSolved: true,
   finalMousePosition: { x: 0, y: 0 },
   tokenUsage: { modelName: 'fake', inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, estimatedCost: 0 },
+  verdicts: [],
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

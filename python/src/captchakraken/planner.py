@@ -63,6 +63,12 @@ _CLIENT_ENV = "CAPTCHA_KRAKEN_CLIENT"
 # One id per solve lets the gateway cap an attempt's billable rounds.
 _SESSION_HEADER = "X-CK-Session"
 _SESSION_ENV = "CAPTCHA_KRAKEN_SESSION"
+# Which vendor and which site a hosted solve was for, so the outcome ledger can say where solves fail. The site is
+# a hostname only: a path or query can carry a user's own data.
+_VENDOR_HEADER = "X-CK-Vendor"
+_VENDOR_ENV = "CAPTCHA_KRAKEN_VENDOR"
+_SITE_HEADER = "X-CK-Site"
+_SITE_ENV = "CAPTCHA_KRAKEN_SITE"
 
 # On by default; `captureOptOut` is the server half. Tier 3 sets it to 0 for ~100 solves a run.
 _REPORT_OUTCOME_ENV = "CAPTCHA_REPORT_OUTCOME"
@@ -70,10 +76,14 @@ _REPORT_OUTCOME_ENV = "CAPTCHA_REPORT_OUTCOME"
 # Extra headers may not rewrite these: pinning one X-CK-Session forever would escape the per-attempt billing cap.
 _EXTRA_HEADERS_ENV = "CAPTCHA_KRAKEN_EXTRA_HEADERS"
 _PROTECTED_HEADERS = frozenset(
-    {"authorization", "content-type", _CLIENT_HEADER.lower(), _SESSION_HEADER.lower()}
+    h.lower() for h in ("authorization", "content-type", _CLIENT_HEADER, _SESSION_HEADER, _VENDOR_HEADER, _SITE_HEADER)
 )
 
 _HEADER_VALUE_MAX = 128
+
+
+def _warn(message: str) -> None:
+    print(f"[captchakraken] warning: {message}", file=sys.stderr, flush=True)
 
 
 _VALID_HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
@@ -106,8 +116,11 @@ def _extra_headers(raw: str) -> Dict[str, str]:
     return out
 
 
-def routing_headers(env=None) -> Dict[str, str]:
-    """Each header is derived on its own: a malformed priority must not drop the attribution headers and understate a partner's revenue share."""
+def routing_headers(env=None, hosted: bool = False) -> Dict[str, str]:
+    """Each header is derived on its own: a malformed priority must not drop the attribution headers and understate a partner's revenue share.
+
+    Vendor and site go to the hosted API only; a self-hosted endpoint has no ledger to read them.
+    """
     env = os.environ if env is None else env
     headers: Dict[str, str] = {}
 
@@ -118,7 +131,10 @@ def routing_headers(env=None) -> Dict[str, str]:
         except ValueError:
             pass
 
-    for header, var in ((_CLIENT_HEADER, _CLIENT_ENV), (_SESSION_HEADER, _SESSION_ENV)):
+    attribution = ((_CLIENT_HEADER, _CLIENT_ENV), (_SESSION_HEADER, _SESSION_ENV))
+    if hosted:
+        attribution += ((_VENDOR_HEADER, _VENDOR_ENV), (_SITE_HEADER, _SITE_ENV))
+    for header, var in attribution:
         value = _clean_header_value(env.get(var) or "")
         if value:
             headers[header] = value
@@ -203,7 +219,7 @@ class ActionPlanner:
             prompts.route(_prompt_key, None, pin=self.expert)
         self._server_ensured = False
         self._http = requests.Session()
-        self._outcome_supported = True
+        self.outcome_supported = True
 
     def _model_for(self, family: Optional[PromptFamily]) -> str:
         if not self.experts:
@@ -214,11 +230,13 @@ class ActionPlanner:
     _OUTCOME_TIMEOUT_S = 3.0
 
     def report_outcome(self, session_id: Optional[str], solved: bool) -> bool:
-        """A 404 disables it for the planner's lifetime: a self-hosted vLLM has no /solve-outcome."""
-        if not session_id or not self._outcome_supported:
+        """A 404 from a self-hosted endpoint disables it for the planner's lifetime, since vLLM has no /solve-outcome.
+        From the hosted API every failure is a fault and is warned about every time, never silently switched off."""
+        if not session_id or not self.outcome_supported:
             return False
         if os.getenv(_REPORT_OUTCOME_ENV, "1") == "0":
             return False
+        hosted = config.is_hosted_endpoint(self.base_url)
         url = f"{self.base_url}{self._OUTCOME_PATH}"
         try:
             resp = self._http.post(
@@ -226,18 +244,21 @@ class ActionPlanner:
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
+                    **routing_headers(hosted=hosted),
                 },
                 json={"session": session_id, "solved": bool(solved)},
                 timeout=self._OUTCOME_TIMEOUT_S,
             )
         except Exception as exc:
-            self._log(f"outcome report failed: {exc}")
+            (_warn if hosted else self._log)(f"outcome report failed: {exc}")
             return False
-        if resp.status_code == 404:
-            self._outcome_supported = False
+        if resp.status_code == 404 and not hosted:
+            self.outcome_supported = False
             self._log("outcome reporting: endpoint has no /solve-outcome; disabled")
             return False
         ok = 200 <= resp.status_code < 300
+        if not ok and hosted:
+            _warn(f"outcome report for session {session_id} was refused: HTTP {resp.status_code} from {url}")
         self._log(f"outcome report {session_id} solved={solved} -> {resp.status_code}")
         return ok
 
@@ -292,7 +313,7 @@ class ActionPlanner:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            **routing_headers(),
+            **routing_headers(hosted=config.is_hosted_endpoint(self.base_url)),
         }
 
         if not self._server_ensured:

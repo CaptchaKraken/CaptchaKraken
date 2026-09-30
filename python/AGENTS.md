@@ -71,10 +71,15 @@ module docstring of `captchakraken/cli.py` lists every mode with its arguments.
 ## 4. Errors
 
 `PageSolver.solve()` raises from `captchakraken.page_solver`:
-`NoCaptchaFoundError` (no interactive widget — usually not a failure),
-`UnsupportedChallengeError`, `AnimatedChallengeError` (the challenge could not
-be *recorded*), `PageClosedError`, and `CaptchaSolveError`, which is the base
-class of the other four — catch it last or it swallows them. The TypeScript
+`NoCaptchaFoundError` (no interactive widget appeared within
+`detection_timeout_ms` — usually not a failure), `VendorBlockedError` (the
+vendor refused to serve this client at all), `UnsupportedChallengeError`,
+`AnimatedChallengeError` (the challenge could not be *recorded*),
+`PageClosedError`, and `CaptchaSolveError`, which is the base class of the
+other five — catch it last or it swallows them. Apart from a vendor refusal, a
+closed page and the time budget, a solve only gives up once every one of
+`max_solve_loops` has been spent. `result.verdicts` holds the vendor's own
+answer to each round where its answer-check response is readable. The TypeScript
 port raises none of these; it exports one error class and throws plain `Error`
 otherwise.
 

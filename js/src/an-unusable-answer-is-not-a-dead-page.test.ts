@@ -1,8 +1,8 @@
 // An answer with nothing to execute is not proof the page is stuck.
 //
-// The throw exists for a driver that cannot act at all — no widget, no controls, nothing to press. An answer
-// the driver could not USE is a different thing, and on an animated board it is exactly what a still expert
-// returns when the board is not a still.
+// A round that executes nothing counts one loop, and the loops are its only bound. An answer the driver could
+// not USE is not a dead page: on an animated board it is exactly what a still expert returns when the board is
+// not a still, so the round after it is armed for a recording.
 //
 // Measured on the hosted arms, 2026-09-17: an animated hCaptcha board came back as
 // `{"action": "drag", "source_bounding_box": null, ...}`, the driver logged "slide action, but the widget has
@@ -31,9 +31,10 @@ function driver(barren: number, videoSolveEnabled = true) {
     speculativeBurstEnabled: false,
     maxSolveLoops: 4,
     postSolveOutcomeTimeoutMs: 60,
+    postSolveDelayMs: 1,
+    staleElementBackoffMs: 0,
     videoSolveEnabled,
   });
-  const armed: boolean[] = [];
   let round = 0;
 
   solver.answerBox = async () => null;
@@ -52,42 +53,35 @@ function driver(barren: number, videoSolveEnabled = true) {
   solver.shot = async (_el: any, dest: string) => fs.writeFileSync(dest, 'board');
   solver.getSolution = async () => ({ actions: [], token_usage: [] });
   solver.getAnimatedSolution = async () => ({ actions: [], token_usage: [] });
-  // What the loop is really asked each round: was the second look armed going into it?
-  const shouldRetry = solver.shouldRetryAsAnimated.bind(solver);
-  solver.shouldRetryAsAnimated = (source: any) => {
-    const fires = shouldRetry(source);
-    armed.push(fires);
-    return fires;
-  };
   // Every round answers with nothing until `barren` is spent.
   solver.solveSingle = async () => {
     round++;
     return { didInteract: round > barren, tokenUsage: [] };
   };
-  return { solver, armed, rounds: () => round };
+  return { solver, rounds: () => round };
 }
 
 test('an answer the widget cannot take buys the recording path a round', async () => {
   const { solver, rounds } = driver(1);
-  await solver.solveImpl({}).catch((e: Error) => {
-    assert.ok(!/performed no interactions/.test(e.message),
-      'the solve was abandoned on an answer the widget could not take');
-  });
+  await solver.solveImpl({}).catch(() => {});
   assert.ok(rounds() >= 2, `the driver gave up after ${rounds()} round(s) instead of looking again`);
+  assert.equal(solver.repeatedAnswerSeen || solver.animatedProbeDone, true, 'the round after it was not armed for a recording');
 });
 
-test('a page that never takes an answer still gives up', async () => {
+test('a page that never takes an answer gives up when the loops are spent', async () => {
   const { solver, rounds } = driver(99);
   let message = '';
   await solver.solveImpl({}).catch((e: Error) => { message = e.message; });
+  assert.match(message, /after 4 solve loops/);
   assert.match(message, /performed no interactions/);
-  assert.equal(rounds(), 2, `gave the recording path ${rounds() - 1} rounds, not one`);
+  assert.equal(rounds(), 4, `used ${rounds()} of 4 loops`);
 });
 
-test('a caller with recording off gets the old behaviour', async () => {
+test('a caller with recording off never arms a recording', async () => {
   const { solver, rounds } = driver(99, false);
   let message = '';
   await solver.solveImpl({}).catch((e: Error) => { message = e.message; });
   assert.match(message, /performed no interactions/);
-  assert.equal(rounds(), 1, 'recording is off; there is no second look to buy');
+  assert.equal(rounds(), 4);
+  assert.equal(solver.repeatedAnswerSeen, false, 'recording is off; there is no second look to buy');
 });

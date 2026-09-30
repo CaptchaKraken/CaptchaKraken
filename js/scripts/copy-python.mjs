@@ -11,19 +11,16 @@ if (!existsSync(src)) {
   process.exit(1)
 }
 
-const SKIP = new Set([
-  '.venv', '__pycache__', 'dist', 'build', '.pytest_cache', '.ruff_cache', 'tests',
-  'coverage', 'htmlcov', '.nyc_output', 'coverage.xml', 'lcov.info',
-
-  'latestDebugRun',
-])
+// What `pip install` of the bundled engine reads, and nothing else: the npm package is the JS driver, and the
+// engine's examples, tests and Dockerfile are the Python package's own business.
+const SHIPPED = ['pyproject.toml', 'README.md', 'LICENSE', 'NOTICE', 'AGENTS.md', 'src']
+const SKIP = new Set(['__pycache__', '.pytest_cache', '.ruff_cache'])
 
 rmSync(dest, { recursive: true, force: true })
-cpSync(src, dest, {
-  recursive: true,
-  filter: (p) =>
-    !p
-      .split(/[\\/]/)
-      .some((seg) => SKIP.has(seg) || seg.endsWith('.egg-info') || seg.startsWith('.coverage')),
-})
+for (const entry of SHIPPED) {
+  cpSync(resolve(src, entry), resolve(dest, entry), {
+    recursive: true,
+    filter: (p) => !p.split(/[\\/]/).some((seg) => SKIP.has(seg) || seg.endsWith('.egg-info')),
+  })
+}
 console.log('[copy-python] bundled python/ engine -> js/python/')

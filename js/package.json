@@ -1,6 +1,6 @@
 {
   "name": "captchakraken",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Captcha solver for Playwright and Puppeteer. Finds the captcha, reads the puzzle with a fine-tuned Qwen3.5-9B vision model, and clicks, drags, slides or types through to a token \u2014 reCAPTCHA, GeeTest, NetEase Yidun, Tencent, Lemin, Prosopo, Turnstile and distorted text. Hosted API or self-hosted.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,7 +8,8 @@
     "dist",
     "NOTICE",
     "python",
-    "scripts",
+    "!python/**/__pycache__",
+    "scripts/setup-python.js",
     "AGENTS.md",
     "LICENSE"
   ],
