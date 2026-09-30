@@ -3,12 +3,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CaptchaKrakenSolver } from './solver';
+import { photographsItself } from './fake-dom.test';
 
 const MAX_STEP_SNAPSHOT_MS = 3000;
 
 function seen(config: Record<string, any> = {}) {
   const shots: any[] = [];
-  const solver: any = new CaptchaKrakenSolver({ onStep: async () => {}, ...config });
+  const solver: any = photographsItself(new CaptchaKrakenSolver({ onStep: async () => {}, ...config }));
   const element = { screenshot: async (opts: any) => { shots.push(opts); } };
   return { solver, element, shots };
 }
@@ -32,7 +33,7 @@ test('the caller can still size it', async () => {
 });
 
 test('no observer, no snapshot', async () => {
-  const solver: any = new CaptchaKrakenSolver({});
+  const solver: any = photographsItself(new CaptchaKrakenSolver({}));
   const shots: any[] = [];
   await solver.emitStep({ screenshot: async (o: any) => { shots.push(o); } },
     'initial', 'x', 'unknown', 'challenge', 1);

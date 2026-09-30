@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CaptchaKrakenSolver } from './solver';
+import { photographsItself } from './fake-dom.test';
 
 const BOX = { x: 0, y: 0, width: 340, height: 400 };
 
@@ -13,7 +14,7 @@ const TRUE_PIECE_W = 80;
 const DIFF_PIECE_W = 63;
 
 async function runSlide({ pieceInDom }: { pieceInDom: boolean }) {
-  const s: any = new CaptchaKrakenSolver({});
+  const s: any = photographsItself(new CaptchaKrakenSolver({}));
   const moves: number[] = [];
   let handleX = 40;
   const pieceStartCentre = TRUE_PIECE_W / 2;

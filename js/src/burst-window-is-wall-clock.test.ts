@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { resolve } from 'node:path';
 
 import { CaptchaKrakenSolver } from './solver';
+import { photographsItself } from './fake-dom.test';
 
 const FLOOR_MS = 500;
 const CEILING_MS = 1500;
@@ -25,11 +26,11 @@ function slowCamera(screens: string[]) {
 }
 
 function solver() {
-  return new CaptchaKrakenSolver({
+  return photographsItself(new CaptchaKrakenSolver({
     videoBurstDurationMs: FLOOR_MS,
     videoBurstMaxMs: CEILING_MS,
     videoBurstFps: 10,
-  }) as any;
+  })) as any;
 }
 
 test('a still board does not hold the burst longer than the floor', async () => {

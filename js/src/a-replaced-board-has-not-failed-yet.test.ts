@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { CaptchaKrakenSolver } from './solver';
+import { photographsItself } from './fake-dom.test';
 
 const BOX = { x: 0, y: 0, width: 100, height: 100 };
 const WIDGET = {
@@ -22,13 +23,13 @@ const WIDGET = {
 
 /** A still board every round; the first one turns up evidence that arms the second look. */
 function stillBoards(freshBoards: boolean) {
-  const solver: any = new CaptchaKrakenSolver({
+  const solver: any = photographsItself(new CaptchaKrakenSolver({
     videoBurstDurationMs: 120,
     videoBurstFps: 50,
     speculativeBurstEnabled: false,
     maxSolveLoops: 3,
     postSolveOutcomeTimeoutMs: 60,
-  });
+  }));
   const probed: boolean[] = [];
   let frame = 0;
   let answer = 0;
@@ -41,6 +42,8 @@ function stillBoards(freshBoards: boolean) {
   solver.captchaFrameChangedSince = async () => false;
   solver.executeClick = async () => {};
   solver.emitStep = async () => {};
+  // The pointer leaving the board before it is judged has tests of its own; these fakes have no viewport.
+  solver.stepOffTheBoard = async () => {};
   solver.detectCaptcha = async () => WIDGET;
   solver.hasInteractiveWidgetInDom = async () => false;
   solver.bannerKind = async () => null;

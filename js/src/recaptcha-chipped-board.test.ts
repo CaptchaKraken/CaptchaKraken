@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CaptchaKrakenSolver } from './solver';
+import { photographsItself } from './fake-dom.test';
 
 const GRID = [
   [0, 0, 100, 100], [100, 0, 200, 100], [200, 0, 300, 100],
@@ -21,11 +22,11 @@ const DONE = { action: 'done' };
 interface Log { rounds: number; clicked: any[]; waits: number; submits: number; }
 
 function driver(states: any, answers: any[]): { solver: any; log: Log } {
-  const solver: any = new CaptchaKrakenSolver({
+  const solver: any = photographsItself(new CaptchaKrakenSolver({
     recaptchaFadeOnsetGraceMs: 60,
     recaptchaDynamicFadePollMs: 1,
     recaptchaDynamicFadeWaitMs: 20,
-  });
+  }));
   const log: Log = { rounds: 0, clicked: [], waits: 0, submits: 0 };
 
   solver.waitForGridCellsLoaded = async () => true;

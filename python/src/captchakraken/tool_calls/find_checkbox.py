@@ -37,6 +37,10 @@ def find_checkbox(image_path: str) -> Optional[Tuple[int, int, int, int]]:
         if not (0.001 * image_area < area < 0.05 * image_area):
             continue
 
+        # Every checkbox widget puts its box at the left; a square on the right is a logo or a badge.
+        if x + w / 2 > width / 2:
+            continue
+
         contour_area = cv2.contourArea(cnt)
         extent = contour_area / area
         if extent < 0.8:

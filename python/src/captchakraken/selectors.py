@@ -26,6 +26,8 @@ class VendorSelectors:
     response: Optional[str] = None
     # Inside the checkbox frame: the box shows accepted. Demo pages do not always fill `response`.
     checked: Optional[str] = None
+    # Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph.
+    box: Sequence[str] = ()
     # On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).
     accepted: Optional[str] = None
     # Inside the challenge frame: a new round has painted, with text.
@@ -55,6 +57,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',),
         response='[name="g-recaptcha-response"]',
         checked=".recaptcha-checkbox-checked",
+        box=("#recaptcha-anchor",),
         fresh=".rc-imageselect-instructions, #rc-imageselect",
         submit=("#recaptcha-verify-button",),
         banners=(
@@ -72,6 +75,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         checkbox=('iframe[src*="hcaptcha"][src*="frame=checkbox"]',),
         response='[name="h-captcha-response"]',
         checked='#checkbox[aria-checked="true"]',
+        box=("#checkbox",),
         fresh=".prompt-text",
         images=(".task-image .image", ".task .image", ".challenge-example img", ".image-wrapper img"),
         submit=(".button-submit",),

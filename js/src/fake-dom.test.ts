@@ -29,6 +29,16 @@ interface Options {
   unparsable?: string[];
 }
 
+/**
+ * For tests about what the driver does with a picture rather than how it takes one: each fake element photographs
+ * itself. The viewport capture has tests of its own.
+ */
+export function photographsItself<T>(solver: T): T {
+  (solver as any).shot = (el: PlaywrightElementHandle, path: string, timeout?: number, animations?: 'disabled' | 'allow') =>
+    el.screenshot({ path, timeout, animations });
+  return solver;
+}
+
 const parts = (selector: string): string[] => (selector.startsWith('xpath=') ? [selector] : selector.split(',').map((s) => s.trim()));
 
 function handleOf(node: FakeNode, opts: Options): FakeHandle {

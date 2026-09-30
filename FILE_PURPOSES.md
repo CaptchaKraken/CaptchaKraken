@@ -142,6 +142,7 @@ answers with a frame number the driver then waits for on screen.
 | `js/src/model-name.ts` | Which served adapter name this client asks for — the same answer the Python port gives, because the name selects the prompt generation. |
 | `js/src/humanize.ts` | How the driver moves: one pluggable object per input device — mouse, mobile touch (over CDP, Appium or a Playwright touchscreen), or none. |
 | `js/src/slide-geometry.ts` | The algebra behind a puzzle-piece slider: where to drag the handle so the piece lands in the gap, at any device pixel ratio. |
+| `js/src/png.ts` | Cutting the widget out of a whole-viewport PNG, with nothing but `node:zlib`: every capture is taken unclipped, because a clipped one makes a headed browser repaint the page. |
 | `js/src/playwright-types.ts` | Minimal structural `Page`, `Frame`, `Locator` and `ElementHandle` types, defined here rather than imported, so the package depends on no browser library and accepts any Playwright-compatible one. |
 | `js/src/puppeteer-adapter.ts` | `fromPuppeteer()`: translates the handful of methods Puppeteer names differently onto that structural surface, and builds a Playwright-shaped `Locator` over Puppeteer's `$$`. |
 | `js/src/timing.ts` | Where one solve's wall clock went, by phase. |
@@ -157,6 +158,9 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/contract.test.ts` | The JS half of `contract.json`, and the parity between the two ports. Known divergences are pinned so the list can only shrink deliberately; a new one fails the build. |
 | `js/src/limits.test.ts` | The `5 < 8 < 10` round-cap ordering against the gateway — a type-check cannot notice a changed integer. |
 | `js/src/browser-compat.test.ts` | The compatibility claim, driven against **real** Playwright and Puppeteer, so a library renaming a method we call is caught rather than agreed with by a fake. |
+| `js/src/a-capture-never-clips-the-page.test.ts` | Every capture is one unclipped viewport screenshot cropped locally, at the page's device pixel ratio, scrolled into view once rather than per shot. |
+| `js/src/a-checkbox-is-clicked-not-watched.test.ts` | A checkbox is ticked from the DOM, or found on one capture by OpenCV when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `js/src/our-own-gesture-is-not-animation.test.ts` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `js/src/puppeteer-adapter.test.ts` | The adapter's translation layer, pinned difference by difference. |
 | `js/src/fake-dom.test.ts` | The one locator-shaped fake DOM the driver tests share: nodes name the selectors they answer to, so no test carries its own CSS matcher. |
 | `js/src/python-command.test.ts` | The client must not assume a `python` binary exists — on Debian-family systems there is only `python3`. |
@@ -192,7 +196,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/speculative-burst.test.ts` | Asking the model and watching the board can overlap, and the burst must not be wasted when they do. |
 | `js/src/burst-window-is-wall-clock.test.ts` | The burst's windows are budgets in milliseconds, so a camera slower than the interval must not spend more of the solve than a fast one. |
 | `js/src/step-observer-is-cheap.test.ts` | Watching a solve through `onStep` must not slow it down. |
-| `js/src/screenshot-timeouts.test.ts` | Every element screenshot names its own timeout instead of inheriting a default that can hang. |
+| `js/src/screenshot-timeouts.test.ts` | Every capture names its own timeout instead of inheriting a default that can hang. |
 | `js/src/scroll-into-view-is-bounded.test.ts` | Scrolling to an element cannot take thirty seconds. |
 | `js/src/empty-answer-submits.test.ts` | "None of these" is an answer, and it still has to be sent. |
 | `js/src/geetest-submit-button.test.ts` | GeeTest's submit control is a `div` that says OK, not a button. |
@@ -297,6 +301,9 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_blank_board_is_not_photographed.py` | The load gate in front of every inference screenshot, and the fences that stop it stalling a legitimately sparse puzzle. |
 | `python/tests/test_a_board_that_will_not_film_may_already_be_solved.py` | A burst that caught no frame is not a verdict about the board; it must not discard a board the vendor already took. |
 | `python/tests/test_a_board_that_never_repeats_is_animated.py` | A continuous animation never repeats and never settles; the burst calls it animated rather than a still. |
+| `python/tests/test_a_capture_never_clips_the_page.py` | Every capture is one unclipped viewport screenshot cropped locally, at the page's device pixel ratio, scrolled into view once rather than per shot. |
+| `python/tests/test_a_checkbox_is_clicked_not_watched.py` | A checkbox is ticked from the DOM, or found on one capture by OpenCV when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `python/tests/test_our_own_gesture_is_not_animation.py` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `python/tests/test_geetest_accept_is_a_signal.py` | GeeTest's accept banner is a solve; its refuse banner, and its closed popup wrapper, are not. |
 | `python/tests/test_a_missing_prompt_is_not_a_reason_to_wait.py` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
 | `python/tests/test_slide_reads_the_piece_off_the_page.py` | The slider prefers the piece element's own box over the pixel diff, and the diff's measured undershoot is pinned as the fallback's known cost. |

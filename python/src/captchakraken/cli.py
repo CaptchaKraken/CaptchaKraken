@@ -188,6 +188,7 @@ def _report_outcome(args):
 def _serve(args):
     """Persistent CV worker: one JSON request per stdin line, one JSON reply per stdout line."""
     from .image_processor import ImageProcessor
+    from .tool_calls.find_checkbox import find_checkbox
     from .tool_calls.find_grid import find_grid
 
     def handle(req):
@@ -209,6 +210,8 @@ def _serve(args):
             return match_region(req["ref"], req["live"], float(req["cx"]), float(req["cy"]), req.get("tolerance"))
         if cmd == "board-painted":
             return board_painted(req["image"], req.get("floor"), req.get("box"))
+        if cmd == "find-checkbox":
+            return find_checkbox(req["image"])
         if cmd == "track-piece":
             return track_piece(req["before"], req["after"], req.get("exclude"), req.get("travel") or 0.0)
         raise ValueError(f"unknown cmd: {cmd!r}")

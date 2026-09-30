@@ -94,6 +94,9 @@ export interface PlaywrightPage extends PlaywrightScope {
 
   viewportSize(): ViewportSize | null;
 
+  /** The whole viewport as a PNG: the driver's only capture, cropped locally, because a clipped one repaints the page. */
+  screenshot(options?: { timeout?: number; animations?: 'disabled' | 'allow' }): Promise<Buffer>;
+
   /** Optional: the mouse humanizer asks the window for its size when `viewportSize()` is null (camoufox). */
   evaluate?<R>(pageFunction: () => R): Promise<R>;
 

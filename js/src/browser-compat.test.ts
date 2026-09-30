@@ -1,10 +1,14 @@
 // Waits on a count rather than a fixed sleep: the sleep flaked under node --test parallelism.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { fromPuppeteer } from './puppeteer-adapter';
 import { watchPage } from './watcher';
 import { PlaywrightPage } from './playwright-types';
+import { CaptchaKrakenSolver } from './solver';
 
 function optional(name: string): any | null {
   try {
@@ -37,6 +41,7 @@ async function exerciseSurface(page: PlaywrightPage): Promise<void> {
   assert.ok((await target!.boundingBox())!.width > 0, 'boundingBox');
   await target!.scrollIntoViewIfNeeded();
   assert.ok((await target!.screenshot()).length > 0, 'element screenshot');
+  assert.ok((await page.screenshot({ timeout: 5000, animations: 'disabled' })).length > 0, 'viewport screenshot');
 
   const hidden = await page.locator('#hidden').elementHandle();
   assert.equal(await hidden!.isVisible(), false, 'isVisible (display:none)');
@@ -176,3 +181,46 @@ test('one watcher covers every navigation on the page', { skip: !playwright && '
     await browser.close();
   }
 });
+
+const CAPTURE_FIXTURE =
+  '<body style="margin:0;height:2400px;background:#fafafa;font:14px sans-serif">' +
+  '<div id="board" style="position:absolute;left:37.5px;top:61.25px;width:301.3px;height:151.6px;border:3px solid #222;' +
+  'background:linear-gradient(90deg,#c33,#3c3 40%,#33c)">a still board</div>' +
+  '<iframe id="framed" style="position:absolute;left:420px;top:40px;width:260px;height:180px;border:1px solid #888" ' +
+  'srcdoc="<body style=\'margin:0;background:#fe9\'><div style=\'margin:20px;width:90px;height:60px;background:#069\'></div>framed</body>"></iframe>' +
+  '<div id="below" style="position:absolute;left:50px;top:1500px;width:200px;height:120px;background:#9c6">below the fold</div>' +
+  '</body>';
+
+for (const dpr of [1, 2]) {
+  test(`the viewport crop is what an element screenshot shows (dpr ${dpr})`, { skip: !playwright && 'playwright not installed' }, async () => {
+    // The model-facing picture did not change when the capture did: same rect, same scale, same pixels. Compared
+    // decoded, through the page itself, because the two PNG encoders are free to differ byte for byte.
+    const browser = await playwright.chromium.launch({ headless: true, args: LAUNCH_ARGS });
+    try {
+      const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: dpr })).newPage();
+      await page.setContent(CAPTURE_FIXTURE);
+      await (await (await page.locator('#framed').elementHandle()).contentFrame()).waitForSelector('div');
+      const solver: any = new CaptchaKrakenSolver({});
+      solver.page = page;
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ck_crop_'));
+      for (const selector of ['#board', '#framed', '#below']) {
+        const handle = await page.locator(selector).elementHandle();
+        const ours = path.join(dir, 'ours.png');
+        await solver.shot(handle, ours);
+        const theirs = await handle.screenshot({ animations: 'disabled' });
+        const decode = (png: Buffer) => page.evaluate(async (b64: string) => {
+          const img = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+          const canvas = new OffscreenCanvas(img.width, img.height);
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(img, 0, 0);
+          return { w: img.width, h: img.height, px: Array.from(ctx.getImageData(0, 0, img.width, img.height).data) };
+        }, png.toString('base64'));
+        const [a, b] = [await decode(fs.readFileSync(ours)), await decode(theirs)];
+        assert.deepEqual([a.w, a.h], [b.w, b.h], `${selector} at dpr ${dpr}`);
+        assert.ok(a.px.every((v: number, i: number) => v === b.px[i]), `${selector} at dpr ${dpr}: the crop differs from the element screenshot`);
+      }
+    } finally {
+      await browser.close();
+    }
+  });
+}

@@ -9,9 +9,10 @@ import assert from 'node:assert/strict';
 
 import { CaptchaKrakenSolver, SOLVE_DEFAULTS } from './solver';
 import { SettleVerdict } from './kinds';
+import { photographsItself } from './fake-dom.test';
 
 function gated(opts: { mode: string | null; screens: number; matchAfter?: number }) {
-  const solver: any = new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 });
+  const solver: any = photographsItself(new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 }));
   solver.keyframeMode = opts.mode;
   solver.keyframeSteadyScreens = opts.screens;
   let probes = 0;
@@ -42,7 +43,7 @@ test('no steady screens, but the answer AREA comes back — then it waits', asyn
   for (const n of ['frame_01.png', 'frame_02.png', 'frame_03.png']) {
     fs.writeFileSync(path.join(dir, n), '');
   }
-  const solver: any = new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 });
+  const solver: any = photographsItself(new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 }));
   solver.keyframeSteadyScreens = 0;
   let probes = 0;
   solver.runCvTool = async (tool: string) => {
@@ -79,7 +80,7 @@ test('the gate polls until the screen comes round, then reports the match', asyn
 });
 
 test('the pointer is parked on the target BEFORE the gate opens', async () => {
-  const solver: any = new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 });
+  const solver: any = photographsItself(new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 }));
   solver.keyframeMode = 'even';
   solver.keyframeSteadyScreens = 3;
 
@@ -117,7 +118,7 @@ test('the wait budget can hold one worst-case cycle', () => {
 });
 
 test('the gate stops early once the widget is clearly a different board', async () => {
-  const solver: any = new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 });
+  const solver: any = photographsItself(new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 }));
   solver.keyframeMode = 'even';
   solver.keyframeSteadyScreens = 3;
   let probes = 0;
@@ -134,7 +135,7 @@ test('the gate stops early once the widget is clearly a different board', async 
 });
 
 test('a WRONG SCREEN of the right board is still waited for', async () => {
-  const solver: any = new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 });
+  const solver: any = photographsItself(new CaptchaKrakenSolver({ keyframeWaitPollMs: 1 }));
   solver.keyframeMode = 'even';
   solver.keyframeSteadyScreens = 3;
   let probes = 0;
@@ -148,7 +149,7 @@ test('a WRONG SCREEN of the right board is still waited for', async () => {
 });
 
 test('a cycling board is recorded after ONE round, not two', async () => {
-  const solver: any = new CaptchaKrakenSolver({});
+  const solver: any = photographsItself(new CaptchaKrakenSolver({}));
   let changes = 0;
   solver.captchaFrameChangedSince = async () => { changes += 1; return true; };
   solver.answerFor = async (_k: string, run: () => any) => run();
@@ -164,7 +165,7 @@ test('a cycling board is recorded after ONE round, not two', async () => {
 });
 
 test('a board we have already touched is not re-classified by filming it', async () => {
-  const solver: any = new CaptchaKrakenSolver({});
+  const solver: any = photographsItself(new CaptchaKrakenSolver({}));
   let filmed = 0;
   solver.startKeyframeBurst = () => {
     filmed += 1;
