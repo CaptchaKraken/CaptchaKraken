@@ -65,9 +65,11 @@ we could not RECORD — note this no longer means "the challenge moves"; a movin
 challenge is recorded and solved from keyframes), and `CaptchaSolveError` for
 everything else, including every loop spent without a solve.
 
-A solve gives up only when the vendor refuses to serve the client or when
-`max_solve_loops` is spent; any other failed round counts a loop and the next
-one goes again. It also waits up to `detection_timeout_ms` (default 15 s) for a
+A solve gives up when the vendor refuses to serve the client, when
+`max_solve_loops` is spent, or when `overall_solve_timeout_ms` (default 45 s)
+runs out; any other failed round counts a loop and the next one goes again. A
+solve that takes much longer reads as automated to the vendor, so raise the
+budget only for a page that needs it. It also waits up to `detection_timeout_ms` (default 15 s) for a
 widget the page has not drawn yet, so you can call `solve()` straight after
 `goto(..., wait_until="domcontentloaded")`; that wait is not charged to
 `overall_solve_timeout_ms`. Where the vendor's answer-check response is

@@ -7,8 +7,9 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Changed
 
-- **A solve gives up only when the vendor refuses to serve you, or when
-  `max_solve_loops` is spent.** A refused answer, a board that would not
+- **A solve gives up only when the vendor refuses to serve you, when
+  `max_solve_loops` is spent, or when `overall_solve_timeout_ms` /
+  `overallSolveTimeoutMs` (still 45 s by default) runs out.** A refused answer, a board that would not
   screenshot, an answer the widget could not use, the same answer twice, a
   second under-selection banner and a round that pressed nothing each ended the
   solve early before, often with loops still in hand. Each now counts one loop,
