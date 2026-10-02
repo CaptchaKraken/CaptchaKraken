@@ -97,7 +97,7 @@ captchakraken server start | stop | status | run
 ```bash
 # Solve an image/video: classify → find_grid → plan. Prints the click actions.
 captchakraken path/to/captcha.png
-captchakraken path/to/captcha.png --puzzle-source hcaptcha
+captchakraken path/to/captcha.png --puzzle-source recaptcha
 ```
 
 ```python
