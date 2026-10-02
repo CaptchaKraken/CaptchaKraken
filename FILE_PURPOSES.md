@@ -165,7 +165,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/model-name.test.ts` | The JS port asks for the same served model the Python port does. |
 | `js/src/expert-routing.test.ts` | The `expert` knob reaches the CLI, and is absent when unset. |
 | `js/src/humanize.test.ts` | Humanisation is an input device, not a realism dial: `mobile` never touches `page.mouse`. |
-| `js/src/vendor-hint-decides-the-expert.test.ts` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds the grid SHAPE GATE: hCaptcha must be named off the same `hcaptcha` substring its selectors use, or a click board can be read as a lattice. |
+| `js/src/vendor-hint-decides-the-expert.test.ts` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds the grid SHAPE GATE: a vendor must be named off the same substring its selectors use, or a click board can be read as a lattice. |
 | `js/src/idle-wander-stops-on-time.test.ts` | The cursor drift during inference stops when the thinking stops. |
 | `js/src/slide-geometry.test.ts` | Cross-port parity for the slider algebra. |
 | `js/src/slide-aims-before-it-corrects.test.ts` | The slider opens with one sweep at the slot and corrects from what the screen shows, instead of spending two nudges calibrating before the drag starts. |
@@ -347,7 +347,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_recaptcha_dynamic_more_is_not_an_error.py` | reCAPTCHA writes three different sentences into the same corner; only one of them is a rejection. |
 | `python/tests/test_vendor_gates_are_not_keyed_on_unknown.py` | The vendor hint is overloaded — an absent or unrecognised one must not switch off the gates it also selects. |
 | `python/tests/test_animated_solve_budget.py` | The overall timeout was sized for rounds, and recording an animated challenge is not a round. |
-| `python/tests/test_vendor_hint_decides_the_expert.py` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds `solver._grid_dims`: hCaptcha must be named off the same `hcaptcha` substring its selectors use, or a click board can be read as a lattice. |
+| `python/tests/test_vendor_hint_decides_the_expert.py` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds `solver._grid_dims`: a vendor must be named off the same substring its selectors use, or a click board can be read as a lattice. |
 | `python/tests/test_a_still_board_is_not_filmed.py` | A board is only recorded when it is actually moving; filming a still picture spent the budget for nothing. |
 | `python/tests/test_a_still_burst_stops_at_the_floor.py` | A burst of a board that is not cycling stops at its floor instead of running to the ceiling, and a stalled frame drops its slot rather than bunching. Exact counts, on a virtual clock. |
 | `python/tests/virtual_clock.py` | The clock the burst tests drive `page_solver` on: sleeping advances it and nothing else does, so a frame count is about the pacing code, not the runner. |
