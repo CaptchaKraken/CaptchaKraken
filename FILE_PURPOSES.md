@@ -100,6 +100,7 @@ answers with a frame number the driver then waits for on screen.
 | `docs/licensing.md` | A plain-English summary of what the licence permits building. |
 | `docs/performance.md` | Speed by device class, and why a real-world solve rate depends on more than the model. Points at `benchmarks.md` for every number. |
 | `docs/roadmap.md` | Shipped, in progress, planned. |
+| `docs/staying-current.md` | Why a persistent lockfile pins an old client despite `"latest"`, the deploy fix, and how to read the running version from error text. |
 | `docs/self-hosting.md` | Hardware requirements, running and managing a local server, and updating weights. |
 | `docs/usage.md` | The long-form client guide: every browser framework, the watcher, humanisation modes, the config surface, and migrating from v1. |
 | `docs/assets/logo-light.svg` | Logo for light backgrounds; the root README's default. |
