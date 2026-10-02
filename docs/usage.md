@@ -19,6 +19,9 @@ npm install captchakraken          # TypeScript browser driver
 pip install captchakraken          # Python engine + `captchakraken` CLI
 ```
 
+Deploying with a persistent `package-lock.json`? `npm install` alone keeps the
+old version. See [Staying current](./staying-current.md).
+
 Python one-liner (solve a screenshot → JSON click plan):
 
 ```bash
