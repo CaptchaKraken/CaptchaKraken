@@ -302,10 +302,10 @@ permanent supply-chain surface.
 
 ## What we'd love help with
 
-- More **real labeled samples** for under-represented hCaptcha grid prompts.
+- More **real labeled samples** for under-represented grid prompts.
 - Robustness on **reCAPTCHA 4×4** (our weakest grid type end-to-end).
-- Accuracy on the **freehand hCaptcha puzzles** — connect-the-path, the
-  numbered-line and missing-piece drags. Every hCaptcha family now routes and is
+- Accuracy on the **freehand drag/path puzzles** — connect-the-path, the
+  numbered-line and missing-piece drags. Every puzzle family now routes and is
   driven; these are the ones where the model is least reliable.
 - Smaller / faster quantizations so lower-VRAM hardware can self-host.
 

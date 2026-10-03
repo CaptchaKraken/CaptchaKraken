@@ -100,12 +100,12 @@ answers with a frame number the driver then waits for on screen.
 | `docs/licensing.md` | A plain-English summary of what the licence permits building. |
 | `docs/performance.md` | Speed by device class, and why a real-world solve rate depends on more than the model. Points at `benchmarks.md` for every number. |
 | `docs/roadmap.md` | Shipped, in progress, planned. |
+| `docs/staying-current.md` | Why a persistent lockfile pins an old client despite `"latest"`, the deploy fix, and how to read the running version from error text. |
 | `docs/self-hosting.md` | Hardware requirements, running and managing a local server, and updating weights. |
 | `docs/usage.md` | The long-form client guide: every browser framework, the watcher, humanisation modes, the config surface, and migrating from v1. |
 | `docs/assets/logo-light.svg` | Logo for light backgrounds; the root README's default. |
 | `docs/assets/logo-dark.svg` | Logo for dark backgrounds, picked by `prefers-color-scheme`. |
 | `docs/assets/logo-card.png` | Square raster logo, used by the npm, PyPI and MCP package READMEs, which cannot rely on relative paths. |
-| `docs/assets/demo/hcaptcha_grid.webp` | Animated still of an hCaptcha image-select solve, embedded in the package READMEs. |
 | `docs/assets/demo/recaptcha_4x4.webp` | The same, for a reCAPTCHA 4×4 grid. |
 | `docs/assets/demo/geetest_slide.webp` | The same, for a GeeTest slide jigsaw. |
 
@@ -165,7 +165,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/model-name.test.ts` | The JS port asks for the same served model the Python port does. |
 | `js/src/expert-routing.test.ts` | The `expert` knob reaches the CLI, and is absent when unset. |
 | `js/src/humanize.test.ts` | Humanisation is an input device, not a realism dial: `mobile` never touches `page.mouse`. |
-| `js/src/vendor-hint-decides-the-expert.test.ts` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds the grid SHAPE GATE: hCaptcha must be named off the same `hcaptcha` substring its selectors use, or a click board can be read as a lattice. |
+| `js/src/vendor-hint-decides-the-expert.test.ts` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds the grid SHAPE GATE: a vendor must be named off the same substring its selectors use, or a click board can be read as a lattice. |
 | `js/src/idle-wander-stops-on-time.test.ts` | The cursor drift during inference stops when the thinking stops. |
 | `js/src/slide-geometry.test.ts` | Cross-port parity for the slider algebra. |
 | `js/src/slide-aims-before-it-corrects.test.ts` | The slider opens with one sweep at the slot and corrects from what the screen shows, instead of spending two nudges calibrating before the drag starts. |
@@ -218,7 +218,6 @@ Runnable demos. Not published to npm.
 | `js/examples/withPuppeteer.ts` | The same, through the Puppeteer adapter. |
 | `js/examples/watchPlaywright.ts` | The watcher: install once, and captchas are solved as they appear. |
 | `js/examples/demoRecaptcha.ts` | End to end against Google's public reCAPTCHA v2 demo page. |
-| `js/examples/demoHcaptcha.ts` | End to end against hCaptcha's public demo page. |
 | `js/examples/demoSites.ts` | Several vendors in one browser run, with a printed comparison. |
 
 ## `mcp/` — the account MCP server (npm `captchakraken-mcp`)
@@ -348,7 +347,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_recaptcha_dynamic_more_is_not_an_error.py` | reCAPTCHA writes three different sentences into the same corner; only one of them is a rejection. |
 | `python/tests/test_vendor_gates_are_not_keyed_on_unknown.py` | The vendor hint is overloaded — an absent or unrecognised one must not switch off the gates it also selects. |
 | `python/tests/test_animated_solve_budget.py` | The overall timeout was sized for rounds, and recording an animated challenge is not a round. |
-| `python/tests/test_vendor_hint_decides_the_expert.py` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds `solver._grid_dims`: hCaptcha must be named off the same `hcaptcha` substring its selectors use, or a click board can be read as a lattice. |
+| `python/tests/test_vendor_hint_decides_the_expert.py` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds `solver._grid_dims`: a vendor must be named off the same substring its selectors use, or a click board can be read as a lattice. |
 | `python/tests/test_a_still_board_is_not_filmed.py` | A board is only recorded when it is actually moving; filming a still picture spent the budget for nothing. |
 | `python/tests/test_a_still_burst_stops_at_the_floor.py` | A burst of a board that is not cycling stops at its floor instead of running to the ceiling, and a stalled frame drops its slot rather than bunching. Exact counts, on a virtual clock. |
 | `python/tests/virtual_clock.py` | The clock the burst tests drive `page_solver` on: sleeping advances it and nothing else does, so a frame count is about the pacing code, not the runner. |
@@ -383,4 +382,3 @@ Runnable demos. Not published to PyPI.
 | `python/examples/watch_playwright.py` | The watcher: install once, and captchas are solved as they appear. |
 | `python/examples/with_local_gguf.py` | Solve one image against a local GGUF server (Ollama, LM Studio, llama.cpp): the shortest check that the endpoint, the model name and the prompt resolution are wired up, with no browser. |
 | `python/examples/demoRecaptcha.py` | The engine run against Google's public reCAPTCHA v2 demo page. |
-| `python/examples/demoHcaptcha.py` | The engine run against hCaptcha's public demo page. |

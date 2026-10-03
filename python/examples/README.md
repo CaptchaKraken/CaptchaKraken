@@ -1,16 +1,15 @@
 # Examples (Python)
 
-Two runnable demos that drive a real stealth browser
+A runnable demo that drives a real stealth browser
 ([camoufox](https://github.com/JWriter20/camoufox)) to a live captcha demo site,
-screenshot the challenge, run the **engine** on it, and print token speed /
+screenshots the challenge, runs the **engine** on it, and prints token speed /
 total time / outcome:
 
 | File | Site |
 |---|---|
 | `demoRecaptcha.py` | Google reCAPTCHA v2 demo |
-| `demoHcaptcha.py` | hCaptcha demo |
 
-> The Python port is the engine (detection + planner). These demos validate the
+> The Python port is the engine (detection + planner). This demo validates the
 > engine + model + server on a real challenge frame. Full click-replay and
 > multi-round verification in a live page are what the TypeScript port
 > (`captchakraken`) does end-to-end.
@@ -58,7 +57,6 @@ python examples/with_local_gguf.py path/to/text-captcha.png --text
 
 ```bash
 python examples/demoRecaptcha.py
-python examples/demoHcaptcha.py
 HEADLESS=0 python examples/demoRecaptcha.py    # watch the browser
 ```
 
@@ -74,7 +72,7 @@ HEADLESS=0 python examples/demoRecaptcha.py    # watch the browser
 ```
 
 `gen speed` = model output tokens ÷ solve seconds. Failure reasons the harness
-reports: unreachable vLLM server, an unsupported hCaptcha puzzle (drag/video),
+reports: unreachable vLLM server, a challenge type the solver does not handle,
 the challenge iframe never appearing, or the model returning no matching tiles.
 
 ## Playwright, and the auto-solver

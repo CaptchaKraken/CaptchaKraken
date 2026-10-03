@@ -34,9 +34,9 @@ wire up.
 | ⬜ Sunlight v1.1 | previous | 4-bit (AWQ) | ~9.1 GB | ~11 GB | [`Sunlight-AWQ-4bit`](https://huggingface.co/CaptchaKraken/Sunlight-AWQ-4bit) |
 | ⬜ Twilight v1.1 | previous | 8-bit (FP8) | ~14 GB | ~22 GB | [`Twilight-FP8`](https://huggingface.co/CaptchaKraken/Twilight-FP8) |
 
-**Take v1.2 unless you have a reason not to.** v1.1 was trained on reCAPTCHA and
-hCaptcha alone and will not attempt the other eight vendors, animated
-challenges or typed text — see [The models](../README.md#the-models).
+**Take v1.2 unless you have a reason not to.** v1.1 was trained on image-grid
+puzzles alone and will not attempt sliders, the other vendors v1.2 added,
+animated challenges or typed text — see [The models](../README.md#the-models).
 
 Serve either one directly — no `--enable-lora`, no adapter flags:
 

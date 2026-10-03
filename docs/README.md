@@ -15,6 +15,7 @@ guides. Start here.
 | [☁️ Hosted API](./hosted-api.md) | Sign in, keys, pricing, per-session billing, and every error code — the no-GPU path. |
 | [🖥️ Self-hosting](./self-hosting.md) | One-command install, model-size gate, server management, configuration, and **updating** (`captchakraken fetch`). |
 | [🧑‍💻 Usage](./usage.md) | Install both ports, the Python one-liner, all four browser frameworks (Playwright / Patchright / camoufox-js / Puppeteer), **how it moves** (mouse / mobile touch / none / your own), and migrating from v1. |
+| [🔄 Staying current](./staying-current.md) | Why `"latest"` plus a kept lockfile pins an old client, the one-line deploy fix, and how to tell which version is running. |
 | [⚙️ How it works](./how-it-works.md) | The detect → grid → click → verify pipeline, the OpenCV grid tracer, the stale-frame freshness guard, and solution dedup. |
 | [📊 Benchmarks](./benchmarks.md) | The canonical numbers — real captchas driven in a browser, and per-puzzle model accuracy on held-out real captures, with what each measures and why they differ. |
 | [⚡ Performance](./performance.md) | The memory-bandwidth speed model + per-device throughput, and IP-reputation guidance. |
@@ -30,8 +31,6 @@ CaptchaKraken detects the captcha, solves it, clicks, and verifies.
 | ✅ Checkbox / "I'm not a robot" | Works end-to-end |
 | ✅ **reCAPTCHA 3×3** (dynamic) | Works end-to-end |
 | ✅ **reCAPTCHA 4×4** (one-shot) | Works end-to-end |
-| ✅ **hCaptcha 3×3 image grid** | Works end-to-end |
-| ✅ **hCaptcha click / drag puzzles** | Full-puzzle model → pixel click/drag actions |
 | ✅ Cloudflare Turnstile | Works via the checkbox flow |
 | ✅ **GeeTest** (v3 + v4) | Slide, icon, nine, svg, gobang, iconcrush |
 | ✅ **NetEase Yidun** | Jigsaw, picture-click, icon-click |
@@ -39,7 +38,7 @@ CaptchaKraken detects the captcha, solves it, clicks, and verifies.
 | ✅ **Distorted text** | BotDetect, MTCaptcha, Yandex — read and typed, not clicked |
 | ✅ **Animated / video challenges** | Recorded (4 s @ 10 fps), cut into keyframes, solved as one multi-image prompt, then clicked once the widget returns to the chosen frame. The model half shipped with **v1.2**, which `setup.sh` installs and the hosted API serves |
 
-44 puzzle types across those 10 vendors. The per-type record — each puzzle
+44 puzzle types in all. The per-type record — each puzzle
 driven on the vendor's own demo page, with the attempts scored — is in the
 [main README](../README.md#watch-it-work).
 

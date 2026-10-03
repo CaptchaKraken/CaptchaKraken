@@ -73,8 +73,8 @@ semantic versioning; v2 is a major, **breaking** release.
   spots the repeat, and the next round re-asks on a longer film. That reuse was
   never bounded to the board it was cut from, so when the vendor dealt a
   DIFFERENT puzzle the plan survived it and the next animated round replayed the
-  previous board's coordinates onto the new one. Measured live against hCaptcha,
-  a keyframe answer cut from one board was pressed onto a board two deals later
+  previous board's coordinates onto the new one. Measured live on a vendor demo
+  page, a keyframe answer cut from one board was pressed onto a board two deals later
   — landing on the reference photo in the banner, then submitting, which with
   nothing selected reads as Skip. Six rounds could pass without a real attempt.
   The film, the animated verdict and the slice now end the moment a next round
@@ -152,7 +152,7 @@ semantic versioning; v2 is a major, **breaking** release.
 
 - **The debug-only CLI subcommands are gone:** `find-move`, `find-movable`,
   `is-empty-cell`, `is-cell-selected`, `is-cell-changing`, `wait-for-cell-loaded`
-  and `check-movement-batch`. Nothing in either driver called them. The hCaptcha
+  and `check-movement-batch`. Nothing in either driver called them. The grid
   "Move" pill detector (`move_indicator.py`) went with them.
 - **`trajectory.py` / `trajectory.ts` are gone.** Both humanizers call Cursory
   directly. The drag-overshoot redraw and the finger contact-wobble along a swipe
@@ -516,7 +516,7 @@ that had no way to succeed.
   puzzle types. 2500ms was being spent in full on every unsuccessful round,
   25.5s of one 66.1s solve.
 
-- **hCaptcha's image wait is bounded at 3s**, not 8 (`hcaptchaImagesTimeoutMs` /
+- **The image-select grid's image wait is bounded at 3s**, not 8 (`hcaptchaImagesTimeoutMs` /
   `hcaptcha_images_timeout_ms`). It is best-effort — the screenshot happens
   either way — so it should cost what a loading tile plausibly costs, not
   two-thirds of a whole solve.
@@ -580,7 +580,7 @@ that had no way to succeed.
   nothing when pressed.
 
 - **A readiness gate with nothing to check no longer reads as "not ready".**
-  The last clause asked whether hCaptcha's example image had loaded and returned
+  The last clause asked whether the challenge's example image had loaded and returned
   false when there was no example image at all, so a challenge with no tile
   grid, no canvas and no example polled out the full timeout and carried on
   regardless — 24.0s of a 45.2s solve, three times over. A gate can only report
@@ -600,8 +600,8 @@ that had no way to succeed.
   FREEZES infinite ones — right for a model-facing still, fatal for a recording.
   GeeTest's svg board came back as forty copies of one picture, the slicer
   honestly reported `mode=static`, and the solve went back to answering a single
-  still. The TS port has passed `allow` since it hit this first; hCaptcha hid it
-  there, because it animates in canvas and the flag does not touch canvas.
+  still. The TS port has passed `allow` since it hit this first; canvas-animated
+  boards hid it there, because the flag does not touch canvas.
 
 - **A widget that never renders reports "no captcha" again, not "still detected
   after N loops".** The render-wait cap was a flat 6 and a render wait consumes
@@ -659,7 +659,7 @@ that had no way to succeed.
   inference, which is what the old code paid every time.
 
 - **A photograph is not a selection badge.** `detect_selected_cells` runs BOTH
-  vendors' badge tests on every tile, so hCaptcha's — a small blue-teal disc
+  badge tests on every tile, so the teal one — a small blue-teal disc
   with a white glyph, top-right — was applied to reCAPTCHA boards too, and it
   was two pixel COUNTS and nothing else: >=8 teal-ish pixels anywhere in the
   corner patch, >=2 near-white pixels anywhere in the same patch. Blue sky with
@@ -736,7 +736,7 @@ that had no way to succeed.
   served `CaptchaKraken_v1.1` — has no text prompt and no slider clause, so a v1
   model is never asked for either answer. Text captchas now report
   `UnsupportedCaptchaError` naming that reason rather than clicking at random.
-- **Animated challenges are solved instead of skipped.** hCaptcha's "select the
+- **Animated challenges are solved instead of skipped.** Boards like "select the
   odd animal" (sprites cross-fading on independent cycles) and "unique motion
   pattern" (identical meshes, only the rotation differs) carry none of their
   answer in any single frame. The driver now records the widget for 4 s at 10 fps,
@@ -797,8 +797,8 @@ that had no way to succeed.
   not RECORD" — the element refused to screenshot, or `video_solve_enabled` is
   off. A moving challenge is no longer a failure.
 - The Python driver now runs the settle probe for `puzzle_source == "unknown"`
-  (GeeTest, Tencent, …) as well as hCaptcha. It never did, so an animated
-  non-hCaptcha widget was screenshotted mid-cycle and answered from whatever
+  (GeeTest, Tencent, …) as well as for the one vendor it already probed. It
+  never did, so an animated widget from any other vendor was screenshotted mid-cycle and answered from whatever
   single moment happened to be caught. reCAPTCHA is deliberately excluded: it has
   its own readiness gate and its grids are never animated.
 - `"unsupported"` mid-solve followed by a never-settling next round used to be
@@ -1002,7 +1002,7 @@ unless you deliberately set it.
 ## [2.2.0] — 2026-07-15
 
 ### Added
-- **Freshness guard — never act on a stale frame.** reCAPTCHA/hCaptcha fade
+- **Freshness guard — never act on a stale frame.** Grid vendors fade
   fresh tiles in over ~1s; if the frame changed *while the model was
   generating*, its answer described an "undeveloped" frame whose tiles no longer
   lined up. The solver now re-screenshots after every model query and diffs it
@@ -1074,17 +1074,17 @@ unless you deliberately set it.
   grids in memory — the CI guard for the core `find_grid` invariant.
 - **Demo recorder** (`tests/record_demos.spec.ts`) — drives a real browser
   against the live model, tags reCAPTCHA attempts 3×3 vs 4×4, skips/retries
-  out-of-scope hCaptcha puzzles, and records videos of successful solves plus a
+  out-of-scope puzzles, and records videos of successful solves plus a
   per-type solve-rate summary.
 
 ### Solver / model
 - Grid LoRA (CaptchaKraken's grid adapter) exact-tile accuracy on held-out
-  real data: reCAPTCHA 3×3 **94.7%**, hCaptcha 3×3 property **86.7%**,
+  real data: reCAPTCHA 3×3 **94.7%**, 3×3 property grids **86.7%**,
   reCAPTCHA 4×4 **76.2%** (overall **85.8%**).
 - reCAPTCHA dynamic 3×3 (multi-round in-place refresh) and 4×4 one-shot grids,
-  hCaptcha 3×3 property grids, and the checkbox / Turnstile flows are solved
-  end-to-end. Non-grid hCaptcha puzzles are detected and safely skipped.
+  3×3 property grids, and the checkbox / Turnstile flows are solved
+  end-to-end. Non-grid puzzles are detected and safely skipped.
 
 ### Coming soon
 - Hosted cloud API (no GPU required), smaller quantizations, and non-grid
-  hCaptcha puzzle support. See the README roadmap.
+  puzzle support. See the README roadmap.
