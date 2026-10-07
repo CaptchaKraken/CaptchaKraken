@@ -414,6 +414,30 @@ def experts(model: Optional[str]) -> Dict[PromptFamily, str]:
     return out
 
 
+#: Printed once when a hosted request names a model the endpoint no longer routes. The JS port prints the same
+#: text (`model-name.ts`, pinned by test_the_legacy_model_warning_is_one_text.py).
+LEGACY_MODEL_WARNING = ("The hosted API answers the model name '{model}' with an older model. Remove the model "
+                        "pin (CAPTCHA_LORA_NAME or the model option) to use the current one.")
+
+
+def routed_names() -> set:
+    """Every name a current client puts on the wire to the hosted API: each routing alias and its expert arms."""
+    out = set()
+    for alias in served_aliases():
+        if alias.startswith("_"):
+            continue
+        arms = experts(alias)
+        if arms:
+            out.add(alias)
+            out.update(arms.values())
+    return out
+
+
+def is_legacy_hosted_name(model: Optional[str]) -> bool:
+    """A name the hosted API serves with an older model: neither a routing alias nor one of its arms."""
+    return bool(model) and model not in routed_names()
+
+
 def route(model: Optional[str], family: Optional[PromptFamily], *,
           pin: Optional[str] = None) -> str:
     """An unknown pin raises (a benchmark that silently measured the generalist is a number nobody can catch); an unknown family degrades to the generalist."""

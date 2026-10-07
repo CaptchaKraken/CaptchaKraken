@@ -49,6 +49,9 @@ export interface PlaywrightScope {
 }
 
 export interface PlaywrightFrame extends PlaywrightScope {
+  /** Optional: its HOSTNAME alone is sent as X-CK-Widget-Host, the host the widget was served from. */
+  url?(): string;
+
   waitForSelector(
     selector: string,
     options?: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number },

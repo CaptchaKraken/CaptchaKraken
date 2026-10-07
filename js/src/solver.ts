@@ -29,7 +29,7 @@ import { DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS } from './limits';
 import { resolvePythonCommand } from './python-command';
 import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
 import { solveSlideGeometry, MIN_PIECE_PX, MAX_PIECE_FRACTION } from './slide-geometry';
-import { getBundledCliRoot, resolveLoraName } from './model-name';
+import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
 import { SELECTORS, VENDORS, VendorSelectors, WIDGET_PROBES, WidgetProbe, RESPONSE_SELECTORS, ACCEPTED_SELECTORS, SUBMIT_SELECTORS,
   TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS } from './selectors';
 
@@ -204,7 +204,7 @@ export function burstHangDeadlineMs(cfg: { videoBurstMaxMs?: number }): number {
 }
 
 /** The page's host alone: a path or query can carry a user's own data. */
-function hostname(page: Page): string | null {
+function hostname(page: { url?: () => string }): string | null {
   try {
     return new URL(page.url?.() ?? '').hostname.toLowerCase() || null;
   } catch {
@@ -254,6 +254,9 @@ export class CaptchaKrakenSolver {
   /** Which vendor and site this solve is for, sent to the hosted API; the site is a hostname only. */
   private solveVendor: Vendor | null = null;
   private solveSite: string | null = null;
+  /** The host the widget itself was served from (its iframe's); null for an inline widget. */
+  private solveWidgetHost: string | null = null;
+  private legacyModelWarned = false;
   private verdicts: VerdictLog | null = null;
   /** False once a self-hosted endpoint has answered 404: it has no outcome route to report to. */
   private outcomeSupported = true;
@@ -347,6 +350,7 @@ export class CaptchaKrakenSolver {
     this.page = page;
     this.solveVendor = null;
     this.solveSite = hostname(page);
+    this.solveWidgetHost = null;
     this.budget = new PhaseBudget();
     this.verdicts = null;
     let solvedForReport = false;
@@ -623,6 +627,9 @@ export class CaptchaKrakenSolver {
       ...(this.solveSessionId ? { CAPTCHA_KRAKEN_SESSION: this.solveSessionId } : {}),
       ...(this.solveVendor ? { CAPTCHA_KRAKEN_VENDOR: this.solveVendor } : {}),
       ...(this.solveSite ? { CAPTCHA_KRAKEN_SITE: this.solveSite } : {}),
+      ...(this.solveWidgetHost ? { CAPTCHA_KRAKEN_WIDGET_HOST: this.solveWidgetHost } : {}),
+      // This driver warns about a legacy model name itself, once; the engine it starts per round stays quiet.
+      CAPTCHA_KRAKEN_MODEL_WARNING: '0',
     };
   }
 
@@ -652,6 +659,7 @@ export class CaptchaKrakenSolver {
     const { el: captchaElement, vendor: puzzleSource, role: frameRole } = widget;
     this.solveVendor = puzzleSource;
     const frame = await captchaElement.contentFrame();
+    this.solveWidgetHost = frame ? hostname(frame) : null;
     const scope: Scope = frame ?? widget.at;
 
     if (frameRole === FrameRole.CHECKBOX) {
@@ -1170,8 +1178,13 @@ export class CaptchaKrakenSolver {
   /** The `--model` argv, or nothing: without VLLM_BASE_URL the CLI can see a credentials file this process cannot. */
   private modelName(cliRoot: string): string | undefined {
     const explicit = this.config.model ?? process.env.CAPTCHA_LORA_NAME;
-    if (explicit) return explicit;
-    return process.env.VLLM_BASE_URL ? this.loraName(cliRoot) : undefined;
+    const name = explicit || (process.env.VLLM_BASE_URL ? this.loraName(cliRoot) : undefined);
+    if (name && !this.legacyModelWarned && isHostedEndpoint(process.env.VLLM_BASE_URL)
+        && isLegacyHostedName(name, cliRoot)) {
+      this.legacyModelWarned = true;
+      console.error(`[captchakraken] ${LEGACY_MODEL_WARNING.replace('{model}', name)}`);
+    }
+    return name;
   }
 
   private resolveCli(): { cliRoot: string; py: string } {
