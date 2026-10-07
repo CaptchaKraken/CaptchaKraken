@@ -67,6 +67,9 @@ _SESSION_ENV = "CAPTCHA_KRAKEN_SESSION"
 # a hostname only: a path or query can carry a user's own data.
 _VENDOR_HEADER = "X-CK-Vendor"
 _VENDOR_ENV = "CAPTCHA_KRAKEN_VENDOR"
+# The host the widget itself was served from (its iframe's), so a failure can be reproduced against the same widget.
+_WIDGET_HOST_HEADER = "X-CK-Widget-Host"
+_WIDGET_HOST_ENV = "CAPTCHA_KRAKEN_WIDGET_HOST"
 _SITE_HEADER = "X-CK-Site"
 _SITE_ENV = "CAPTCHA_KRAKEN_SITE"
 
@@ -76,7 +79,8 @@ _REPORT_OUTCOME_ENV = "CAPTCHA_REPORT_OUTCOME"
 # Extra headers may not rewrite these: pinning one X-CK-Session forever would escape the per-attempt billing cap.
 _EXTRA_HEADERS_ENV = "CAPTCHA_KRAKEN_EXTRA_HEADERS"
 _PROTECTED_HEADERS = frozenset(
-    h.lower() for h in ("authorization", "content-type", _CLIENT_HEADER, _SESSION_HEADER, _VENDOR_HEADER, _SITE_HEADER)
+    h.lower() for h in ("authorization", "content-type", _CLIENT_HEADER, _SESSION_HEADER, _VENDOR_HEADER, _SITE_HEADER,
+                        _WIDGET_HOST_HEADER)
 )
 
 _HEADER_VALUE_MAX = 128
@@ -133,7 +137,8 @@ def routing_headers(env=None, hosted: bool = False) -> Dict[str, str]:
 
     attribution = ((_CLIENT_HEADER, _CLIENT_ENV), (_SESSION_HEADER, _SESSION_ENV))
     if hosted:
-        attribution += ((_VENDOR_HEADER, _VENDOR_ENV), (_SITE_HEADER, _SITE_ENV))
+        attribution += ((_VENDOR_HEADER, _VENDOR_ENV), (_SITE_HEADER, _SITE_ENV),
+                        (_WIDGET_HOST_HEADER, _WIDGET_HOST_ENV))
     for header, var in attribution:
         value = _clean_header_value(env.get(var) or "")
         if value:
@@ -188,6 +193,19 @@ DEFAULT_REQUEST_TIMEOUT_S: float = 120.0
 MIN_REQUEST_TIMEOUT_S: float = 10.0
 
 
+# Set by a driver that has already warned, so the engine it starts per round does not repeat it.
+_MODEL_WARNING_ENV = "CAPTCHA_KRAKEN_MODEL_WARNING"
+_legacy_model_warned = False
+
+
+def _warn_legacy_model_once(model: str) -> None:
+    global _legacy_model_warned
+    if _legacy_model_warned or (os.environ.get(_MODEL_WARNING_ENV) or "").strip() == "0":
+        return
+    _legacy_model_warned = True
+    print(f"[captchakraken] {prompts.LEGACY_MODEL_WARNING.format(model=model)}", file=sys.stderr)
+
+
 class ActionPlanner:
 
     def __init__(
@@ -202,6 +220,8 @@ class ActionPlanner:
 
         self.model = model or config.lora_name()
         self.base_url = base_url or config.base_url()
+        if config.is_hosted_endpoint(self.base_url) and prompts.is_legacy_hosted_name(self.model):
+            _warn_legacy_model_once(self.model)
         self.api_key = api_key or config.api_key()
         self.sampling: Dict[str, Any] = {}
         #: Seconds a single ask may take. The CALLER owns this: a solve has a budget, and a request

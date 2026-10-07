@@ -36,6 +36,7 @@ DEBUG = os.getenv("CAPTCHA_DEBUG", "0") == "1"
 _SESSION_ENV = "CAPTCHA_KRAKEN_SESSION"
 _VENDOR_ENV = "CAPTCHA_KRAKEN_VENDOR"
 _SITE_ENV = "CAPTCHA_KRAKEN_SITE"
+_WIDGET_HOST_ENV = "CAPTCHA_KRAKEN_WIDGET_HOST"
 # How often a page that has not drawn its widget yet is looked at again.
 _DETECTION_POLL_MS = 250
 
@@ -1816,6 +1817,12 @@ class PageSolver:
         element, puzzle_source, role = widget.element, widget.vendor, widget.role
         os.environ[_VENDOR_ENV] = puzzle_source.value
         frame = element.content_frame()
+        # The widget's own host comes from its iframe; an inline widget has none to report.
+        widget_host = _hostname(frame) if frame else ""
+        if widget_host:
+            os.environ[_WIDGET_HOST_ENV] = widget_host
+        else:
+            os.environ.pop(_WIDGET_HOST_ENV, None)
         scope = frame or widget.at
 
         if role == FrameRole.CHECKBOX:
@@ -2011,10 +2018,11 @@ class PageSolver:
         self._verdicts = None
         # One session id per solve groups its inference rounds into one billable attempt; vendor and site say
         # where it was, and are set as they become known.
-        previous = {name: os.environ.get(name) for name in (_SESSION_ENV, _VENDOR_ENV, _SITE_ENV)}
+        previous = {name: os.environ.get(name) for name in (_SESSION_ENV, _VENDOR_ENV, _SITE_ENV, _WIDGET_HOST_ENV)}
         session_id = os.environ[_SESSION_ENV] = str(uuid.uuid4())
         os.environ.pop(_VENDOR_ENV, None)
         os.environ.pop(_SITE_ENV, None)
+        os.environ.pop(_WIDGET_HOST_ENV, None)
         site = _hostname(page)
         if site:
             os.environ[_SITE_ENV] = site

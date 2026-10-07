@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { CaptchaKrakenSolver } from './solver';
+import { getBundledCliRoot } from './model-name';
 import type { PlaywrightPage } from './playwright-types';
 
 /** An executable that stands in for the engine: it records what it was called with and answers `reply`. */
@@ -108,4 +109,40 @@ test('inference carries the vendor and site to the engine alongside the session'
   assert.equal(env.CAPTCHA_KRAKEN_SESSION, 'SESSION-1');
   assert.equal(env.CAPTCHA_KRAKEN_VENDOR, 'recaptcha');
   assert.equal(env.CAPTCHA_KRAKEN_SITE, 'shop.example.com');
+});
+
+test('inference carries the widget host, and keeps the engine from repeating the model warning', () => {
+  const solver: any = new CaptchaKrakenSolver();
+  solver.solveWidgetHost = 'assets.vendor.example';
+  const env = solver.solveEnvironment(os.tmpdir(), undefined);
+  assert.equal(env.CAPTCHA_KRAKEN_WIDGET_HOST, 'assets.vendor.example');
+  assert.equal(env.CAPTCHA_KRAKEN_MODEL_WARNING, '0');
+});
+
+test('the widget host is the iframe\'s hostname and nothing else', async () => {
+  const solver: any = new CaptchaKrakenSolver();
+  solver.clickCheckbox = async () => { throw new Error('stop after the host is set'); };
+  const frame = { url: () => 'https://Assets.Vendor.Example/challenge?k=SYNTHETIC' };
+  const widget = { el: { contentFrame: async () => frame }, at: null, vendor: 'recaptcha', role: 'checkbox' };
+  await assert.rejects(solver.solveSingle(null, widget, 0));
+  assert.equal(solver.solveWidgetHost, 'assets.vendor.example');
+});
+
+test('a hosted model name with no route is warned about once per solver', () => {
+  const solver: any = new CaptchaKrakenSolver({ model: 'captcha' });
+  const before = process.env.VLLM_BASE_URL;
+  const errors: string[] = [];
+  const original = console.error;
+  console.error = (m: string) => { errors.push(String(m)); };
+  try {
+    process.env.VLLM_BASE_URL = 'https://api.captchakraken.com/v1';
+    solver.modelName(getBundledCliRoot());
+    solver.modelName(getBundledCliRoot());
+    new CaptchaKrakenSolver({ model: 'abyss-grid' } as any)['modelName'](getBundledCliRoot());
+  } finally {
+    console.error = original;
+    if (before === undefined) delete process.env.VLLM_BASE_URL; else process.env.VLLM_BASE_URL = before;
+  }
+  assert.equal(errors.filter((m) => m.includes("answers the model name 'captcha' with an older model")).length, 1);
+  assert.equal(errors.length, 1);
 });

@@ -325,7 +325,8 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_routing_headers.py` | The request-priority environment variable becomes the header the gateway reads, and nothing else. |
 | `python/tests/test_the_vendor_says_whether_the_round_was_taken.py` | Every recorded answer-check response parses as the vendor meant it, an accepted verdict ends the solve, a rejected one counts a loop, and only a refusal to serve ends the solve early. |
 | `python/tests/test_a_widget_is_waited_for.py` | A widget that draws late is waited for without charging the solve budget, and "no captcha" names the cause instead of blaming the selectors. |
-| `python/tests/test_outcome_reporting.py` | The outcome report's contract: endpoint, body and timeout, a self-hosted 404 switching it off, a hosted failure warned about every time, and the vendor and site headers. |
+| `python/tests/test_outcome_reporting.py` | The outcome report's contract: endpoint, body and timeout, a self-hosted 404 switching it off, a hosted failure warned about every time, and the vendor, site and widget-host headers. |
+| `python/tests/test_the_legacy_model_warning_is_one_text.py` | A hosted model name with no route is warned about once per process, and both ports print the same words. |
 | `python/tests/test_endpoint_is_dialled_once.py` | Connections are reused instead of a fresh handshake per inference. |
 | `python/tests/test_solver.py` | The still-image engine end to end against a stubbed endpoint. |
 | `python/tests/test_page_solver.py` | The Python page driver: detection, the round loop, and which error each dead end raises. |

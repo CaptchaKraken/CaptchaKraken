@@ -5,6 +5,7 @@ one: a 404 there is a broken route, and switching reporting off for the process 
 the ledger for as long as the process ran.
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -44,7 +45,7 @@ def _planner(base_url: str, status: int) -> ActionPlanner:
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
     for name in ("CAPTCHA_REPORT_OUTCOME", "CAPTCHA_KRAKEN_SESSION", "CAPTCHA_KRAKEN_VENDOR", "CAPTCHA_KRAKEN_SITE",
-                 "CAPTCHA_KRAKEN_EXTRA_HEADERS", "CAPTCHA_HOSTED_HOSTS"):
+                 "CAPTCHA_KRAKEN_WIDGET_HOST", "CAPTCHA_KRAKEN_EXTRA_HEADERS", "CAPTCHA_HOSTED_HOSTS"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -101,6 +102,32 @@ def test_extra_headers_cannot_rewrite_vendor_or_site():
     env = {"CAPTCHA_KRAKEN_VENDOR": "recaptcha", "CAPTCHA_KRAKEN_SITE": "shop.example.com",
            "CAPTCHA_KRAKEN_EXTRA_HEADERS": "X-CK-Vendor: forged, x-ck-site: forged.example"}
     assert routing_headers(env=env, hosted=True) == {"X-CK-Vendor": "recaptcha", "X-CK-Site": "shop.example.com"}
+
+
+def test_the_widget_host_goes_to_the_hosted_api_only_and_cannot_be_rewritten():
+    env = {"CAPTCHA_KRAKEN_WIDGET_HOST": "assets.vendor.example",
+           "CAPTCHA_KRAKEN_EXTRA_HEADERS": "X-CK-Widget-Host: forged.example"}
+    assert routing_headers(env=env) == {}
+    assert routing_headers(env=env, hosted=True) == {"X-CK-Widget-Host": "assets.vendor.example"}
+
+
+def test_the_widget_host_is_the_iframes_hostname_and_nothing_else(monkeypatch):
+    from captchakraken.page_solver import _WIDGET_HOST_ENV, PageSolver, Widget
+    from captchakraken.kinds import FrameRole, Vendor
+
+    frame = type("F", (), {"url": "https://Assets.Vendor.Example/challenge?k=SYNTHETIC"})()
+    element = type("E", (), {"content_frame": lambda self: frame})()
+    solver = PageSolver.__new__(PageSolver)
+    seen = {}
+
+    def stop(*_a, **_k):
+        seen["host"] = os.environ.get(_WIDGET_HOST_ENV)
+        raise RuntimeError("stop after the env is set")
+
+    monkeypatch.setattr(PageSolver, "_click_checkbox", stop, raising=False)
+    with pytest.raises(RuntimeError):
+        PageSolver._solve_single(solver, None, Widget(element, None, Vendor.RECAPTCHA, FrameRole.CHECKBOX), None)
+    assert seen["host"] == "assets.vendor.example"
 
 
 def test_the_site_header_is_the_hostname_and_nothing_else():

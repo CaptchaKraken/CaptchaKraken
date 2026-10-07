@@ -224,6 +224,9 @@
     "CAPTCHA_KRAKEN_EXTRA_HEADERS": [
       "python/src/captchakraken/planner.py"
     ],
+    "CAPTCHA_KRAKEN_MODEL_WARNING": [
+      "python/src/captchakraken/planner.py"
+    ],
     "CAPTCHA_KRAKEN_PYTHON": [
       "js/scripts/setup-python.js",
       "js/src/python-command.ts"
@@ -250,6 +253,10 @@
       "python/src/captchakraken/config.py"
     ],
     "CAPTCHA_KRAKEN_VENDOR": [
+      "python/src/captchakraken/page_solver.py",
+      "python/src/captchakraken/planner.py"
+    ],
+    "CAPTCHA_KRAKEN_WIDGET_HOST": [
       "python/src/captchakraken/page_solver.py",
       "python/src/captchakraken/planner.py"
     ],
