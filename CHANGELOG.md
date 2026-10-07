@@ -3,7 +3,7 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [3.2.0] - 2026-09-30
+## [3.2.0] - 2026-10-07
 
 ### Changed
 
@@ -53,6 +53,16 @@ semantic versioning; v2 is a major, **breaking** release.
   hosted API is told whether the vendor accepted the solve, and hosted requests
   send `X-CK-Vendor` and `X-CK-Site` (the page's hostname only — never its path
   or query). Neither can be overridden through `CAPTCHA_KRAKEN_EXTRA_HEADERS`.
+
+- **Hosted requests also send `X-CK-Widget-Host`:** the hostname the captcha's
+  own frame was served from, never a path or query. Like the site, it cannot be
+  overridden through `CAPTCHA_KRAKEN_EXTRA_HEADERS`.
+
+- **A model name the hosted API no longer routes is called out once.** Pinning
+  a name that is neither a routing alias nor one of its experts is answered by
+  an older model; both ports now log one warning saying so, in the same words.
+  Remove the pin (`CAPTCHA_LORA_NAME` or the `model` option) to use the current
+  model, or set `CAPTCHA_KRAKEN_MODEL_WARNING=0` to silence it.
 
 ### Fixed
 
