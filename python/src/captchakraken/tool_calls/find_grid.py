@@ -937,6 +937,25 @@ def _axis_candidates(lines, total):
     return cand
 
 
+# How near a cell's midpoint a detected gutter must sit, as a fraction of the pitch, to say the cell is two cells.
+HALVED_CELL_TOL = 0.12
+
+
+def _halves_a_finer_lattice(positions, pitch, kept_lines):
+    """True when a detected gutter splits EVERY cell of this axis down its middle.
+
+    Tall tiles fail the square-cell gate as themselves, but every other gutter spaces cells two tiles wide that
+    pass it, so a 6x3 board read as a 3x3 of tile pairs.
+    """
+    if not positions or pitch <= 0:
+        return False
+    lines = sorted(positions)
+    mids = ([lines[0] - pitch / 2.0] + [(a + b) / 2.0 for a, b in zip(lines, lines[1:])]
+            + [lines[-1] + pitch / 2.0])
+    tol = HALVED_CELL_TOL * pitch
+    return all(any(abs(l.midline_pos - m) <= tol for l in kept_lines) for m in mids)
+
+
 def extract_grid_from_lines(h_lines, v_lines, h, w, lab=None):
     """Every colour gate is RELATIVE, so a grid of any uniform border colour is detectable."""
     h_keep = _corroborate(h_lines, v_lines, h)
@@ -989,6 +1008,9 @@ def extract_grid_from_lines(h_lines, v_lines, h, w, lab=None):
                     h_col = np.mean([l.color_lab for l in hlns], axis=0)
                     v_col = np.mean([l.color_lab for l in vlns], axis=0)
                     if _de(h_col, v_col) > XAXIS_COLOR_TOL:
+                        continue
+                    if (_halves_a_finer_lattice(vpos, vd, v_keep_int)
+                            or _halves_a_finer_lattice(hpos, hd, h_keep_int)):
                         continue
                     slant = np.tan(h_ang)
                     ang_inc = abs(h_ang + v_ang) * 200
