@@ -173,6 +173,20 @@ async function viewportOf(page: Page): Promise<ViewportSize> {
   return view;
 }
 
+/**
+ * Does a viewport capture speak the bounding box's coordinates? Not on a page laid out wider than the device and
+ * zoomed out to fit, which is every mobile layout of a desktop page: there the box is in layout pixels and the
+ * capture is not.
+ */
+async function layoutIsTheViewport(page: Page, view: ViewportSize): Promise<boolean> {
+  const frame = await page.evaluate?.(() => ({
+    width: window.innerWidth,
+    scale: window.visualViewport ? window.visualViewport.scale : 1,
+  }));
+  if (!frame) throw new Error('the page cannot evaluate its own layout width');
+  return Math.abs((frame.scale ?? 1) - 1) < 1e-3 && Math.abs(frame.width - view.width) <= 1;
+}
+
 const within = (r: CaptureRect, view: ViewportSize): boolean =>
   r.x >= 0 && r.y >= 0 && r.x + r.width <= view.width && r.y + r.height <= view.height;
 
@@ -301,9 +315,10 @@ export class CaptchaKrakenSolver {
   private async shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled'): Promise<void> {
     const page = this.page as Page;
     const view = await viewportOf(page);
-    const rect = await this.rectInView(el, view);
+    const rect = (await layoutIsTheViewport(page, view)) ? await this.rectInView(el, view) : null;
     if (!rect) {
-      // Bigger than the viewport: no viewport capture holds all of it, so the element photographs itself.
+      // Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
+      // coordinates, so the element photographs itself.
       await el.screenshot({ path: p, timeout, animations });
       return;
     }
