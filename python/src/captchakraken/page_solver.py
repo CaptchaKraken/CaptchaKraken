@@ -107,11 +107,19 @@ def crop_png(png: bytes, rect: CaptureRect, css_width: float) -> bytes:
 
 
 _VIEWPORT_JS = "() => ({ width: window.innerWidth, height: window.innerHeight })"
+_FRAME_JS = ("() => ({ width: window.innerWidth, height: window.innerHeight,"
+             " scale: window.visualViewport ? window.visualViewport.scale : 1 })")
 
 
 def _viewport_of(page: Any) -> Dict[str, float]:
     """`viewport_size` is None on a context launched without one (camoufox), where only the window knows."""
     return page.viewport_size or page.evaluate(_VIEWPORT_JS)
+
+
+def _layout_is_the_viewport(page: Any, view: Dict[str, float]) -> bool:
+    """Does a viewport capture speak the bounding box's coordinates? Not on a page laid out wider than the device and zoomed out to fit, which is every mobile layout of a desktop page: there the box is in layout pixels and the capture is not."""
+    frame = page.evaluate(_FRAME_JS)
+    return abs(frame.get("scale", 1) - 1) < 1e-3 and abs(frame["width"] - view["width"]) <= 1
 
 
 def _within(rect: CaptureRect, view: Dict[str, float]) -> bool:
@@ -1098,9 +1106,10 @@ class PageSolver:
         timeout = 2_500 if timeout_ms is None else timeout_ms
         page = self._page
         view = _viewport_of(page)
-        rect = self._rect_in_view(element, view)
+        rect = self._rect_in_view(element, view) if _layout_is_the_viewport(page, view) else None
         if rect is None:
-            # Bigger than the viewport: no viewport capture holds all of it, so the element photographs itself.
+            # Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
+            # coordinates, so the element photographs itself.
             element.screenshot(path=path, timeout=timeout, animations=animations)
             return
         png = crop_png(page.screenshot(timeout=timeout, animations=animations), rect, view["width"])

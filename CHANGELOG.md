@@ -75,7 +75,9 @@ semantic versioning; v2 is a major, **breaking** release.
   against 69 ms measured on a checkbox, 68 ms against 91-103 ms on a challenge
   board). The picture the model sees is unchanged: same region, same size, same
   pixels, at any device pixel ratio. A widget larger than the viewport is still
-  photographed on its own. The structural `Page` type gains `screenshot()`,
+  photographed on its own, and so is any widget on a page laid out wider than
+  the device and zoomed out to fit (a desktop page on a phone), where the
+  viewport capture is not in the widget's coordinates. The structural `Page` type gains `screenshot()`,
   which every Playwright page already has; `fromPuppeteer()` supplies it.
 
 - **A checkbox is ticked, not studied.** The "I'm not a robot" box used to go

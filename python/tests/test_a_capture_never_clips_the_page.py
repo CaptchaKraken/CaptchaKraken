@@ -49,7 +49,8 @@ class FakePage:
         return _viewport_png(int(view["width"] * self._dpr), int(view["height"] * self._dpr))
 
     def evaluate(self, *_: Any) -> Optional[Dict[str, float]]:
-        return self._inner
+        # A real window always answers; when nothing says otherwise its layout is the viewport.
+        return self._inner if self._inner is not None else self.viewport_size
 
 
 class FakeElement:
@@ -129,3 +130,13 @@ def test_an_element_with_no_box_reads_as_a_stale_handle(tmp_path: Path) -> None:
     with pytest.raises(Exception) as raised:
         _solver(FakePage({"width": 640, "height": 480}))._screenshot(FakeElement(None), str(tmp_path / "x.png"))
     assert _STALE_HANDLE_RE.search(str(raised.value)), "the solve loop would not re-detect after this"
+
+
+def test_a_mobile_layout_zoomed_out_to_fit_photographs_the_element(tmp_path: Path) -> None:
+    """Pixel 7 on a desktop page: a 412px device, a 981px layout shown at 0.42. The box speaks layout pixels and the
+    capture does not, so a crop scaled by the device width cut the board out of the wrong place."""
+    page = FakePage(viewport={"width": 412, "height": 839}, inner={"width": 981, "height": 1996, "scale": 0.42})
+    element = FakeElement({"x": 0, "y": 0, "width": 320, "height": 257})
+    _solver(page)._screenshot(element, str(tmp_path / "shot.png"))
+    assert element.element_shots == 1
+    assert page.shots == []

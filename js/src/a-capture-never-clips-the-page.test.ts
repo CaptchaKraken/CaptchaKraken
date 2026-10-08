@@ -75,13 +75,15 @@ for (const dpr of [1, 2]) {
   });
 }
 
-function rig(opts: { viewport?: { width: number; height: number } | null; inner?: { width: number; height: number };
+function rig(opts: { viewport?: { width: number; height: number } | null;
+                     inner?: { width: number; height: number; scale?: number };
                      dpr?: number; box: any; scrolledTo?: any }) {
   const shots: any[] = [];
   const view = opts.viewport ?? opts.inner!;
   const page: any = {
     viewportSize: () => opts.viewport ?? null,
-    evaluate: async () => opts.inner,
+    // A real window always answers; when nothing says otherwise its layout is the viewport.
+    evaluate: async () => opts.inner ?? opts.viewport,
     screenshot: async (o: any) => { shots.push(o); return viewportPng(view.width * (opts.dpr ?? 1), view.height * (opts.dpr ?? 1)); },
   };
   const el: any = {
@@ -124,6 +126,16 @@ test('an element bigger than the viewport photographs itself', async () => {
   assert.equal(el.elementShots, 1);
   assert.equal(shots.length, 0);
   assert.equal(el.scrolls, 0);
+});
+
+test('a mobile layout zoomed out to fit photographs the element', async () => {
+  // Pixel 7 on a desktop page: a 412px device, a 981px layout shown at 0.42. The box speaks layout pixels and the
+  // capture does not, so a crop scaled by the device width cut the board out of the wrong place.
+  const { solver, el, shots, out } = rig({ viewport: { width: 412, height: 839 },
+    inner: { width: 981, height: 1996, scale: 0.42 }, box: { x: 0, y: 0, width: 320, height: 257 } });
+  await solver.shot(el, out);
+  assert.equal(el.elementShots, 1);
+  assert.equal(shots.length, 0);
 });
 
 test('a context without a viewport asks the window', async () => {
