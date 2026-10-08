@@ -267,6 +267,7 @@ class PageSolverConfig:
     detection_timeout_ms: int = 15_000
     # Deprecated and ignored since 3.2.0: a round that makes no progress now counts against max_solve_loops.
     max_no_progress_rounds: int = 2
+    # Deprecated and ignored since 3.2.0: a round that performed nothing goes straight on to the next.
     post_solve_delay_ms: int = 1_200
     post_solve_outcome_timeout_ms: int = 1_000
     post_solve_outcome_poll_ms: int = 75
@@ -2078,11 +2079,14 @@ class PageSolver:
         def blocked(how: str) -> VendorBlockedError:
             return VendorBlockedError(f"the vendor refused to serve this client ({how}); no further round can succeed")
 
-        def again(failure: CaptchaSolveError) -> None:
+        def again(failure: CaptchaSolveError, *, in_transition: bool = False) -> None:
+            """Count the loop. Only a widget caught mid-transition is worth waiting out; a refused or repeated
+            answer changed nothing on the page, and pausing after it only spends the solve's budget."""
             nonlocal last_failure
             last_failure = failure
             _log(f"{failure}; counting this loop and going again")
-            _delay(cfg.stale_element_backoff_ms)
+            if in_transition:
+                _delay(cfg.stale_element_backoff_ms)
 
         for attempt in range(1, cfg.max_solve_loops + 1):
             # A round that failed arms the second look only while its board is still up. A board the vendor has
@@ -2148,7 +2152,7 @@ class PageSolver:
                 if has_interacted and self.is_captcha_solved(page):
                     _log("nothing left to film because the board was accepted; finishing.")
                     return done()
-                again(animated)
+                again(animated, in_transition=True)
                 continue
             except Exception as exc:
                 message = str(exc)
@@ -2167,22 +2171,25 @@ class PageSolver:
                         "the page, context or browser closed mid-solve"
                         + (", after the answer had been submitted but before the vendor's verdict could be read — "
                            "the solve may in fact have succeeded" if has_interacted else "")) from exc
-                again(CaptchaSolveError(f"the challenge handle went stale ({message.splitlines()[0]})"))
+                again(CaptchaSolveError(f"the challenge handle went stale ({message.splitlines()[0]})"), in_transition=True)
                 continue
 
             has_interacted = has_interacted or did_interact
             usage.extend(round_usage)
 
             # One polled wait per round: the vendor's verdict, the widget going away, or a fresh board. The flat
-            # sleep it replaced observed nothing and cost 1200-1500ms per finished round.
-            window_ms = (cfg.post_solve_outcome_timeout_ms if did_interact
-                         else cfg.post_solve_delay_ms + random.random() * 300)
+            # sleep it replaced observed nothing and cost 1200-1500ms per finished round. A round that performed
+            # nothing gave the page nothing to react to, so it looks once and goes on: waiting there cost every
+            # refused or repeated answer the full window.
+            window_ms = cfg.post_solve_outcome_timeout_ms if did_interact else 0
             deadline = _now() + window_ms
             t0 = time.perf_counter()
             solved = False
             said = None
             widget_gone = 0
-            while _now() < deadline:
+            looked = False
+            while not looked or _now() < deadline:
+                looked = True
                 said = self._vendor_verdict() or said
                 if said in (Verdict.ACCEPTED, Verdict.BLOCKED):
                     solved = said == Verdict.ACCEPTED

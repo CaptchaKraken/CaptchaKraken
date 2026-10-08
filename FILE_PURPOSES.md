@@ -192,6 +192,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/a-finished-recording-still-answers-the-question.test.ts` | A film of a board that never stopped changing is not a still, however late the verdict is asked for. |
 | `js/src/a-replaced-board-has-not-failed-yet.test.ts` | Evidence that arms the second look belongs to the board it was found on; the boards dealt after it are not filmed for it. |
 | `js/src/an-unusable-answer-is-not-a-dead-page.test.ts` | An answer the widget cannot take buys the recording path a round; a page that takes nothing still gives up. |
+| `js/src/a-round-that-did-nothing-waits-for-nothing.test.ts` | A round that performed nothing starts the next at once; only a widget caught mid-transition is waited out. |
 | `js/src/one-ask-cannot-outlive-the-solve.test.ts` | Every inference ask is bounded by what is left of the solve, and the source test refuses a new call site that is not. |
 | `js/src/cycling-board-waits-for-its-screen.test.ts` | The frame gate was off on every real animated captcha: the driver must hold until the page shows the keyframe the model chose. |
 | `js/src/speculative-burst.test.ts` | Asking the model and watching the board can overlap, and the burst must not be wasted when they do. |
@@ -340,6 +341,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_new_board_ends_the_film.py` | `_fresh_board()` drops the recorded answer, the animated verdict and the slice, so none of them cross onto the next board. |
 | `python/tests/test_a_replaced_board_has_not_failed_yet.py` | A failed round arms the second look only while its board is still up, and a replaced board drops an arm the previous one set. |
 | `python/tests/test_an_unusable_answer_is_not_a_dead_page.py` | The same rule in the Python port: an unusable answer is a reason to look again, not to end the solve. |
+| `python/tests/test_a_round_that_did_nothing_waits_for_nothing.py` | The same rule in the Python port: no dwell and no backoff after a round that performed nothing. |
 | `python/tests/test_a_solved_board_is_not_lost_to_a_typed_action.py` | A typed answer reads like a dict one, so a widget closing on an accepted board is not a failed solve. |
 | `python/tests/test_one_ask_cannot_outlive_the_solve.py` | The planner's request timeout is the caller's remaining budget, floored, and the request actually sends it. |
 | `python/tests/test_the_second_look_believes_its_recording.py` | The second look at a board that failed once is a question, and the clip it records answers it: a board that never moved goes back to the still expert. |

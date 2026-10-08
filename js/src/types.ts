@@ -47,7 +47,7 @@ export interface CaptchaKrakenConfig {
   detectionTimeoutMs?: number;
   /** @deprecated Ignored since 3.2.0: a round that makes no progress now counts against `maxSolveLoops`. */
   maxNoProgressRounds?: number;
-  /** Dwell after a round that answered nothing. Default 1200. */
+  /** @deprecated Ignored since 3.2.0: a round that performed nothing goes straight on to the next. */
   postSolveDelayMs?: number;
   /** Whole-solve time limit. Default 45000. */
   overallSolveTimeoutMs?: number;
