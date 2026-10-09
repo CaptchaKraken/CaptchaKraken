@@ -19,10 +19,10 @@
   <a href="https://www.npmjs.com/package/captchakraken"><img src="https://img.shields.io/npm/v/captchakraken?logo=npm&label=npm" alt="npm"></a>
   <a href="https://pypi.org/project/captchakraken/"><img src="https://img.shields.io/pypi/v/captchakraken?logo=pypi&logoColor=white&label=PyPI" alt="PyPI"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Source--Available-blue" alt="License: Source-Available"></a>
-  <a href="https://github.com/JWriter20/CaptchaKraken/actions/workflows/ci.yml"><img src="https://github.com/JWriter20/CaptchaKraken/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/CaptchaKraken/CaptchaKraken/actions/workflows/ci.yml"><img src="https://github.com/CaptchaKraken/CaptchaKraken/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-> ⭐ **Enjoying CaptchaKraken?** [Star & watch the repo](https://github.com/JWriter20/CaptchaKraken)
+> ⭐ **Enjoying CaptchaKraken?** [Star & watch the repo](https://github.com/CaptchaKraken/CaptchaKraken)
 > for new puzzle types and new models. One repo, two
 > published ports — the TypeScript browser driver (**npm:** `captchakraken`) and
 > the Python engine (**PyPI:** `captchakraken`).
@@ -201,7 +201,7 @@ One command. It checks your GPU or Apple memory, picks a model size that fits,
 downloads it, and writes a config file:
 
 ```bash
-git clone https://github.com/JWriter20/CaptchaKraken
+git clone https://github.com/CaptchaKraken/CaptchaKraken
 cd CaptchaKraken
 ./setup.sh
 source captchakraken.env
@@ -578,7 +578,7 @@ Most of the detail lives in the docs hub — start at **[docs/](./docs/README.md
   attempted.
 
 The visual, always-current version is in **[docs/roadmap.md](./docs/roadmap.md)**.
-📣 **[Watch the repo](https://github.com/JWriter20/CaptchaKraken)** to hear about
+📣 **[Watch the repo](https://github.com/CaptchaKraken/CaptchaKraken)** to hear about
 these as they ship.
 
 ---

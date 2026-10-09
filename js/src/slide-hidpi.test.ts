@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { CaptchaKrakenSolver } from './solver';
-import { fakeDom } from './fake-dom.test';
+import { fakeDom, photographsItself } from './fake-dom.test';
 
 const DPR = 2.625;
 const WIDGET_W = 400;
@@ -45,7 +45,7 @@ function rig(targetPx: number, dpr: number) {
   };
   const scope = fakeDom([{ matches: ['.geetest_slider_button'], box: { ...HANDLE } }]);
 
-  const solver: any = new CaptchaKrakenSolver({});
+  const solver: any = photographsItself(new CaptchaKrakenSolver({}));
   solver.trackPiece = async (
     _el: unknown, _before: string, _after: string, exclude: number[],
   ) => {

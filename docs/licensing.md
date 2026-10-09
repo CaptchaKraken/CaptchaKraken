@@ -60,7 +60,7 @@ The restriction is on **distribution**, not use. If you are the one clicking
 ## Need one of the prohibited uses?
 
 Commercial licensing is available. Open an issue or message the maintainer on
-GitHub: [github.com/JWriter20/CaptchaKraken](https://github.com/JWriter20/CaptchaKraken).
+GitHub: [github.com/CaptchaKraken/CaptchaKraken](https://github.com/CaptchaKraken/CaptchaKraken).
 
 ## Responsible use
 

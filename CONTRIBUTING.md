@@ -184,7 +184,7 @@ driver → npm `captchakraken`), `python/` (the engine and `captchakraken` CLI �
 PyPI), and `mcp/` (→ npm `captchakraken-mcp`).
 
 ```bash
-git clone git@github.com:JWriter20/CaptchaKraken.git
+git clone git@github.com:CaptchaKraken/CaptchaKraken.git
 cd CaptchaKraken
 
 # Repo tooling: repomix and the codebase-map gate. NOT a published package —

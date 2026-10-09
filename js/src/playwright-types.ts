@@ -49,6 +49,9 @@ export interface PlaywrightScope {
 }
 
 export interface PlaywrightFrame extends PlaywrightScope {
+  /** Optional: its HOSTNAME alone is sent as X-CK-Widget-Host, the host the widget was served from. */
+  url?(): string;
+
   waitForSelector(
     selector: string,
     options?: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number },
@@ -59,6 +62,13 @@ export interface PlaywrightFrame extends PlaywrightScope {
     arg?: any,
     options?: { timeout?: number; polling?: number | 'raf' },
   ): Promise<unknown>;
+}
+
+/** A network response as Playwright and Puppeteer both shape it. */
+export interface PlaywrightResponse {
+  url(): string;
+  status(): number;
+  text(): Promise<string>;
 }
 
 /**
@@ -87,6 +97,9 @@ export interface PlaywrightPage extends PlaywrightScope {
 
   viewportSize(): ViewportSize | null;
 
+  /** The whole viewport as a PNG: the driver's only capture, cropped locally, because a clipped one repaints the page. */
+  screenshot(options?: { timeout?: number; animations?: 'disabled' | 'allow' }): Promise<Buffer>;
+
   /** Optional: the mouse humanizer asks the window for its size when `viewportSize()` is null (camoufox). */
   evaluate?<R>(pageFunction: () => R): Promise<R>;
 
@@ -97,6 +110,14 @@ export interface PlaywrightPage extends PlaywrightScope {
   };
 
   isClosed?(): boolean;
+
+  /** Optional: where the vendor's own verdict is read. Without it every round is judged by the DOM. */
+  on?(event: 'response', listener: (response: PlaywrightResponse) => void): unknown;
+
+  off?(event: 'response', listener: (response: PlaywrightResponse) => void): unknown;
+
+  /** Optional: its hostname names the site on hosted requests. */
+  url?(): string;
 }
 
 export type Page = PlaywrightPage;

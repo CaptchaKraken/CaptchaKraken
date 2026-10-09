@@ -360,6 +360,52 @@ are the vendors that score typing cadence.
 the slow solve happens. Phases attribute rather than partition: a nested phase
 counts under both names and re-entry counts once.
 
+**A solve gives up for two reasons only: the vendor refuses to serve us, or the
+loops are spent.** Every other early exit — a stale handle past its own cap, a
+board that would not film, an unusable answer, the same answer twice, a second
+under-selection banner, a round that pressed nothing — used to end the solve
+with loops still in hand, and each had been added for a real incident. Now each
+of those failures counts one loop, pauses `stale_element_backoff_ms`, and goes again;
+`max_solve_loops` is the one bound, which is why the three per-failure caps are
+deprecated rather than kept. What still ends a solve at once is what no further
+round can change: a vendor refusal (HTTP 429 on its answer endpoint, or its
+try-again-later screen), a closed page, the time budget, and our own API's
+refusals. An animated board that will not film keeps its animated verdict, so
+the next round films it again; answering it as a still is what once took two
+video types from 3 solved to 0.
+
+**The vendor's verdict is read off the wire, and it outranks the DOM.** The DOM
+signals say something changed; the answer-check response says whether the round
+was taken, and a widget that closes right after a refusal is not a solve. Every
+shape the parsers read was recorded on the vendor's own demo page, a deliberate
+wrong answer for the refusal and a real solve for the acceptance; the sanitised
+bodies in `python/tests/fixtures/vendor_verdicts.json` are what both ports test
+against. One vendor encrypts its deal endpoint, so only its URL is read there.
+The listener is page-level, which sees the vendors' cross-origin frames, and
+optional: a page object with no `on` is judged by the DOM as before.
+
+**A page that has not drawn its widget is waited for, and the wait is not the
+solve's.** `solve()` right after `domcontentloaded` failed 3/3 on a vendor demo
+whose frames arrived a moment later, and the error blamed the selector table.
+Detection now polls for `detection_timeout_ms` before believing "no captcha",
+and the solve budget starts when there is something to solve. The "markup has
+changed" message is kept for what proves it: a vendor frame on screen that no
+selector matches, minus the frames the table marks `passive` (an invisible
+badge). Code on the wire with no frame is reported as that, not as a broken
+table.
+
+**A 404 on `/solve-outcome` means different things by host.** A self-hosted vLLM
+has no such route, so the first 404 there switches reporting off for the
+process (and the JS port remembers it across solves). From the hosted API the
+same 404 is a broken route: switching reporting off on it once hid every later
+solve in a process from the ledger, so it is warned about every time instead.
+
+**The npm package bundles the engine by allow-list.** The JS driver runs the
+Python engine it ships, so `python/` cannot leave the tarball, but 3.1.0 also
+shipped the engine's examples and Dockerfile because the bundler copied the
+directory and only knew what to skip. `copy-python.mjs` now names what `pip
+install` reads, and a test reads the real `npm pack` list.
+
 ## Grid detection
 
 Every constant in `find_grid.py` was measured on the real capture corpus, and
@@ -438,6 +484,41 @@ same corpus in one commit, only ever downward. The residue is all one class,
 blue sky plus something white.
 
 ## Rounds, bursts and gates
+
+**Every capture is the whole viewport, cropped locally — never a clip.** An
+element screenshot, `page.screenshot({ clip })` and a raw CDP capture with any
+`clip` all make a headed Chromium paint frames at the clip's size: measured with
+`Page.startScreencast` on a static page, 1-38 off-size frames per twelve to thirty
+captures, which a user watches as the page flashing. An unclipped viewport
+capture painted 0 changed frames, with `animations: 'disabled'` as with
+`'allow'`, so `disabled` keeps its meaning (freeze CSS animation for a still) at
+no visual cost. The crop reproduces the element screenshot exactly — Playwright
+clips to the enclosing whole-pixel rect at the device pixel ratio, and so does
+`crop_png` / `cropPng`; `test_browser_compat` compares the two on a real page at
+DPR 1 and 2. It is also faster (no actionability wait): 35 ms against 69 ms on a
+small widget. JS decodes the PNG with `node:zlib` rather than take an image
+dependency. The one element screenshot left is a widget larger than the
+viewport, which no viewport capture can hold; an element merely off screen is
+scrolled in once, not per shot.
+
+**A checkbox is never a board.** It used to take the board round: the paint
+poll, the classifier's film and — when OpenCV missed the box on a half-drawn
+frame — an inference on the checkbox picture, which the model answered with a
+drag. The box is clicked through the DOM (`SELECTORS[v].box`), and found by
+`find_checkbox` on ONE capture only where the DOM cannot reach it (Turnstile's
+closed shadow root, a frame that refuses access); the model is never asked.
+After the click the round waits, on DOM signals, for the challenge frame or the
+checked state — without that wait the next round found the checkbox still up and
+clicked it again.
+
+**Our own gesture is not the board moving.** A hovered tile or button repaints,
+and a film that catches the highlight arrive and leave sees "a screen came back"
+and calls a still board a cycle — measured, a still board filmed as animated
+after a refused answer, because the cursor was left on Verify. Before a board is
+judged the pointer leaves it past the nearest edge, and any frame taken within
+`INPUT_SETTLE_MS` (400 ms, longer than a CSS hover transition) of our last
+gesture is dropped. The JS idle wander hovers the board during inference, so a
+change seen across it is not counted as evidence the board cycles.
 
 **The board paints before the round asks anything about it.** A round opens on
 two questions — which expert answers it, read out of the DOM as "is there a text

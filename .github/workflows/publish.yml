@@ -8,12 +8,12 @@ name: Publish
 # Auth is TOKENLESS via OIDC trusted publishing on all three — no secrets.
 # One-time config, PER PACKAGE (after any repo rename, redo all of these):
 #   npm:  npmjs.com → captchakraken → Settings → Trusted Publisher →
-#         GitHub Actions: JWriter20/CaptchaKraken, workflow publish.yml
+#         GitHub Actions: CaptchaKraken/CaptchaKraken, workflow publish.yml
 #   npm:  npmjs.com → captchakraken-mcp → same, as its own entry. The
 #         `captchakraken` entry does NOT cover it; trusted publishers are scoped
 #         to one package name.
 #   PyPI: pypi.org → captchakraken → Publishing → add a GitHub trusted publisher:
-#         JWriter20/CaptchaKraken, workflow publish.yml
+#         CaptchaKraken/CaptchaKraken, workflow publish.yml
 #
 # A BRAND-NEW npm package cannot be configured before it exists: npm's trusted
 # publisher settings live on the package page. So the FIRST publish of
@@ -133,7 +133,7 @@ jobs:
             echo "::error::captchakraken-mcp EXISTS on npm ($(npm view captchakraken-mcp version)) \
           but this workflow is not its trusted publisher, which npm reports as a 404 on the PUT. \
           Fix: npmjs.com -> captchakraken-mcp -> Settings -> Trusted Publisher -> GitHub Actions, \
-          repository JWriter20/CaptchaKraken, workflow publish.yml. The captchakraken entry does \
+          repository CaptchaKraken/CaptchaKraken, workflow publish.yml. The captchakraken entry does \
           NOT cover this package. Then re-run this job."
           fi
           exit 1

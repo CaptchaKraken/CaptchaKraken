@@ -26,6 +26,8 @@ class VendorSelectors:
     response: Optional[str] = None
     # Inside the checkbox frame: the box shows accepted. Demo pages do not always fill `response`.
     checked: Optional[str] = None
+    # Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph.
+    box: Sequence[str] = ()
     # On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).
     accepted: Optional[str] = None
     # Inside the challenge frame: a new round has painted, with text.
@@ -36,6 +38,10 @@ class VendorSelectors:
     submit: Sequence[str] = ()
     # Inside the challenge frame: verdict banners and what each means.
     banners: Sequence[Tuple[str, RecaptchaBanner]] = ()
+    # Inside the challenge frame: the vendor refusing to serve this client at all. Nothing after it can succeed.
+    blocked: Sequence[str] = ()
+    # On the host page: the vendor's frames that are never interactive, so a page showing only these has no widget.
+    passive: Sequence[str] = ()
     # Inside the widget, and its enclosing fieldset/form: the answer box of a typed captcha.
     text_input: Sequence[str] = ()
     # Inside the widget: the knob a slide must start on; a drag from the piece moves nothing.
@@ -51,6 +57,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',),
         response='[name="g-recaptcha-response"]',
         checked=".recaptcha-checkbox-checked",
+        box=("#recaptcha-anchor",),
         fresh=".rc-imageselect-instructions, #rc-imageselect",
         submit=("#recaptcha-verify-button",),
         banners=(
@@ -58,6 +65,8 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
             (".rc-imageselect-error-dynamic-more", RecaptchaBanner.DYNAMIC_MORE),
             (".rc-imageselect-incorrect-response", RecaptchaBanner.REJECTED),
         ),
+        blocked=(".rc-doscaptcha-header-text",),
+        passive=('iframe[src*="size=invisible"]',),
     ),
     # Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com.
     Vendor.HCAPTCHA: VendorSelectors(
@@ -66,6 +75,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         checkbox=('iframe[src*="hcaptcha"][src*="frame=checkbox"]',),
         response='[name="h-captcha-response"]',
         checked='#checkbox[aria-checked="true"]',
+        box=("#checkbox",),
         fresh=".prompt-text",
         images=(".task-image .image", ".task .image", ".challenge-example img", ".image-wrapper img"),
         submit=(".button-submit",),

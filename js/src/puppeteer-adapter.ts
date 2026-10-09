@@ -3,6 +3,7 @@ import {
   PlaywrightFrame,
   PlaywrightElementHandle,
   PlaywrightLocator,
+  PlaywrightResponse,
   BoundingBoxRect,
   ViewportSize,
 } from './playwright-types';
@@ -39,10 +40,14 @@ interface PuppeteerPage {
   };
   waitForSelector(selector: string, options?: any): Promise<PuppeteerElementHandle | null>;
   viewport(): ViewportSize | null;
+  screenshot(options?: { type?: 'png' }): Promise<Uint8Array>;
   evaluate<R>(pageFunction: () => R): Promise<R>;
   $$(selector: string): Promise<PuppeteerElementHandle[]>;
   isClosed(): boolean;
   evaluate(pageFunction: () => any): Promise<any>;
+  on(event: 'response', listener: (response: PlaywrightResponse) => void): unknown;
+  off(event: 'response', listener: (response: PlaywrightResponse) => void): unknown;
+  url(): string;
 }
 
 function toPuppeteerSelectorOptions(options?: PuppeteerSelectorState): any {
@@ -121,9 +126,15 @@ export function fromPuppeteer(page: PuppeteerPage): PlaywrightPage {
     waitForSelector: async (selector, options) =>
       wrapHandle(await page.waitForSelector(selector, toPuppeteerSelectorOptions(options))),
     viewportSize: () => page.viewport(),
+    // Puppeteer has no `animations` option, and its own timeout; the capture is PNG either way.
+    screenshot: async () => Buffer.from(await page.screenshot({ type: 'png' })),
     evaluate: (pageFunction) => page.evaluate(pageFunction),
     locator: (selector) => locatorOver(() => page.$$(selector)),
     // Forwarded explicitly: without it the watcher polls a dead page forever.
     isClosed: () => page.isClosed(),
+    // Puppeteer's HTTPResponse already has Playwright's url/status/text, so the listener passes straight through.
+    on: (event, listener) => page.on(event, listener),
+    off: (event, listener) => page.off(event, listener),
+    url: () => page.url(),
   };
 }

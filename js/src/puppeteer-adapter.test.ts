@@ -48,6 +48,7 @@ function fakePage(calls: Call[], over: Record<string, any> = {}) {
     },
     waitForSelector: async (sel: string, o: any) => { calls.push({ method: 'waitForSelector', args: [sel, o] }); return fakeHandle(calls); },
     viewport: () => { calls.push({ method: 'viewport', args: [] }); return { width: 1280, height: 720 }; },
+    screenshot: async (o: any) => { calls.push({ method: 'screenshot', args: [o] }); return new Uint8Array([137, 80]); },
     $$: async (sel: string) => { calls.push({ method: '$$', args: [sel] }); return [fakeHandle(calls), fakeHandle(calls)]; },
     evaluate: async (fn: any) => { calls.push({ method: 'evaluate', args: [fn] }); return fn(); },
     isClosed: () => false,
@@ -188,4 +189,13 @@ test('isClosed is forwarded — the watcher needs it to end its loop', async () 
   assert.equal(page.isClosed!(), false);
   closed = true;
   assert.equal(page.isClosed!(), true, 'a watcher would poll a dead page forever');
+});
+
+test('screenshot() takes the whole viewport as a PNG Buffer, dropping the Playwright-only options', async () => {
+  const calls: Call[] = [];
+  const page = fromPuppeteer(fakePage(calls));
+  const png = await page.screenshot({ timeout: 2500, animations: 'allow' });
+  assert.ok(Buffer.isBuffer(png), 'the driver crops a Buffer; Puppeteer 22+ returns a Uint8Array');
+  assert.deepEqual([...png], [137, 80]);
+  assert.deepEqual(last(calls), { method: 'screenshot', args: [{ type: 'png' }] });
 });

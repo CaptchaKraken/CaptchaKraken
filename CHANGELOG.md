@@ -3,6 +3,113 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [3.2.0] - 2026-10-07
+
+### Changed
+
+- **A solve gives up only when the vendor refuses to serve you, when
+  `max_solve_loops` is spent, or when `overall_solve_timeout_ms` /
+  `overallSolveTimeoutMs` (still 45 s by default) runs out.** A refused answer, a board that would not
+  screenshot, an answer the widget could not use, the same answer twice, a
+  second under-selection banner and a round that pressed nothing each ended the
+  solve early before, often with loops still in hand. Each now counts one loop
+  and the next round goes again. The one exception is a board the model answers
+  identically after every resample: a third identical answer still ends the
+  solve, as `max_no_progress_rounds` / `maxNoProgressRounds` (default 2) says. A round that performed nothing starts the next
+  at once; only a widget caught mid-transition (a stale handle, a board that
+  would not screenshot) pauses `stale_element_backoff_ms` /
+  `staleElementBackoffMs` first. `UnsupportedChallengeError` is raised once every
+  loop came back unusable; a solve that runs out of loops says what its last
+  failed round was. The time budget, a closed page and hosted API refusals still
+  end a solve at once. `max_stale_element_retries`, `max_unsupported_resolves`
+  and `post_solve_delay_ms` (and their TypeScript twins) are deprecated and
+  ignored; they will be removed in 4.0.
+
+- **`solve()` waits for a widget the page has not drawn yet.** Calling it
+  straight after `goto(..., wait_until="domcontentloaded")` failed every time on
+  a demo page whose frames arrived a moment later. Detection now polls for up
+  to `detection_timeout_ms` / `detectionTimeoutMs` (default 15000) before
+  raising "no captcha", and that wait is not charged to the solve's time budget.
+  A page with no captcha at all now takes that long to say so; set it to `0` for
+  the old fail-fast behaviour.
+
+- **"No captcha" says why.** The error used to claim the vendor's markup had
+  changed whenever its code was loaded. It now says so only when a vendor frame
+  is on screen that no selector matches; loaded code with no widget is reported
+  as that.
+
+- **The npm package ships only what it runs**: the driver and the Python engine
+  source it installs. The engine's examples, Dockerfile and bytecode caches are
+  no longer in the tarball.
+
+### Added
+
+- **The vendor's own verdict decides each round.** Both drivers listen to the
+  page's network for the vendor's answer-check response and read whether the
+  round was accepted or rejected, a new board was dealt, or the vendor refused
+  to serve at all. An accepted verdict ends the solve; a rejected one counts the
+  loop; a refusal ends it with `VendorBlockedError` (Python) or an `Error`
+  saying so (TypeScript). Vendors whose answer is not readable are judged by
+  the page's done-signals, as before. The verdicts are on the result as
+  `SolveResult.verdicts` / `result.verdicts`.
+
+- **Outcome reports carry the vendor's verdict, the vendor and the site.** The
+  hosted API is told whether the vendor accepted the solve, and hosted requests
+  send `X-CK-Vendor` and `X-CK-Site` (the page's hostname only — never its path
+  or query). Neither can be overridden through `CAPTCHA_KRAKEN_EXTRA_HEADERS`.
+
+- **Hosted requests also send `X-CK-Widget-Host`:** the hostname the captcha's
+  own frame was served from, never a path or query. Like the site, it cannot be
+  overridden through `CAPTCHA_KRAKEN_EXTRA_HEADERS`.
+
+- **A model name the hosted API no longer routes is called out once.** Pinning
+  a name that is neither a routing alias nor one of its experts is answered by
+  an older model; both ports now log one warning saying so, in the same words.
+  Remove the pin (`CAPTCHA_LORA_NAME` or the `model` option) to use the current
+  model, or set `CAPTCHA_KRAKEN_MODEL_WARNING=0` to silence it.
+
+### Fixed
+
+- **The page no longer flickers while the solver looks at it.** Every picture
+  the solver took was an element screenshot, and in a headed Chromium each one
+  made the whole page repaint at the element's size for a frame — the page
+  visibly flashed and jumped on every look, dozens of times a solve. Both
+  drivers now take one screenshot of the whole viewport and cut the widget out
+  of it themselves, which repaints nothing and is about twice as fast (35 ms
+  against 69 ms measured on a checkbox, 68 ms against 91-103 ms on a challenge
+  board). The picture the model sees is unchanged: same region, same size, same
+  pixels, at any device pixel ratio. A widget larger than the viewport is still
+  photographed on its own, and so is any widget on a page laid out wider than
+  the device and zoomed out to fit (a desktop page on a phone), where the
+  viewport capture is not in the widget's coordinates. The structural `Page` type gains `screenshot()`,
+  which every Playwright page already has; `fromPuppeteer()` supplies it.
+
+- **A checkbox is ticked, not studied.** The "I'm not a robot" box used to go
+  through the same round as a puzzle: the solver waited for it to "paint",
+  filmed it for four seconds, and when it could not find the box on the picture
+  asked the model where to click — one measured solve spent 70 screenshots and
+  three model responses on a checkbox before the puzzle had even opened. The box
+  is now clicked through the page itself, and where it cannot be reached that way
+  it is found on a single picture without the model. The solver then waits for the
+  challenge to open or the box to tick instead of clicking it again. On a demo
+  page the challenge now opens about 3.5 s into the solve (12-29 s before), with
+  no model response spent before it.
+
+- **A still puzzle is no longer mistaken for an animated one because the
+  pointer was resting on it.** A button or picture under the cursor changes as
+  it is hovered, and the solver read those changes as the puzzle moving: after a
+  wrong answer, a still puzzle could be filmed as a video and answered as one,
+  adding up to half a minute. The pointer now leaves the puzzle before the
+  solver decides whether it moves, and pictures taken while the puzzle is still
+  reacting to the pointer are left out.
+
+- **A hosted outcome report that fails is reported, every time.** A 404 from
+  the hosted API used to switch outcome reporting off silently for the rest of
+  the process. It is now a warning on each failure; only a self-hosted endpoint,
+  which has no such route, switches reporting off. The TypeScript driver now
+  surfaces the same warnings and, like Python, stops asking a self-hosted
+  endpoint after its first 404.
+
 ## [3.1.0] - 2026-09-18
 
 ### Fixed

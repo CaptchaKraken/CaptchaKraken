@@ -11,6 +11,7 @@ export type { CaptchaKrakenErrorCode } from './errors';
 export { fromPuppeteer } from './puppeteer-adapter';
 
 export type { Page, PlaywrightPage, PlaywrightFrame, PlaywrightElementHandle, PlaywrightLocator, PlaywrightScope } from './playwright-types';
+export type { RoundVerdict } from './verdicts';
 export { SELECTORS } from './selectors';
 export type { VendorSelectors } from './selectors';
 

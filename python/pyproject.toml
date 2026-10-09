@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "captchakraken"
-version = "3.1.0"
+version = "3.2.0"
 description = "Captcha-solving engine and CLI: OpenCV grid detection plus a fine-tuned Qwen3.5-9B vision model, for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -92,10 +92,10 @@ captchakraken = "captchakraken.cli:main"
 
 [project.urls]
 Homepage = "https://captchakraken.com"
-Documentation = "https://github.com/JWriter20/CaptchaKraken#readme"
-Source = "https://github.com/JWriter20/CaptchaKraken"
-Issues = "https://github.com/JWriter20/CaptchaKraken/issues"
-Changelog = "https://github.com/JWriter20/CaptchaKraken/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/CaptchaKraken/CaptchaKraken#readme"
+Source = "https://github.com/CaptchaKraken/CaptchaKraken"
+Issues = "https://github.com/CaptchaKraken/CaptchaKraken/issues"
+Changelog = "https://github.com/CaptchaKraken/CaptchaKraken/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/captchakraken"]

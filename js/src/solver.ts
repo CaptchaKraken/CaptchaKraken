@@ -8,6 +8,7 @@ import {
   PlaywrightFrame as Frame,
   PlaywrightLocator as Locator,
   PlaywrightScope as Scope,
+  ViewportSize,
 } from './playwright-types';
 import { watchPage, CaptchaWatcher, WatchOptions } from './watcher';
 import { Humanizer, resolveHumanizer } from './humanize.js';
@@ -18,15 +19,17 @@ import * as path from 'path';
 import * as os from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { PhaseBudget, timingsEnabled } from './timing';
+import { CaptureRect, cropPng, enclosingRect } from './png';
 import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
-import { ActionKind, FrameRole, KeyframeMode, Outcome, PaintVerdict, PauseKind, Phase, RecaptchaBanner, RetryMode, SettleVerdict, SolveStage, Vendor, isOneOf } from './kinds';
+import { ActionKind, FrameRole, KeyframeMode, Outcome, PaintVerdict, PauseKind, Phase, RecaptchaBanner, RetryMode, SettleVerdict, SolveStage, Vendor, Verdict, isOneOf } from './kinds';
+import { VerdictLog } from './verdicts';
 import { aggregateTokenUsage } from './token-usage';
 import { parseApiError } from './errors';
 import { DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS } from './limits';
 import { resolvePythonCommand } from './python-command';
 import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
 import { solveSlideGeometry, MIN_PIECE_PX, MAX_PIECE_FRACTION } from './slide-geometry';
-import { getBundledCliRoot, resolveLoraName } from './model-name';
+import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
 import { SELECTORS, VENDORS, VendorSelectors, WIDGET_PROBES, WidgetProbe, RESPONSE_SELECTORS, ACCEPTED_SELECTORS, SUBMIT_SELECTORS,
   TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS } from './selectors';
 
@@ -141,8 +144,16 @@ export function answerNeedsElementBox(actions: ReadonlyArray<{ action?: string }
 
 /** The widget moved on under us (hCaptcha swapped rounds, GeeTest closed on accept): re-detect, do not fail. */
 export function isStaleHandleError(message: string): boolean {
-  return /Timeout .*exceeded|not visible|not attached|detached|Target closed|bounding box of captcha element/i.test(message);
+  return /Timeout .*exceeded|not visible|not attached|detached|bounding box of captcha element/i.test(message);
 }
+
+/** A closed target is not a stale handle: retried as one, a dead page was re-detected until the loops ran out. */
+export function isClosedTargetError(message: string): boolean {
+  return /Target (?:page, context or browser )?(?:has been )?closed|Session closed/i.test(message);
+}
+
+/** How often a page that has not drawn its widget yet is looked at again. */
+const DETECTION_POLL_MS = 250;
 
 // Frame-diff thresholds; two screens of one board differ by ~0.0056, a different board by ~0.77.
 const NOT_THIS_BOARD_DIFF = 0.5;
@@ -151,10 +162,52 @@ const MOVED_DURING_INFERENCE_DIFF = 0.002;
 // hCaptcha odd-animal showed 38 screens in 4s with no repeat; past DEFAULT_MAX_KEYFRAMES a keyframe answer cannot describe the motion.
 const BURST_ANIMATED_SCREENS = 6;
 const NOT_THIS_BOARD_POLLS = 3;
+// How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read inside
+// this window is wearing our own feedback, which is not a screen it ever showed by itself.
+export const INPUT_SETTLE_MS = 400;
+
+/** `viewportSize()` is null on a context launched without one (camoufox), where only the window knows. */
+async function viewportOf(page: Page): Promise<ViewportSize> {
+  const view = page.viewportSize() ?? await page.evaluate?.(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  if (!view) throw new Error('the page reports no viewport size and cannot evaluate one');
+  return view;
+}
+
+/**
+ * Does a viewport capture speak the bounding box's coordinates? Not on a page laid out wider than the device and
+ * zoomed out to fit, which is every mobile layout of a desktop page: there the box is in layout pixels and the
+ * capture is not.
+ */
+async function layoutIsTheViewport(page: Page, view: ViewportSize): Promise<boolean> {
+  const frame = await page.evaluate?.(() => ({
+    width: window.innerWidth,
+    scale: window.visualViewport ? window.visualViewport.scale : 1,
+  }));
+  if (!frame) throw new Error('the page cannot evaluate its own layout width');
+  return Math.abs((frame.scale ?? 1) - 1) < 1e-3 && Math.abs(frame.width - view.width) <= 1;
+}
+
+const within = (r: CaptureRect, view: ViewportSize): boolean =>
+  r.x >= 0 && r.y >= 0 && r.x + r.width <= view.width && r.y + r.height <= view.height;
+
+/** A point just outside the board, past the edge nearest the pointer, that is still inside the viewport. */
+function offBoardPoint(box: Box, at: readonly [number, number], view: ViewportSize): [number, number] | null {
+  const [x, y] = at;
+  const gap = 24 + Math.random() * 40;
+  const right = box.x + box.width;
+  const bottom = box.y + box.height;
+  const exits: Array<[number, [number, number]]> = [
+    [x - box.x, [box.x - gap, y]], [right - x, [right + gap, y]], [y - box.y, [x, box.y - gap]], [bottom - y, [x, bottom + gap]],
+  ];
+  return exits.sort((a, b) => a[0] - b[0]).map(([, p]) => p)
+    .find(([px, py]) => px >= 0 && px < view.width && py >= 0 && py < view.height) ?? null;
+}
 
 export const SOLVE_DEFAULTS = {
   maxSolveLoops: 6,
   overallSolveTimeoutMs: 45_000,
+  // A page just navigated has often not drawn its widget; solving straight after `domcontentloaded` failed 3/3 on a demo page.
+  detectionTimeoutMs: 15_000,
   // 9s holds a 3-screen GeeTest svg cycle at 2.7s a screen; 6s gave up one screen short. videoBudgetMs derives from it on both ports.
   keyframeWaitTimeoutMs: 9_000,
 } as const;
@@ -162,6 +215,15 @@ export const SOLVE_DEFAULTS = {
 /** A hang detector for a burst whose screenshot never returns, sized off the ceiling. */
 export function burstHangDeadlineMs(cfg: { videoBurstMaxMs?: number }): number {
   return 3 * (cfg.videoBurstMaxMs ?? 12_000) + 5_000;
+}
+
+/** The page's host alone: a path or query can carry a user's own data. */
+function hostname(page: { url?: () => string }): string | null {
+  try {
+    return new URL(page.url?.() ?? '').hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
 }
 
 export class CaptchaKrakenSolver {
@@ -179,7 +241,6 @@ export class CaptchaKrakenSolver {
   /** Answers keyed by screenshot hash; a hit means the answer already ran and changed nothing. */
   private solutionCache: Map<string, CliResponse> = new Map();
   private repeatedAnswerSeen = false;
-  private retriedUnusableAnswer = false;
   private knownAnimated = false;
   private animatedProbeDone = false;
   /** The one recording for the animated board on screen, and its answer until the widget refuses it. */
@@ -204,12 +265,30 @@ export class CaptchaKrakenSolver {
   private actedOnBoard = false;
   private lastSubmitFrameHash: string | null = null;
   private solveSessionId: string | null = null;
+  /** Which vendor and site this solve is for, sent to the hosted API; the site is a hostname only. */
+  private solveVendor: Vendor | null = null;
+  private solveSite: string | null = null;
+  /** The host the widget itself was served from (its iframe's); null for an inline widget. */
+  private solveWidgetHost: string | null = null;
+  private legacyModelWarned = false;
+  private verdicts: VerdictLog | null = null;
+  /** False once a self-hosted endpoint has answered 404: it has no outcome route to report to. */
+  private outcomeSupported = true;
   private cliCache: { cliRoot: string; py: string } | null = null;
   private loraNameCache: string | null = null;
   budget: PhaseBudget | null = null;
+  /** The page being solved: every capture is taken of its viewport. Set by `solve`. */
+  private page: Page | null = null;
+  /** When our last gesture ended; the board's reaction to it is never read as the board's own motion. */
+  private lastInputAt = -Infinity;
 
   private ph<T>(name: Phase, fn: () => Promise<T>): Promise<T> {
     return this.budget ? this.budget.phase(name, fn) : fn();
+  }
+
+  /** A pointer gesture, timed as MOUSE and remembered: see `INPUT_SETTLE_MS`. */
+  private gesture<T>(fn: () => Promise<T>): Promise<T> {
+    return this.ph(Phase.MOUSE, fn).finally(() => { this.lastInputAt = Date.now(); });
   }
 
   constructor(config: CaptchaKrakenConfig = {}) {
@@ -225,15 +304,73 @@ export class CaptchaKrakenSolver {
     this.human.at = [v.x, v.y];
   }
 
-  /** `disabled` freezes CSS animation, which once sliced GeeTest svg to a static clip; callers filming motion pass `allow`. */
-  private shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled'): Promise<Buffer> {
-    return el.screenshot({ path: p, timeout, animations });
+  /**
+   * Every capture the driver takes: the whole viewport, cropped here to the element.
+   *
+   * Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at the
+   * clip's size for that frame, which the user watches as the page flashing and jumping; a viewport capture
+   * repaints nothing, and measured twice as fast. `disabled` freezes CSS animation, which once sliced GeeTest svg to
+   * a static clip; callers filming motion pass `allow`.
+   */
+  private async shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled'): Promise<void> {
+    const page = this.page as Page;
+    const view = await viewportOf(page);
+    const rect = (await layoutIsTheViewport(page, view)) ? await this.rectInView(el, view) : null;
+    if (!rect) {
+      // Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
+      // coordinates, so the element photographs itself.
+      await el.screenshot({ path: p, timeout, animations });
+      return;
+    }
+    fs.writeFileSync(p, cropPng(await page.screenshot({ timeout, animations }), rect, view.width));
+  }
+
+  private async rectOf(el: ElementHandle): Promise<CaptureRect> {
+    const box = await el.boundingBox();
+    const rect = box ? enclosingRect(box) : null;
+    if (!rect || rect.width <= 0 || rect.height <= 0) throw new Error('the element is not visible: it has no bounding box to photograph');
+    return rect;
+  }
+
+  /** Where the element sits in the viewport, scrolled in when it is merely off screen; null when it cannot fit. */
+  private async rectInView(el: ElementHandle, view: ViewportSize): Promise<CaptureRect | null> {
+    let rect = await this.rectOf(el);
+    if (rect.width > view.width || rect.height > view.height) return null;
+    if (!within(rect, view)) {
+      await el.scrollIntoViewIfNeeded({ timeout: 2000 });
+      rect = await this.rectOf(el);
+    }
+    return within(rect, view) ? rect : null;
+  }
+
+  /**
+   * Take the pointer off the board and let our own feedback fade before the board is judged still or animated.
+   *
+   * A hovered or pressed control repaints, and a board wearing our highlight read as motion: a still board was
+   * filmed as animated because of the Verify button under the cursor.
+   */
+  private async stepOffTheBoard(page: Page, el: ElementHandle): Promise<void> {
+    // Only a board we pointed at wears our feedback. One the vendor dealt under a resting pointer has nothing of
+    // ours to fade, and stepping off it cost every round its own gesture and settle window.
+    if (!this.actedOnBoard) return;
+    const box = await el.boundingBox();
+    const [x, y] = this.human.at;
+    if (box && this.human.hovers && x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
+      const spot = offBoardPoint(box, [x, y], await viewportOf(page));
+      if (spot) await this.performSmoothMove(page, ...spot);
+    }
+    await delay(this.lastInputAt + INPUT_SETTLE_MS - Date.now());
   }
 
   async solve(page: Page): Promise<SolveResult | void> {
     // One session id per solve groups its inference rounds into one billable attempt.
     this.solveSessionId = randomUUID();
+    this.page = page;
+    this.solveVendor = null;
+    this.solveSite = hostname(page);
+    this.solveWidgetHost = null;
     this.budget = new PhaseBudget();
+    this.verdicts = null;
     let solvedForReport = false;
     try {
       const result = await this.solveImpl(page);
@@ -246,22 +383,43 @@ export class CaptchaKrakenSolver {
       await this.stopAnimatedFilm();
       this.teardownCvWorker();
       this.cvWorkerReady = null;
-      this.reportOutcome(this.solveSessionId, solvedForReport);
+      // Set by solveImpl, which the narrowing from the reset above cannot see.
+      const verdicts = this.verdicts as VerdictLog | null;
+      await verdicts?.close();
+      // The vendor's own verdict when it was readable; the DOM's done-signal only when it was not.
+      const said = verdicts?.decisive() ?? null;
+      void this.reportOutcome(this.solveSessionId, said === null ? solvedForReport : said === Verdict.ACCEPTED);
       this.solveSessionId = null;
     }
   }
 
-  /** Tell the hosted API whether the widget accepted, through the CLI, detached, never awaited. */
-  private reportOutcome(sessionId: string | null, solved: boolean): void {
+  /** Tell the hosted API whether the widget accepted, through the CLI. The solve never awaits it; the promise is for callers that must know it finished. */
+  private reportOutcome(sessionId: string | null, solved: boolean): Promise<void> {
     // The opt-out is honoured here too: otherwise every solve spawns a process just to be told 404 by a local vLLM.
-    if (!sessionId || process.env.CAPTCHA_REPORT_OUTCOME === '0') return;
-    try {
-      const { cliRoot, py } = this.resolveCli();
-      const child = spawn(py, ['-m', 'captchakraken.cli', 'report-outcome', sessionId, solved ? Outcome.SOLVED : Outcome.FAILED],
-        { cwd: cliRoot, env: cliEnv(cliRoot), detached: true, stdio: 'ignore' });
-      child.on('error', () => {});
-      child.unref();
-    } catch { /* a missing engine is loud everywhere else */ }
+    if (!sessionId || !this.outcomeSupported || process.env.CAPTCHA_REPORT_OUTCOME === '0') return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      try {
+        const { cliRoot, py } = this.resolveCli();
+        const child = spawn(py, ['-m', 'captchakraken.cli', 'report-outcome', sessionId, solved ? Outcome.SOLVED : Outcome.FAILED],
+          { cwd: cliRoot, env: cliEnv(cliRoot, this.routingEnv()), stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+        // The engine words its own warnings; a hosted refusal must be as visible here as it is from Python.
+        child.stderr.on('data', (chunk: Buffer) => process.stderr.write(chunk));
+        child.on('error', () => resolve());
+        child.on('close', () => {
+          try {
+            if (JSON.parse(stdout.trim()).supported === false) this.outcomeSupported = false;
+          } catch { /* nothing parseable to learn from */ }
+          resolve();
+        });
+        // Never holds the process open: the solve's result is already decided.
+        child.unref();
+        [child.stdout, child.stderr].forEach((stream) => (stream as unknown as { unref?: () => void }).unref?.());
+      } catch {
+        resolve();   // a missing engine is loud everywhere else
+      }
+    });
   }
 
   /** Solve captchas on `page` as they appear, until `stop()`. Injects nothing into the page. */
@@ -269,27 +427,38 @@ export class CaptchaKrakenSolver {
     return watchPage(this, page, options);
   }
 
+  /**
+   * Give up only when the vendor refuses to serve us, or when every one of `maxSolveLoops` has been spent. Any other
+   * failed round — a stale handle, an unusable or repeated answer, a board that would not film — counts one loop,
+   * pauses, and goes again.
+   */
   private async solveImpl(page: Page): Promise<SolveResult | void> {
     const cfg = this.config;
     const maxSolveLoops = cfg.maxSolveLoops ?? SOLVE_DEFAULTS.maxSolveLoops;
     const overallSolveTimeoutMs = cfg.overallSolveTimeoutMs ?? SOLVE_DEFAULTS.overallSolveTimeoutMs;
-    const start = Date.now();
+    const detectionTimeoutMs = cfg.detectionTimeoutMs ?? SOLVE_DEFAULTS.detectionTimeoutMs;
+    let start = Date.now();
     const cumulativeTokenUsage: TokenUsage[] = [];
     this.stepIndex = 0;
     this.solveStartMs = start;
     await this.human.reset(page);
     await this.stopAnimatedFilm();
     this.resetSolveState();
-    const done = (): SolveResult => ({ isSolved: true, finalMousePosition: this.lastMousePosition, tokenUsage: aggregateTokenUsage(cumulativeTokenUsage) });
+    const verdicts = this.verdicts = new VerdictLog(page);
+    const done = (): SolveResult => ({ isSolved: true, finalMousePosition: this.lastMousePosition,
+      tokenUsage: aggregateTokenUsage(cumulativeTokenUsage), verdicts: [...verdicts.verdicts] });
+    const blocked = (how: string) => new Error(`The vendor refused to serve this client (${how}); no further round can succeed.`);
+    let lastFailure: { message: string; unsupported: boolean } | null = null;
+    // Count the loop. Only a widget caught mid-transition is worth waiting out; a refused or repeated answer changed
+    // nothing on the page, and pausing after it only spends the solve's budget.
+    const again = async (message: string, { unsupported = false, inTransition = false } = {}) => {
+      lastFailure = { message, unsupported };
+      console.log(`${message}; counting this loop and going again.`);
+      if (inTransition) await delay(cfg.staleElementBackoffMs ?? 900);
+    };
 
     let pendingRetryMode: RetryMode | null = null;
-    let alreadyRetriedRecaptchaError = false;
-    let unsupportedRetries = 0;
-    let staleElementRetries = 0;
     let hasInteracted = false;
-    let renderWaits = 0;
-    // Strictly fewer than the loops, else the reCAPTCHA v3 "no interactive widget" branch never gets a turn.
-    const MAX_RENDER_WAITS = Math.min(6, maxSolveLoops - 1);
 
     for (let attempt = 1; attempt <= maxSolveLoops; attempt++) {
       const budgetMs = overallSolveTimeoutMs + this.videoBudgetMs;
@@ -298,24 +467,37 @@ export class CaptchaKrakenSolver {
         throw new Error(`Captcha solve timed out after ${budgetMs}ms (attempt ${attempt}/${maxSolveLoops})`
           + (this.videoBudgetMs ? `, including ${this.videoBudgetMs}ms granted for recording an animated challenge` : '') + '.');
       }
+      const said = await this.vendorVerdict();
+      if (said === Verdict.ACCEPTED) {
+        console.log('[verdict] the vendor accepted the answer; finishing.');
+        return done();
+      }
+      if (said === Verdict.BLOCKED) throw blocked('its server answered 429');
       if (hasInteracted && await this.isCaptchaSolved(page)) {
         console.log('Vendor reports solved; returning without another detect pass.');
         return done();
       }
 
-      const widget = await this.ph(Phase.DETECT, () => this.detectCaptcha(page));
+      let widget = await this.ph(Phase.DETECT, () => this.detectCaptcha(page));
       if (!widget) {
-        if (hasInteracted) {
+        // A widget that vanished right after the vendor refused the answer was not solved.
+        if (hasInteracted && verdicts.decisive() !== Verdict.REJECTED) {
           console.log('No supported captcha found (post-interaction); considering solved.');
           return done();
         }
-        if (await this.hasInteractiveWidgetInDom(page) && renderWaits < MAX_RENDER_WAITS) {
-          renderWaits++;
-          console.log(`Captcha widget present in DOM but not yet rendered; waiting (${renderWaits}/${MAX_RENDER_WAITS}).`);
-          await delay(800 + Math.random() * 300);
-          continue;
+        const waitedFrom = Date.now();
+        widget = await this.ph(Phase.DETECT, () => this.awaitWidget(page, detectionTimeoutMs));
+        // The budget is for solving; the page drawing its widget is not charged to it.
+        start += Date.now() - waitedFrom;
+        this.solveDeadlineAt = start + budgetMs;
+        if (!widget) {
+          if (await this.isCaptchaSolved(page)) {
+            console.log('Captcha already satisfied; nothing to solve.');
+            return done();
+          }
+          if (hasInteracted) throw new Error(`The vendor rejected the last answer and its widget did not come back within ${detectionTimeoutMs}ms.`);
+          throw new Error(await this.noWidgetMessage(page, detectionTimeoutMs));
         }
-        throw new Error(await this.noWidgetMessage(page));
       }
 
       console.log(`\n--- Captcha Solve Loop ${attempt}/${maxSolveLoops} ---`);
@@ -327,66 +509,58 @@ export class CaptchaKrakenSolver {
       try {
         ({ didInteract, tokenUsage } = await this.solveSingle(page, widget, attempt, retryModeThisLoop));
       } catch (e: any) {
-        if (e?.nothingFilmed && hasInteracted) {
-          // Every other failure in this loop asks `isCaptchaSolved` before giving up; this one did not,
-          // and threw away boards the vendor had already taken. Measured on the python port, which fails
-          // the same way: prosopo_grid_3x3 was 8/8 green across six runs on 09-12 and 09-13, then lost
-          // four attempts on 09-17 to exactly this — each after its FIRST board came back from /fx/verify
-          // graded `solved: true`, with the solve dying on the second board the vendor dealt.
-          if (await this.isCaptchaSolved(page)) {
+        const emsg = String((e && (e as any).message) || e);
+        if (e?.unsupported) {
+          // The model had nothing usable for this board. The next round re-asks, often of a board the vendor has replaced.
+          await again(`Cannot solve this kind of captcha — ${emsg}`, { unsupported: true });
+          continue;
+        }
+        if (e?.animated) {
+          if (cfg.videoSolveEnabled === false) throw new Error(`Animated challenge could not be solved: ${emsg}`);
+          // A widget that will not screenshot is usually one that is closing, because the answer was accepted: measured, a
+          // vendor that deals several boards lost four attempts to exactly this, each after its first board came back graded solved.
+          if (hasInteracted && await this.isCaptchaSolved(page)) {
             console.log('nothing left to film because the board was accepted; finishing.');
             return done();
           }
-          // Not solved: the handle is stale for the same reason it is unscreenshottable, so take the
-          // stale-handle recovery rather than ending a solve with loops still in it.
-          if (staleElementRetries < (cfg.maxStaleElementRetries ?? 3)) {
-            staleElementRetries++;
-            console.log(`the widget would not screenshot; re-detecting next round (${staleElementRetries}/${cfg.maxStaleElementRetries ?? 3}).`);
-            await delay(cfg.staleElementBackoffMs ?? 900);
-            continue;
-          }
-        }
-        if (e?.animated) throw new Error(`Animated challenge could not be solved: ${e.message ?? 'recording failed'}`);
-        if (e?.unsupported) {
-          // Mid-solve, a transitional blank frame reads as unsupported; settle and retry.
-          if (hasInteracted && unsupportedRetries < (cfg.maxUnsupportedReSolves ?? 3)) {
-            unsupportedRetries++;
-            const again = await this.detectCaptcha(page);
-            if (again && await this.ph(Phase.SETTLE, () => this.waitForElementSettled(again.el)) === SettleVerdict.ANIMATED && cfg.videoSolveEnabled === false) {
-              throw new Error('Animated/video challenge detected — the puzzle never settles and videoSolveEnabled is off.');
-            }
-            console.log(`"unsupported" mid-solve; settled and retrying (${unsupportedRetries}/${cfg.maxUnsupportedReSolves ?? 3}).`);
-            continue;
-          }
-          throw new Error(`Cannot solve this kind of captcha — ${e?.message ?? e}`);
-        }
-        const emsg = String((e && (e as any).message) || e);
-        if (hasInteracted && staleElementRetries < (cfg.maxStaleElementRetries ?? 3) && isStaleHandleError(emsg)) {
-          staleElementRetries++;
-          console.log(`stale challenge handle after submit ("${emsg.split('\n')[0]}"); re-detecting next round (${staleElementRetries}/${cfg.maxStaleElementRetries ?? 3}).`);
-          await delay(cfg.staleElementBackoffMs ?? 900);
+          await again(emsg, { inTransition: true });
           continue;
         }
-        throw e;
+        const closed = isClosedTargetError(emsg);
+        if (!closed && !isStaleHandleError(emsg)) throw e;
+        // The handle most often went stale because the answer was accepted.
+        if (hasInteracted && await this.isCaptchaSolved(page).catch(() => false)) {
+          console.log('Vendor reports solved; finishing.');
+          return done();
+        }
+        if (closed) {
+          throw new Error('The page, context or browser closed mid-solve' + (hasInteracted
+            ? ', after the answer had been submitted but before the vendor\'s verdict could be read — the solve may in fact have succeeded.'
+            : '.'));
+        }
+        await again(`the challenge handle went stale (${emsg.split('\n')[0]})`, { inTransition: true });
+        continue;
       }
       hasInteracted = hasInteracted || didInteract;
-
-      if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2)) {
-        throw new Error(`No progress: the model returned the same answer ${this.noProgressRounds + 1} times running and the challenge is still up (attempt ${attempt}/${maxSolveLoops}). Total usage: ${JSON.stringify(aggregateTokenUsage(cumulativeTokenUsage))}`);
-      }
-      renderWaits = 0;
       cumulativeTokenUsage.push(...tokenUsage);
 
       // One polled wait per round, not a flat sleep: the sleep observed nothing and cost 1200-1500ms a round, and
-      // hCaptcha keeps its iframe visible ~2s while verifying, which read as a fresh puzzle and burned ~18s.
-      const settleMs = didInteract ? (cfg.postSolveOutcomeTimeoutMs ?? 1000) : (cfg.postSolveDelayMs ?? 1200) + Math.random() * 300;
+      // hCaptcha keeps its iframe visible ~2s while verifying, which read as a fresh puzzle and burned ~18s. A round that
+      // performed nothing gave the page nothing to react to, so it looks once and goes on: waiting there cost every
+      // refused or repeated answer the full window.
+      const settleMs = didInteract ? (cfg.postSolveOutcomeTimeoutMs ?? 1000) : 0;
       const deadline = Date.now() + settleMs;
       const verdictT0 = Date.now();
       let solved = false;
+      let roundSaid: Verdict | null = null;
       let widgetGone = 0;
-      while (Date.now() < deadline) {
+      let looked = false;
+      while (!looked || Date.now() < deadline) {
+        looked = true;
+        roundSaid = (await this.vendorVerdict()) ?? roundSaid;
+        if (roundSaid === Verdict.ACCEPTED || roundSaid === Verdict.BLOCKED) { solved = roundSaid === Verdict.ACCEPTED; break; }
         if (await this.isCaptchaSolved(page)) { solved = true; break; }
-        widgetGone = (await this.detectCaptcha(page)) ? 0 : widgetGone + 1;
+        widgetGone = roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page)) ? widgetGone + 1 : 0;
         if (widgetGone >= 2) { solved = true; break; }
         if (await this.isChallengeFreshlyRendered(page)) {
           this.resampleLevel = 0;
@@ -410,34 +584,81 @@ export class CaptchaKrakenSolver {
         console.log(`[verdict] success signal arrived after ${Date.now() - verdictT0}ms`);
         return done();
       }
+      if (roundSaid === Verdict.BLOCKED) throw blocked('its server answered 429');
+      if (await this.isBlocked(page)) throw blocked('it is showing its try-again-later screen');
+      if (roundSaid === Verdict.REJECTED) console.log(`[verdict] the vendor rejected the answer after ${Date.now() - verdictT0}ms`);
 
       if (this.bannerIsFatalAfterRetry(await this.bannerKind(page))) {
-        if (alreadyRetriedRecaptchaError) {
-          throw new Error(`reCAPTCHA still showing the under-selection error after retry; aborting (model unable to identify the missed tile). Total usage: ${JSON.stringify(aggregateTokenUsage(cumulativeTokenUsage))}`);
-        }
-        console.log('reCAPTCHA returned under-selection error; retrying with missed-tiles prompt.');
+        console.log('reCAPTCHA under-selection error; the next round asks for the missed tiles.');
         pendingRetryMode = RetryMode.MISSED_TILES;
-        alreadyRetriedRecaptchaError = true;
       }
 
-      if (!(await this.detectCaptcha(page))) return done();
-      if (!didInteract && !this.noProgressRounds) {
-        // AN ANSWER WITH NOTHING TO EXECUTE IS NOT PROOF THE PAGE IS STUCK. The throw below is for a
-        // driver that cannot act at all; an answer the driver could not use is a different thing, and
-        // on an animated board it is what a still expert returns when the board is not a still —
-        // measured on the hosted arms: a drag with no source box, "slide action, but the widget has
-        // neither a slider nor a draggable piece", solve over in 6s with the recording never taken.
-        if (cfg.videoSolveEnabled !== false && !this.retriedUnusableAnswer) {
-          this.retriedUnusableAnswer = true;
-          this.repeatedAnswerSeen = true;   // what arms the second look
-          console.log('[animated] the answer had nothing this widget could execute; taking a second look before giving up.');
-          continue;
-        }
-        throw new Error(`Captcha still detected but solver performed no interactions; aborting to avoid an infinite loop. Total usage: ${JSON.stringify(aggregateTokenUsage(cumulativeTokenUsage))}`);
+      if (roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page))) return done();
+      if (this.noProgressRounds) {
+        const stuck = `No progress: the model returned the same answer ${this.noProgressRounds + 1} times running`;
+        // A board answered the same way after every resample is one the model cannot read: measured, no solve ever
+        // followed a third identical answer, and each further round cost the board 3-7s.
+        if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2)) throw new Error(`${stuck}.`);
+        await again(stuck);
+      } else if (!didInteract) {
+        // An answer with nothing to execute is not proof the page is stuck; on an animated board it is what a still
+        // expert returns when the board is not a still, so the next round takes a second look.
+        if (cfg.videoSolveEnabled !== false) this.repeatedAnswerSeen = true;   // what arms the second look
+        await again('The solver performed no interactions this round');
       }
     }
 
-    throw new Error(`Captcha still detected after ${maxSolveLoops} solve loops. Total usage: ${JSON.stringify(aggregateTokenUsage(cumulativeTokenUsage))}`);
+    const last = lastFailure as { message: string; unsupported: boolean } | null;
+    const usage = ` Total usage: ${JSON.stringify(aggregateTokenUsage(cumulativeTokenUsage))}`;
+    if (last?.unsupported) throw new Error(`${last.message} (after ${maxSolveLoops} solve loops).${usage}`);
+    throw new Error(`Captcha still detected after ${maxSolveLoops} solve loops${last ? `; the last failed round: ${last.message}` : ''}.${usage}`);
+  }
+
+  /** What the vendor's server said since the last look: BLOCKED outranks everything, else the latest answer. */
+  private async vendorVerdict(): Promise<Verdict | null> {
+    const fresh = (await this.verdicts?.fresh() ?? []).map((v) => v.verdict).filter((v) => v !== Verdict.NEW_CHALLENGE);
+    return fresh.includes(Verdict.BLOCKED) ? Verdict.BLOCKED : fresh[fresh.length - 1] ?? null;
+  }
+
+  /**
+   * A page that has not drawn its widget yet is looked at again until `detectionTimeoutMs`. Solving straight after
+   * `domcontentloaded` failed 3/3 on a demo page whose frames arrived a moment later.
+   */
+  private async awaitWidget(page: Page, timeoutMs: number): Promise<Widget | null> {
+    const started = Date.now();
+    let widget: Widget | null = null;
+    while (!widget && Date.now() - started < timeoutMs && !(await this.isCaptchaSolved(page))) {
+      await delay(DETECTION_POLL_MS);
+      widget = await this.detectCaptcha(page);
+    }
+    return widget;
+  }
+
+  /** The vendor showing its refusal screen: rate-limited or flagged, with no board to answer. */
+  private async isBlocked(page: Page): Promise<boolean> {
+    try {
+      const probes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHALLENGE && SELECTORS[p.vendor].blocked);
+      const shown = await Promise.all(probes.map(async (p) => {
+        const [at] = await visible(page, [p.selector]);
+        const frame = at && await frameOf(at);
+        return !!frame && (await Promise.all((SELECTORS[p.vendor].blocked ?? []).map((sel) => this.visibleWithText(frame, sel)))).some(Boolean);
+      }));
+      return shown.some(Boolean);
+    } catch {
+      return false;
+    }
+  }
+
+  /** The env the engine reads its routing headers from: session, and the vendor and site once they are known. */
+  private routingEnv(): NodeJS.ProcessEnv {
+    return {
+      ...(this.solveSessionId ? { CAPTCHA_KRAKEN_SESSION: this.solveSessionId } : {}),
+      ...(this.solveVendor ? { CAPTCHA_KRAKEN_VENDOR: this.solveVendor } : {}),
+      ...(this.solveSite ? { CAPTCHA_KRAKEN_SITE: this.solveSite } : {}),
+      ...(this.solveWidgetHost ? { CAPTCHA_KRAKEN_WIDGET_HOST: this.solveWidgetHost } : {}),
+      // This driver warns about a legacy model name itself, once; the engine it starts per round stays quiet.
+      CAPTCHA_KRAKEN_MODEL_WARNING: '0',
+    };
   }
 
   /** Fire the optional onStep observer with a fresh screenshot; best-effort, never fails the solve. */
@@ -464,8 +685,15 @@ export class CaptchaKrakenSolver {
   private async solveSingle(page: Page, widget: Widget, attempt: number, retryMode: RetryMode | null = null): Promise<{ didInteract: boolean, tokenUsage: TokenUsage[] }> {
     const cfg = this.config;
     const { el: captchaElement, vendor: puzzleSource, role: frameRole } = widget;
+    this.solveVendor = puzzleSource;
     const frame = await captchaElement.contentFrame();
+    this.solveWidgetHost = frame ? hostname(frame) : null;
     const scope: Scope = frame ?? widget.at;
+
+    if (frameRole === FrameRole.CHECKBOX) {
+      await this.clickCheckbox(page, widget, frame);
+      return { didInteract: true, tokenUsage: [] };
+    }
 
     if (frame && frameRole === FrameRole.CHALLENGE && SELECTORS[puzzleSource].images) {
       if (this.lastSubmitFrameHash) {
@@ -489,8 +717,9 @@ export class CaptchaKrakenSolver {
     const textMode = !VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) && (await this.answerBox(scope, widget.at)) !== null;
     if (textMode) console.log('Widget has a text box; solving as a distorted-text captcha.');
 
-    // A checkbox is clicked, not filmed, and a reCAPTCHA board is read by its grid below.
-    const filmable = frameRole !== FrameRole.CHECKBOX && puzzleSource !== Vendor.RECAPTCHA && !textMode;
+    // A reCAPTCHA board is read by its grid below, not filmed.
+    const filmable = puzzleSource !== Vendor.RECAPTCHA && !textMode;
+    if (filmable && !this.knownAnimated) await this.stepOffTheBoard(page, captchaElement);
     let isAnimated = false;
     if (filmable && cfg.videoSolveEnabled === false) {
       if (await this.ph(Phase.SETTLE, () => this.waitForElementSettled(captchaElement)) === SettleVerdict.ANIMATED) {
@@ -740,6 +969,74 @@ export class CaptchaKrakenSolver {
     return { didInteract: performedAction, tokenUsage: allTokenUsage };
   }
 
+  /**
+   * Tick the box and wait for what it opens. A checkbox is not a board: it is never polled, filmed or asked about.
+   *
+   * Treated as a board it cost 70 screenshots and three model calls in one measured solve, two of them answering the
+   * checkbox picture with a drag.
+   */
+  private async clickCheckbox(page: Page, widget: Widget, frame: Frame | null): Promise<void> {
+    const box = await this.checkboxBox(frame, widget.vendor);
+    if (box) await this.move(page, box);
+    else await this.performSmoothMove(page, ...await this.findCheckboxOnScreen(widget.el));
+    await this.human.pause(PauseKind.BETWEEN);
+    await this.gesture(() => this.human.click(page, this.human.at));
+    await this.awaitWhatTheCheckboxOpened(page);
+  }
+
+  /**
+   * The box in a checkbox frame once the frame has drawn it; null when the DOM cannot reach it. Turnstile's box is in
+   * a closed shadow root, and a frame can refuse access; both are found on screen instead.
+   */
+  private async checkboxBox(frame: Frame | null, vendor: Vendor): Promise<ElementHandle | null> {
+    const box = SELECTORS[vendor].box;
+    if (!frame || !box?.length) return null;
+    try {
+      return await frame.waitForSelector(box.join(', '), { state: 'visible', timeout: this.config.detectionTimeoutMs ?? SOLVE_DEFAULTS.detectionTimeoutMs });
+    } catch (e) {
+      console.log(`[checkbox] the box is out of the DOM's reach (${String((e as Error)?.message ?? e).split('\n')[0]}); finding it on screen`);
+      return null;
+    }
+  }
+
+  /** One capture and OpenCV: a point inside the tick box, in page coordinates. No model is asked. */
+  private async findCheckboxOnScreen(el: ElementHandle): Promise<[number, number]> {
+    const box = await el.boundingBox();
+    if (!box) throw new Error('Could not get bounding box of captcha element');
+    const shot = tmp('checkbox');
+    let found: [number, number, number, number] | null;
+    let scale: number;
+    try {
+      await this.ph(Phase.SCREENSHOT, () => this.shot(el, shot, this.config.elementScreenshotTimeoutMs ?? 8000));
+      found = await this.runCvTool('find-checkbox', { image: shot }, ['find-checkbox', shot]);
+      scale = this.shotScale(shot, box.width);
+    } finally {
+      unlink(shot);
+    }
+    if (!found) {
+      const e: any = new Error('UNSUPPORTED_CAPTCHA: the checkbox widget shows no tick box to click');
+      e.unsupported = true;
+      throw e;
+    }
+    const [x, y, w, h] = found.map((v) => v / scale);
+    return [box.x + x + w * (0.3 + Math.random() * 0.4), box.y + y + h * (0.3 + Math.random() * 0.4)];
+  }
+
+  /**
+   * A clicked checkbox passes or opens a challenge, and both show in the DOM.
+   * Without this wait the next round found the same checkbox still up and clicked it again.
+   */
+  private async awaitWhatTheCheckboxOpened(page: Page): Promise<void> {
+    const deadline = Date.now() + (this.config.postSubmitChangeTimeoutMs ?? 4000);
+    await this.ph(Phase.AWAIT_NEXT_ROUND, async () => {
+      while (Date.now() < deadline && !(await this.isCaptchaSolved(page))) {
+        const widget = await this.detectCaptcha(page);
+        if (widget?.role !== FrameRole.CHECKBOX) return;
+        await delay(this.config.postSolveOutcomePollMs ?? 75);
+      }
+    });
+  }
+
   private getVerifyButton(scope: Scope): Promise<ElementHandle | null> {
     return this.findControl(scope, SUBMIT_SELECTORS);
   }
@@ -851,13 +1148,27 @@ export class CaptchaKrakenSolver {
     return VENDORS.filter(([, s]) => s.hosts.some((h) => blob.includes(h))).map(([vendor]) => vendor);
   }
 
-  private async noWidgetMessage(page: Page): Promise<string> {
-    const base = 'No interactive captcha widget detected';
+  /** Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame (an invisible badge) is not a widget, so what is left is markup the table no longer matches. */
+  private async unmatchedVendorFrames(page: Page): Promise<Vendor[]> {
+    const counts = await Promise.all(VENDORS.map(async ([vendor, s]) => {
+      if (!s.hosts.length) return null;
+      const [frames, passive] = await Promise.all([visible(page, s.hosts.map((h) => `iframe[src*="${h}"]`)), visible(page, s.passive ?? [])]);
+      return frames.length > passive.length ? vendor : null;
+    }));
+    return counts.filter((v): v is Vendor => v !== null);
+  }
+
+  private async noWidgetMessage(page: Page, waitedMs: number): Promise<string> {
+    const base = `No interactive captcha widget detected within ${waitedMs}ms`;
     const loaded = await this.vendorsOnTheWire(page);
     if (!loaded.length) {
-      return `${base} (no vendor captcha code loaded on this page — likely reCAPTCHA v3 / invisible, or a click-triggered challenge that has not been triggered). Failing fast.`;
+      return `${base} (no vendor captcha code loaded on this page — likely reCAPTCHA v3 / invisible, or a click-triggered challenge that has not been triggered).`;
     }
-    return `${base}, BUT ${loaded.join('/')} code IS loaded and running on this page. The vendor's markup no longer matches anything in SELECTORS — the table needs re-measuring against the vendor's current markup, in both solver ports.`;
+    const framed = await this.unmatchedVendorFrames(page);
+    if (framed.length) {
+      return `${base}, BUT ${framed.join('/')} is showing a frame that matches nothing in SELECTORS. The vendor's markup has changed — the table needs re-measuring against the vendor's current markup, in both solver ports.`;
+    }
+    return `${base}; ${loaded.join('/')} code is loaded but drew no widget — the challenge may be invisible or not triggered yet, or an in-page widget's markup has changed.`;
   }
 
   /**
@@ -895,8 +1206,13 @@ export class CaptchaKrakenSolver {
   /** The `--model` argv, or nothing: without VLLM_BASE_URL the CLI can see a credentials file this process cannot. */
   private modelName(cliRoot: string): string | undefined {
     const explicit = this.config.model ?? process.env.CAPTCHA_LORA_NAME;
-    if (explicit) return explicit;
-    return process.env.VLLM_BASE_URL ? this.loraName(cliRoot) : undefined;
+    const name = explicit || (process.env.VLLM_BASE_URL ? this.loraName(cliRoot) : undefined);
+    if (name && !this.legacyModelWarned && isHostedEndpoint(process.env.VLLM_BASE_URL)
+        && isLegacyHostedName(name, cliRoot)) {
+      this.legacyModelWarned = true;
+      console.error(`[captchakraken] ${LEGACY_MODEL_WARNING.replace('{model}', name)}`);
+    }
+    return name;
   }
 
   private resolveCli(): { cliRoot: string; py: string } {
@@ -1351,7 +1667,8 @@ export class CaptchaKrakenSolver {
           break;
         }
         const frame = path.join(dir, `frame_${String(seq).padStart(4, '0')}.png`); // zero-padded: the slicer sorts by name
-        try {
+        // A frame taken while the board still wears our last gesture is not a screen it showed by itself.
+        if (Date.now() - this.lastInputAt >= INPUT_SETTLE_MS) try {
           await this.shot(captchaElement, frame, cfg.elementScreenshotTimeoutMs ?? 8000, 'allow');
           captured++;
           seq++;
@@ -1519,15 +1836,9 @@ export class CaptchaKrakenSolver {
         if (!names.length) {
           const e: any = new Error('ANIMATED_CHALLENGE: could not record the animated challenge (no frame screenshotted).');
           e.animated = true;
-          // NOTHING CAME BACK, which is not a verdict about the board: a still photographs fine. It is a
-          // widget that would not screenshot for the whole window, and the commonest reason for that is
-          // that it is CLOSING, because the answer was accepted. The loop asks before giving up.
-          // ONLY the speculative second look gets the soft landing. A board this solve has PROVEN
-          // animated is a real dead end when it will not film, and must fail loudly as it always has:
-          // measured on the python port, the two video types went from 3 solved and 10 keyframe calls
-          // to 0 and 0 when both cases shared a handler, because the first failed film spends the
-          // probe and every round after it is answered as a still.
-          if (!this.knownAnimated) e.nothingFilmed = true;
+          // Not a verdict about the board — a still photographs fine. A widget that would not screenshot for a
+          // whole window is usually closing because the answer was accepted, so the loop asks before it counts
+          // the round. A board proven animated keeps that verdict, and is filmed again rather than read as a still.
           throw e;
         }
         const out = fs.mkdtempSync(path.join(os.tmpdir(), 'ck_slice_'));
@@ -1573,15 +1884,9 @@ export class CaptchaKrakenSolver {
           rmdir(dir);
           const e: any = new Error('ANIMATED_CHALLENGE: could not record the animated challenge (no frame screenshotted).');
           e.animated = true;
-          // NOTHING CAME BACK, which is not a verdict about the board: a still photographs fine. It is a
-          // widget that would not screenshot for the whole window, and the commonest reason for that is
-          // that it is CLOSING, because the answer was accepted. The loop asks before giving up.
-          // ONLY the speculative second look gets the soft landing. A board this solve has PROVEN
-          // animated is a real dead end when it will not film, and must fail loudly as it always has:
-          // measured on the python port, the two video types went from 3 solved and 10 keyframe calls
-          // to 0 and 0 when both cases shared a handler, because the first failed film spends the
-          // probe and every round after it is answered as a still.
-          if (!this.knownAnimated) e.nothingFilmed = true;
+          // Not a verdict about the board — a still photographs fine. A widget that would not screenshot for a
+          // whole window is usually closing because the answer was accepted, so the loop asks before it counts
+          // the round. A board proven animated keeps that verdict, and is filmed again rather than read as a still.
           throw e;
         }
         const burstMs = Math.max(1, elapsed());
@@ -1614,9 +1919,9 @@ export class CaptchaKrakenSolver {
     }
   }
 
-  /** The session id and the credential travel in the environment, never in argv. */
+  /** The routing values and the credential travel in the environment, never in argv. */
   private solveEnvironment(cliRoot: string, apiKey: string | undefined): NodeJS.ProcessEnv {
-    return solveEnv(cliEnv(cliRoot, this.solveSessionId ? { CAPTCHA_KRAKEN_SESSION: this.solveSessionId } : undefined), apiKey, this.resampleLevel);
+    return solveEnv(cliEnv(cliRoot, this.routingEnv()), apiKey, this.resampleLevel);
   }
 
   /** Exit 2 is an unsupported puzzle, exit 3 the hosted API's own refusal; both are relayed, not reworded. */
@@ -1700,7 +2005,6 @@ export class CaptchaKrakenSolver {
   private resetSolveState(): void {
     this.solutionCache.clear();
     this.repeatedAnswerSeen = false;
-    this.retriedUnusableAnswer = false;
     this.knownAnimated = false;
     this.animatedProbeDone = false;
     this.discardAnimatedPlan();
@@ -1737,7 +2041,7 @@ export class CaptchaKrakenSolver {
     const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode);
     if (sig !== null && sig === this.lastAnswerSig) {
       this.noProgressRounds++;
-      console.log(`[no-progress] the model returned the same answer again (${this.noProgressRounds}/${this.config.maxNoProgressRounds ?? 2}) — the previous one already ran and changed nothing`);
+      console.log(`[no-progress] the model returned the same answer again (${this.noProgressRounds} in a row) — the previous one already ran and changed nothing`);
       this.resampleLevel++;
       // A raised sample never reaches the wire while the cached animated answer stands in front of it.
       this.invalidateAnimatedAnswer();
@@ -1879,12 +2183,16 @@ export class CaptchaKrakenSolver {
         await this.shot(captchaElement, liveAnchor, 2500, 'allow');
         haveAnchor = true;
       } catch { /* no anchor, no movement check */ }
+      // The idle wander hovers the board while the model reads it, and a board reacting to our pointer has not moved
+      // by itself: once we have touched it since the anchor, a change is no evidence that it cycles.
+      const anchoredAt = Date.now();
+      const untouched = () => this.lastInputAt < anchoredAt;
 
       let response = await runQuery(currentPath);
       mergedUsage.push(...response.token_usage);
       if (!enabled) return response;
 
-      if (!this.actedOnBoard && !this.repeatedAnswerSeen && haveAnchor
+      if (!this.actedOnBoard && !this.repeatedAnswerSeen && haveAnchor && untouched()
           && await this.captchaFrameChangedSince(captchaElement, liveAnchor, MOVED_DURING_INFERENCE_DIFF, 'allow')) {
         this.repeatedAnswerSeen = true;
         console.log('[freshness] the widget moved while the model was reading it, with nothing clicked — recording it rather than answering another still.');
@@ -1895,7 +2203,7 @@ export class CaptchaKrakenSolver {
       let changedDuringInference = 0;
       for (let i = 0; i < maxReSolves; i++) {
         if (!(await this.captchaFrameChangedSince(captchaElement, currentPath, threshold))) break;
-        if (++changedDuringInference >= 2 && !this.actedOnBoard) {
+        if (++changedDuringInference >= 2 && !this.actedOnBoard && untouched()) {
           this.repeatedAnswerSeen = true;
           console.log('[freshness] the frame changed twice during inference with nothing clicked — this board cycles; recording it rather than re-solving a screen that has gone.');
           return { actions: response.actions, token_usage: mergedUsage };
@@ -2047,11 +2355,11 @@ export class CaptchaKrakenSolver {
 
   async moveAndClick(page: Page, element: ElementHandle) {
     await this.move(page, element);
-    await this.ph(Phase.MOUSE, () => this.human.click(page, this.human.at));
+    await this.gesture(() => this.human.click(page, this.human.at));
   }
 
   private async performSmoothMove(page: Page, x: number, y: number) {
-    await this.ph(Phase.MOUSE, () => this.human.move(page, [x, y]));
+    await this.gesture(() => this.human.move(page, [x, y]));
   }
 
   /** Element-relative click point: a random spot inside the box, inset 10% off its border. */
@@ -2074,10 +2382,10 @@ export class CaptchaKrakenSolver {
       return;
     }
     const at: [number, number] = [elementBox.x + rel[0], elementBox.y + rel[1]];
-    await this.ph(Phase.MOUSE, () => this.human.move(page, at));
+    await this.gesture(() => this.human.move(page, at));
     await this.waitForKeyframe(element, awaitKeyframe, rel[0] / elementBox.width, rel[1] / elementBox.height);
     this.actedOnBoard = true;
-    await this.ph(Phase.MOUSE, () => this.human.click(page, at));
+    await this.gesture(() => this.human.click(page, at));
   }
 
   private async executeClick(page: Page, _element: ElementHandle, action: ClickAction, elementBox: Box) {
@@ -2087,7 +2395,7 @@ export class CaptchaKrakenSolver {
       console.warn('Click action received without coordinates or bounding box', action);
       return;
     }
-    await this.ph(Phase.MOUSE, () => this.human.click(page, [elementBox.x + rel[0], elementBox.y + rel[1]]));
+    await this.gesture(() => this.human.click(page, [elementBox.x + rel[0], elementBox.y + rel[1]]));
   }
 
   private async executeDrag(page: Page, _element: ElementHandle,
@@ -2096,7 +2404,7 @@ export class CaptchaKrakenSolver {
     this.actedOnBoard = true;
     const center = (bbox: [number, number, number, number]): [number, number] =>
       [elementBox.x + ((bbox[0] + bbox[2]) / 2) * elementBox.width, elementBox.y + ((bbox[1] + bbox[3]) / 2) * elementBox.height];
-    await this.ph(Phase.MOUSE, () => this.human.drag(page, center(action.source_bounding_box), center(action.target_bounding_box)));
+    await this.gesture(() => this.human.drag(page, center(action.source_bounding_box), center(action.target_bounding_box)));
   }
 
   /**
@@ -2134,7 +2442,9 @@ export class CaptchaKrakenSolver {
       return false;
     }
     await this.moveAndClick(page, field);
-    if (!(await this.human.typeText(page, field, text))) return false;
+    const typed = await this.human.typeText(page, field, text);
+    this.lastInputAt = Date.now();
+    if (!typed) return false;
     console.log(`Typed ${text.length} character(s) into the captcha field.`);
     return true;
   }
@@ -2172,7 +2482,7 @@ export class CaptchaKrakenSolver {
       }
       const targetY = ((tb[1] + tb[3]) / 2) * elementBox.height;
       console.log('No slider track; dragging the piece to the slot directly.');
-      await this.human.drag(page, [box.x + box.width / 2, box.y + box.height / 2], [elementBox.x + targetX, elementBox.y + targetY]);
+      await this.gesture(() => this.human.drag(page, [box.x + box.width / 2, box.y + box.height / 2], [elementBox.x + targetX, elementBox.y + targetY]));
       return true;
     }
 
@@ -2239,6 +2549,7 @@ export class CaptchaKrakenSolver {
       await this.human.pause(PauseKind.SETTLE);
     } finally {
       try { await this.human.release(page); } catch { /* the page may have navigated */ }
+      this.lastInputAt = Date.now();
       for (const s of shots) unlink(s);
     }
     return true;

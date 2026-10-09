@@ -132,7 +132,8 @@ answers with a frame number the driver then waits for on screen.
 | `js/src/index.ts` | The package's public surface, and the worked examples in its doc comments. |
 | `js/src/solver.ts` | `CaptchaKrakenSolver`: the driver. Finds the widget, screenshots it, asks the engine for a plan, performs it, decides whether the vendor accepted, and goes round again if not. |
 | `js/src/kinds.ts` | Every closed set of names the driver uses — vendors, action kinds, verdicts, phases, error codes — as `as const` objects mirrored one-for-one in `kinds.py`. |
-| `js/src/selectors.ts` | Every selector the driver knows, in one typed table keyed by vendor (`SELECTORS`): hosts, challenge and checkbox iframes, inline widget shapes, response field, accepted markers, submit controls, text inputs, slider handles and pieces. Table order is detection order. Mirrored one-for-one in `selectors.py`. |
+| `js/src/selectors.ts` | Every selector the driver knows, in one typed table keyed by vendor (`SELECTORS`): hosts, challenge and checkbox iframes, inline widget shapes, response field, accepted markers, submit controls, text inputs, slider handles, pieces, the vendor's refusal screen and its never-interactive frames. Table order is detection order. Mirrored one-for-one in `selectors.py`. |
+| `js/src/verdicts.ts` | The vendor's own answer to each submitted round, read off the page's network: which answer-check endpoints are readable, how each vendor words accept, reject, a new board and a refusal to serve, and the per-solve log the driver reads them from. Mirrored in `verdicts.py`. |
 | `js/src/types.ts` | `SolveResult`, the per-step lifecycle event, and the whole configuration surface with a doc comment per knob. |
 | `js/src/watcher.ts` | `watchPage()`: a background poller that solves captchas as they appear and hands back a `stop()`. Injects nothing into the page. |
 | `js/src/cli-invocation.ts` | How a solve request is handed to the bundled Python CLI: the argv, the environment the bearer token travels in, and the redaction applied to anything printed. |
@@ -142,6 +143,7 @@ answers with a frame number the driver then waits for on screen.
 | `js/src/model-name.ts` | Which served adapter name this client asks for — the same answer the Python port gives, because the name selects the prompt generation. |
 | `js/src/humanize.ts` | How the driver moves: one pluggable object per input device — mouse, mobile touch (over CDP, Appium or a Playwright touchscreen), or none. |
 | `js/src/slide-geometry.ts` | The algebra behind a puzzle-piece slider: where to drag the handle so the piece lands in the gap, at any device pixel ratio. |
+| `js/src/png.ts` | Cutting the widget out of a whole-viewport PNG, with nothing but `node:zlib`: every capture is taken unclipped, because a clipped one makes a headed browser repaint the page. |
 | `js/src/playwright-types.ts` | Minimal structural `Page`, `Frame`, `Locator` and `ElementHandle` types, defined here rather than imported, so the package depends on no browser library and accepts any Playwright-compatible one. |
 | `js/src/puppeteer-adapter.ts` | `fromPuppeteer()`: translates the handful of methods Puppeteer names differently onto that structural surface, and builds a Playwright-shaped `Locator` over Puppeteer's `$$`. |
 | `js/src/timing.ts` | Where one solve's wall clock went, by phase. |
@@ -157,6 +159,9 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/contract.test.ts` | The JS half of `contract.json`, and the parity between the two ports. Known divergences are pinned so the list can only shrink deliberately; a new one fails the build. |
 | `js/src/limits.test.ts` | The `5 < 8 < 10` round-cap ordering against the gateway — a type-check cannot notice a changed integer. |
 | `js/src/browser-compat.test.ts` | The compatibility claim, driven against **real** Playwright and Puppeteer, so a library renaming a method we call is caught rather than agreed with by a fake. |
+| `js/src/a-capture-never-clips-the-page.test.ts` | Every capture is one unclipped viewport screenshot cropped locally, at the page's device pixel ratio, scrolled into view once rather than per shot. |
+| `js/src/a-checkbox-is-clicked-not-watched.test.ts` | A checkbox is ticked from the DOM, or found on one capture by OpenCV when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `js/src/our-own-gesture-is-not-animation.test.ts` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `js/src/puppeteer-adapter.test.ts` | The adapter's translation layer, pinned difference by difference. |
 | `js/src/fake-dom.test.ts` | The one locator-shaped fake DOM the driver tests share: nodes name the selectors they answer to, so no test carries its own CSS matcher. |
 | `js/src/python-command.test.ts` | The client must not assume a `python` binary exists — on Debian-family systems there is only `python3`. |
@@ -187,12 +192,13 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/a-finished-recording-still-answers-the-question.test.ts` | A film of a board that never stopped changing is not a still, however late the verdict is asked for. |
 | `js/src/a-replaced-board-has-not-failed-yet.test.ts` | Evidence that arms the second look belongs to the board it was found on; the boards dealt after it are not filmed for it. |
 | `js/src/an-unusable-answer-is-not-a-dead-page.test.ts` | An answer the widget cannot take buys the recording path a round; a page that takes nothing still gives up. |
+| `js/src/a-round-that-did-nothing-waits-for-nothing.test.ts` | A round that performed nothing starts the next at once; only a widget caught mid-transition is waited out. |
 | `js/src/one-ask-cannot-outlive-the-solve.test.ts` | Every inference ask is bounded by what is left of the solve, and the source test refuses a new call site that is not. |
 | `js/src/cycling-board-waits-for-its-screen.test.ts` | The frame gate was off on every real animated captcha: the driver must hold until the page shows the keyframe the model chose. |
 | `js/src/speculative-burst.test.ts` | Asking the model and watching the board can overlap, and the burst must not be wasted when they do. |
 | `js/src/burst-window-is-wall-clock.test.ts` | The burst's windows are budgets in milliseconds, so a camera slower than the interval must not spend more of the solve than a fast one. |
 | `js/src/step-observer-is-cheap.test.ts` | Watching a solve through `onStep` must not slow it down. |
-| `js/src/screenshot-timeouts.test.ts` | Every element screenshot names its own timeout instead of inheriting a default that can hang. |
+| `js/src/screenshot-timeouts.test.ts` | Every capture names its own timeout instead of inheriting a default that can hang. |
 | `js/src/scroll-into-view-is-bounded.test.ts` | Scrolling to an element cannot take thirty seconds. |
 | `js/src/empty-answer-submits.test.ts` | "None of these" is an answer, and it still has to be sent. |
 | `js/src/geetest-submit-button.test.ts` | GeeTest's submit control is a `div` that says OK, not a button. |
@@ -200,6 +206,10 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/recaptcha-chipped-board.test.ts` | A reCAPTCHA board that ticks a clicked tile is already answered — do not click it again. |
 | `js/src/recaptcha-dynamic-more-is-not-an-error.test.ts` | "Please also check the new images" is progress, not a rejection. |
 | `js/src/verdict-widget-gone.test.ts` | For the vendors with no other signal, the widget disappearing *is* success. |
+| `js/src/the-vendor-says-whether-the-round-was-taken.test.ts` | Every recorded answer-check response parses as the vendor meant it, an accepted verdict ends the solve, a rejected one counts a loop, and only a refusal to serve ends the solve early. |
+| `js/src/a-widget-is-waited-for.test.ts` | A widget that draws late is waited for without charging the solve budget, and "no captcha" names the cause instead of blaming the selectors. |
+| `js/src/outcome-reporting.test.ts` | The outcome report reaches the engine with the session, vendor and site, a hosted refusal is warned about every time, and a self-hosted endpoint with no route is not asked again. |
+| `js/src/the-package-ships-only-what-it-runs.test.ts` | The npm tarball holds the driver and the engine source it installs, and nothing else. |
 | `js/src/watcher.test.ts` | The watcher's contract, driven against a fake solver. |
 | `js/src/api-error-crosses-the-process-boundary.test.ts` | A hosted-API refusal is written by the Python CLI to stderr in snake_case and rebuilt here as `CaptchaKrakenAPIError`. Pins that every field survives the rename, that a wrong type is dropped rather than passed through, and that unrelated stderr yields `null` instead of a confident billing message. |
 | `js/src/token-usage-never-reports-nan.test.ts` | `SolveResult.tokenUsage` is published, and the rounds it sums arrive in two dialects. Pins that both are counted, that an unknown shape contributes zero rather than poisoning the total with `NaN`, and that an unpriced model still yields a finite cost. |
@@ -266,6 +276,7 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/action_types.py` | The typed actions the model may return — click, drag, type, wait — and the normalised `BoundingBox` they carry. |
 | `python/src/captchakraken/kinds.py` | Every closed set of names the engine uses — vendors, action kinds, verdicts, phases, error codes — as `StrEnum`s mirrored one-for-one in `kinds.ts`. |
 | `python/src/captchakraken/selectors.py` | Every selector the page driver knows, in one typed table keyed by vendor (`SELECTORS`), mirrored one-for-one in `selectors.ts`. |
+| `python/src/captchakraken/verdicts.py` | The vendor's own answer to each submitted round, read off the page's network, mirrored one-for-one in `verdicts.ts`. |
 | `python/src/captchakraken/image_processor.py` | Image manipulation and the grid-detection entry points the solver calls. |
 | `python/src/captchakraken/overlay.py` | Draws the numbered cell labels onto a grid screenshot. The model reads those labels; it was never trained to invent a numbering. |
 | `python/src/captchakraken/keyframes.py` | Reduces a recorded clip to the few frames the model is shown. A verbatim port of the extractor the model was trained with — if this copy sliced differently, the frame number the model answers with would name a picture that does not exist. Its region-diff metric is also the driver's wait-for-state gate. |
@@ -292,6 +303,9 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_blank_board_is_not_photographed.py` | The load gate in front of every inference screenshot, and the fences that stop it stalling a legitimately sparse puzzle. |
 | `python/tests/test_a_board_that_will_not_film_may_already_be_solved.py` | A burst that caught no frame is not a verdict about the board; it must not discard a board the vendor already took. |
 | `python/tests/test_a_board_that_never_repeats_is_animated.py` | A continuous animation never repeats and never settles; the burst calls it animated rather than a still. |
+| `python/tests/test_a_capture_never_clips_the_page.py` | Every capture is one unclipped viewport screenshot cropped locally, at the page's device pixel ratio, scrolled into view once rather than per shot. |
+| `python/tests/test_a_checkbox_is_clicked_not_watched.py` | A checkbox is ticked from the DOM, or found on one capture by OpenCV when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `python/tests/test_our_own_gesture_is_not_animation.py` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `python/tests/test_geetest_accept_is_a_signal.py` | GeeTest's accept banner is a solve; its refuse banner, and its closed popup wrapper, are not. |
 | `python/tests/test_a_missing_prompt_is_not_a_reason_to_wait.py` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
 | `python/tests/test_slide_reads_the_piece_off_the_page.py` | The slider prefers the piece element's own box over the pixel diff, and the diff's measured undershoot is pinned as the fallback's known cost. |
@@ -310,6 +324,10 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_expert_routing.py` | Which expert a puzzle routes to, including that an unknown puzzle does not silently pick one. |
 | `python/tests/test_expert_reaches_the_wire.py` | Routing correctly is worth nothing if the planner still sends the default — this checks the request that actually leaves. |
 | `python/tests/test_routing_headers.py` | The request-priority environment variable becomes the header the gateway reads, and nothing else. |
+| `python/tests/test_the_vendor_says_whether_the_round_was_taken.py` | Every recorded answer-check response parses as the vendor meant it, an accepted verdict ends the solve, a rejected one counts a loop, and only a refusal to serve ends the solve early. |
+| `python/tests/test_a_widget_is_waited_for.py` | A widget that draws late is waited for without charging the solve budget, and "no captcha" names the cause instead of blaming the selectors. |
+| `python/tests/test_outcome_reporting.py` | The outcome report's contract: endpoint, body and timeout, a self-hosted 404 switching it off, a hosted failure warned about every time, and the vendor, site and widget-host headers. |
+| `python/tests/test_the_legacy_model_warning_is_one_text.py` | A hosted model name with no route is warned about once per process, and both ports print the same words. |
 | `python/tests/test_endpoint_is_dialled_once.py` | Connections are reused instead of a fresh handshake per inference. |
 | `python/tests/test_solver.py` | The still-image engine end to end against a stubbed endpoint. |
 | `python/tests/test_page_solver.py` | The Python page driver: detection, the round loop, and which error each dead end raises. |
@@ -323,6 +341,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_new_board_ends_the_film.py` | `_fresh_board()` drops the recorded answer, the animated verdict and the slice, so none of them cross onto the next board. |
 | `python/tests/test_a_replaced_board_has_not_failed_yet.py` | A failed round arms the second look only while its board is still up, and a replaced board drops an arm the previous one set. |
 | `python/tests/test_an_unusable_answer_is_not_a_dead_page.py` | The same rule in the Python port: an unusable answer is a reason to look again, not to end the solve. |
+| `python/tests/test_a_round_that_did_nothing_waits_for_nothing.py` | The same rule in the Python port: no dwell and no backoff after a round that performed nothing. |
 | `python/tests/test_a_solved_board_is_not_lost_to_a_typed_action.py` | A typed answer reads like a dict one, so a widget closing on an accepted board is not a failed solve. |
 | `python/tests/test_one_ask_cannot_outlive_the_solve.py` | The planner's request timeout is the caller's remaining budget, floored, and the request actually sends it. |
 | `python/tests/test_the_second_look_believes_its_recording.py` | The second look at a board that failed once is a question, and the clip it records answers it: a board that never moved goes back to the still expert. |
@@ -331,6 +350,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_grid_is_a_regular_lattice.py` | Every other grid check asks what is inside the cells; a click board over a photo passes those and is not a lattice. |
 | `python/tests/test_grid_dims_must_be_possible.py` | `find_grid` proposes lattices; a shape no vendor actually ships is a false positive. |
 | `python/tests/test_grid_flank_contrast.py` | A chosen lattice must separate something — gutters running across a smooth background separate nothing. |
+| `python/tests/test_grid_never_pairs_tiles.py` | A board of tall tiles is never read as a lattice of tile pairs, which sent it to the wrong expert. |
 | `python/tests/test_grid_noisy_gutter.py` | A traced gutter line must survive noise instead of ending at the first pixel that fails the step test. |
 | `python/tests/test_grid_off_lattice_clusters.py` | A correct lattice that already won scoring must not then be thrown away by the off-lattice check. |
 | `python/tests/test_grid_overcount_falls_back.py` | Every widget puts a footer under its grid, so an overcounted row falls back rather than answering the wrong shape. |
@@ -364,6 +384,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_find_checkbox_rejects_what_is_not_a_checkbox.py` | One test per gate in the checkbox detector, on synthetic images: squareness, absolute size, relative area and content variance. A false positive here clicks the page background; a false negative reports no widget on a page that has one. |
 | `python/tests/test_the_two_ports_share_one_mouse.py` | The mouse is a port, not a rewrite, so the two drivers agree on a seed exactly rather than statistically. |
 | `python/tests/fixtures/cursory_cross_port.json` | The recorded JS-port trajectories `test_the_two_ports_share_one_mouse.py` checks the Python port against: four seeds, points and timings. |
+| `python/tests/fixtures/vendor_verdicts.json` | Answer-check responses shaped like the ones the vendors' public demo pages return, with every token and id replaced; both ports' verdict tests read it. |
 | `python/tests/test_the_wait_gate_metric.py` | `region_box` and `region_diff_ratio`, the metric the driver holds the mouse on. Pins that an edge point never yields an empty box (which would read as a perfect match and open the gate immediately), that mismatched shapes read as completely different, and that the box is what bounds the comparison. |
 | `python/tests/test_thinking_is_off_on_every_runtime.py` | Both fields that turn thinking off reach the wire. vLLM and llama.cpp read `chat_template_kwargs`; Ollama reads `reasoning_effort` and ignores the other, so one alone leaves the answer in `reasoning` with an empty `content` on whichever runtime the user picked. |
 | `python/tests/test_cli_stdout_is_the_wire_between_the_ports.py` | The CLI's stdout is a wire protocol the TypeScript driver `JSON.parse`s. Pins one JSON document on stdout and nothing else, diagnostics on stderr, a non-zero exit on refusal, and that each handler declines a command that is not its own. |

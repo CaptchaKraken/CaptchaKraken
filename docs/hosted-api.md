@@ -118,6 +118,26 @@ If you write your own HTTP client, set `CAPTCHA_KRAKEN_SESSION` to one value per
 captcha — or send the header yourself. Without it, every round is a separate
 session and every round is billed.
 
+### Outcome reports
+
+When a solve ends, the driver tells the hosted API whether the captcha was
+accepted: `POST /v1/solve-outcome` with `{"session": "<id>", "solved": true}`.
+The answer is the vendor's own verdict where its answer-check response is
+readable, and the page's done-signal otherwise. Hosted requests also carry
+`X-CK-Vendor` (which captcha vendor), `X-CK-Site` (the page's hostname) and
+`X-CK-Widget-Host` (the hostname the captcha's own frame was served from) —
+hostnames only, never a path or query. A failed report never changes the
+solve's result; it is logged as a warning. Set `CAPTCHA_REPORT_OUTCOME=0` to
+send none.
+
+### Model names
+
+Leave the model unset against the hosted API: the client names the right model
+for each puzzle. If a pinned name (`CAPTCHA_LORA_NAME`, or the `model` option)
+is one the hosted API no longer routes, it is answered by an older model and the
+client prints one warning when it starts. Set
+`CAPTCHA_KRAKEN_MODEL_WARNING=0` to silence it.
+
 ## Errors
 
 Refusals arrive as `CaptchaKrakenAPIError` with a machine-readable `code`.

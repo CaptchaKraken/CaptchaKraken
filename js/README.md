@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JWriter20/CaptchaKraken/main/docs/assets/logo-card.png" alt="CaptchaKraken" width="128" height="128">
+  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/logo-card.png" alt="CaptchaKraken" width="128" height="128">
 </p>
 
 <h1 align="center">captchakraken</h1>
 
 <p align="center">
   <b>A captcha solver for browser automation.</b><br>
-  The TypeScript driver for <a href="https://github.com/JWriter20/CaptchaKraken">CaptchaKraken</a>.
+  The TypeScript driver for <a href="https://github.com/CaptchaKraken/CaptchaKraken">CaptchaKraken</a>.
 </p>
 
 Hand it a Playwright or Puppeteer `Page`. It finds the captcha, reads the whole
@@ -17,14 +17,14 @@ Run the model on **your own hardware**, or point it at the **hosted API** and ru
 nothing at all.
 
 > Full docs — demo videos, accuracy, self-hosting — live in the main repo
-> **[CaptchaKraken](https://github.com/JWriter20/CaptchaKraken)**.
+> **[CaptchaKraken](https://github.com/CaptchaKraken/CaptchaKraken)**.
 
 ## Watch it work
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JWriter20/CaptchaKraken/main/docs/assets/demo/recaptcha_4x4.webp" width="260"
+  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/recaptcha_4x4.webp" width="260"
        alt="A live reCAPTCHA 4×4 tile grid challenge being solved end to end">
-  <img src="https://raw.githubusercontent.com/JWriter20/CaptchaKraken/main/docs/assets/demo/geetest_slide.webp" width="260"
+  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/geetest_slide.webp" width="260"
        alt="A live GeeTest slide jigsaw challenge being solved end to end">
 </p>
 
@@ -35,7 +35,7 @@ they run shorter than the solves they show.
 
 **More puzzle types**, as video and with the full method, at
 [captchakraken.com](https://captchakraken.com) and in the
-[main repo](https://github.com/JWriter20/CaptchaKraken#watch-it-work).
+[main repo](https://github.com/CaptchaKraken/CaptchaKraken#watch-it-work).
 
 ## Install
 
@@ -146,7 +146,7 @@ somewhere else. A `touchDriver` with no `scale` on a page reporting
 `devicePixelRatio !== 1` refuses on the first gesture and names the value to pass.
 
 Full details, including writing your own humanizer:
-[docs/usage.md § How it moves](https://github.com/JWriter20/CaptchaKraken/blob/main/docs/usage.md#how-it-moves--mouse-mobile-none-or-yours).
+[docs/usage.md § How it moves](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/usage.md#how-it-moves--mouse-mobile-none-or-yours).
 
 ## Configuration
 
@@ -171,7 +171,7 @@ environment variables at all.
 Python engine and spawns it, forwarding the environment wholesale — so every
 variable the engine reads applies to a TypeScript solve too. The full list, and
 the vLLM server knobs, are in
-[AGENTS.md § Environment variables](https://github.com/JWriter20/CaptchaKraken/blob/main/AGENTS.md#environment-variables).
+[AGENTS.md § Environment variables](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/AGENTS.md#environment-variables).
 
 ## License
 

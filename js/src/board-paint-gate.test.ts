@@ -6,13 +6,14 @@ import fs from 'node:fs';
 import { resolve } from 'node:path';
 
 import { CaptchaKrakenSolver } from './solver';
+import { photographsItself } from './fake-dom.test';
 
 const el = () => ({
   async screenshot({ path }: { path: string }) { fs.writeFileSync(path, 'x'); },
 });
 
 function solverSeeing(verdicts: Array<boolean | null>, config: Record<string, unknown> = {}) {
-  const s: any = new CaptchaKrakenSolver({ boardPaintPollMs: 1, boardPaintTimeoutMs: 60, ...config });
+  const s: any = photographsItself(new CaptchaKrakenSolver({ boardPaintPollMs: 1, boardPaintTimeoutMs: 60, ...config }));
   let i = 0;
   s.calls = 0;
   s.runCvTool = async () => {

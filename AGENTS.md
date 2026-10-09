@@ -95,7 +95,7 @@ One command. It reads your GPU/Apple memory, picks a model size that fits,
 downloads it, and writes a config file.
 
 ```bash
-git clone https://github.com/JWriter20/CaptchaKraken
+git clone https://github.com/CaptchaKraken/CaptchaKraken
 cd CaptchaKraken
 ./setup.sh
 ```
@@ -333,6 +333,8 @@ Advanced — only to change **which** model is served:
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` never auto-starts a local server | `1` |
 | `CAPTCHA_KRAKEN_STATE_DIR` | Where the pidfile, log, and credentials live | `~/.captchakraken` |
 | `CAPTCHA_KRAKEN_SESSION` | Groups rounds of one solve for billing | set per solve by both drivers |
+| `CAPTCHA_KRAKEN_VENDOR`, `CAPTCHA_KRAKEN_SITE` | Which captcha vendor and which site (hostname only) a hosted solve was for; sent to the hosted API only | set per solve by both drivers |
+| `CAPTCHA_REPORT_OUTCOME` | `0` stops the driver telling the hosted API whether each solve was accepted | `1` |
 | `CAPTCHA_DEBUG` | `1` prints solver diagnostics to stderr | `0` |
 | `CAPTCHA_HUMANIZATION` | `mouse`, `mobile` or `none` — how gestures are performed. Loses to anything set in code, because the right mode is a property of the page | `mouse` |
 
@@ -349,15 +351,16 @@ never matches in the other.
 
 **Python.** `PageSolver.solve()` raises these, importable from
 `captchakraken.page_solver`. `CaptchaSolveError` is the base class of the other
-four, so catch it last or it swallows them:
+five, so catch it last or it swallows them:
 
 | Error | Meaning | Do |
 |---|---|---|
-| `NoCaptchaFoundError` | No interactive widget — reCAPTCHA v3 / invisible, or one that only triggers on user action | Continue — this is not a failure |
-| `UnsupportedChallengeError` | A settled frame the model reports it cannot solve | Skip, or retry to get a different puzzle |
+| `NoCaptchaFoundError` | No interactive widget appeared within `detection_timeout_ms` (15 s) — reCAPTCHA v3 / invisible, or one that only triggers on user action | Continue — this is not a failure |
+| `VendorBlockedError` | The vendor refused to serve this client at all (rate-limited, or its try-again-later screen) | Stop; a retry from the same browser and network will be refused too |
+| `UnsupportedChallengeError` | The model had no usable answer on every round until `max_solve_loops` ran out | Skip, or retry to get a different puzzle |
 | `AnimatedChallengeError` | An animated challenge could not be **recorded** (the element refuses to screenshot, or the recording decodes to nothing) | Retry |
 | `PageClosedError` | The page, context or browser went away mid-solve | Nothing to retry against — reopen the page |
-| `CaptchaSolveError` | Everything else, and the base of the four above | Read the message |
+| `CaptchaSolveError` | Everything else, including every loop spent without a solve, and the base of the five above | Read the message |
 
 **TypeScript.** The driver exports exactly **one** error class,
 `CaptchaKrakenAPIError`. Everything else — no widget on the page, a puzzle it
@@ -365,6 +368,17 @@ cannot drive, the round budget exhausted — arrives as a plain `Error` whose
 message says which. Do not write `catch (e) { if (e instanceof
 NoCaptchaFoundError) }` against this port: that class does not exist here and
 the branch can never be taken. Read `result.isSolved`, and read the message.
+
+**A solve gives up in two situations only**: the vendor refuses to serve the
+client at all, or every one of `maxSolveLoops` / `max_solve_loops` (default 6)
+has been spent without a solve. A round that fails for any other reason — a
+refused answer, a board that would not screenshot, an answer the widget could
+not use — counts one loop and the next round goes again. The time budget,
+a closed page and a hosted API refusal still end a solve at once.
+
+Where the vendor's own answer-check response can be read, each round's verdict
+is on the result as `result.verdicts` (`accepted`, `rejected`, `new-challenge`,
+`blocked`), and an accepted verdict is what ends the solve.
 
 Hosted API refusals arrive as `CaptchaKrakenAPIError` in **both** ports.
 **Branch on `e.code`, never on the message text** — wording changes, codes do

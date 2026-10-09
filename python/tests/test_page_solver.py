@@ -145,8 +145,12 @@ def _widget(element: FakeElement, vendor: Vendor = Vendor.UNKNOWN, role: FrameRo
 
 
 def _solver(**overrides: Any) -> PageSolver:
-    solver = PageSolver(config=PageSolverConfig(**overrides), solver=_NO_MODEL)
+    # No detection wait and no pause between rounds unless a test asks: both are real time.
+    config = PageSolverConfig(**{"detection_timeout_ms": 0, "stale_element_backoff_ms": 0, **overrides})
+    solver = PageSolver(config=config, solver=_NO_MODEL)
     solver._solver = None
+    # These fakes photograph themselves; the viewport capture has its own tests.
+    solver._screenshot = lambda element, path, **_: element.screenshot(path=path)
     if hasattr(solver._human, "_cursor_seeded"):
         solver._human._cursor_seeded = True
     return solver
@@ -207,8 +211,8 @@ class TestSolveLoop:
         result = solver.solve(page)
         assert result.is_solved is True
 
-    def test_no_interaction_with_captcha_still_present_aborts(self):
-        solver = _solver()
+    def test_no_interaction_with_captcha_still_present_gives_up_when_the_loops_are_spent(self):
+        solver = _solver(post_solve_delay_ms=1)
         solver.detect_captcha = lambda _page: _widget(FakeElement(src="recaptcha/api2/bframe"))
         solver._solve_single = lambda *_: (False, [])
         solver.is_captcha_solved = lambda _page: False
@@ -216,16 +220,19 @@ class TestSolveLoop:
         with pytest.raises(CaptchaSolveError, match="no interactions"):
             solver.solve(FakePage())
 
-    def test_unsupported_on_the_first_frame_is_definitive(self):
+    def test_an_unsupported_board_every_round_ends_unsupported_once_the_loops_are_spent(self):
         solver = _solver()
         solver.detect_captcha = lambda _page: _widget(FakeElement(src="https://hcaptcha.com/?frame=challenge"))
+        calls = {"n": 0}
 
         def raise_unsupported(*_):
+            calls["n"] += 1
             raise UnsupportedCaptchaError("nope")
 
         solver._solve_single = raise_unsupported
-        with pytest.raises(UnsupportedChallengeError):
+        with pytest.raises(UnsupportedChallengeError, match="after 6 solve loops"):
             solver.solve(FakePage())
+        assert calls["n"] == 6, "an unusable answer ended the solve before its loops were spent"
 
     def test_unsupported_mid_solve_retries_instead_of_aborting(self):
         solver = _solver(max_unsupported_resolves=2)
@@ -249,7 +256,7 @@ class TestSolveLoop:
         assert calls["n"] >= 3
 
     def test_stale_handle_after_submit_is_retried_not_fatal(self):
-        solver = _solver(max_stale_element_retries=2, stale_element_backoff_ms=1)
+        solver = _solver()
         solver.detect_captcha = lambda _page: _widget(FakeElement(src="https://hcaptcha.com/?frame=challenge"))
         solver.is_captcha_solved = lambda _page: False
         solver._is_challenge_freshly_rendered = lambda _page: False
@@ -264,23 +271,26 @@ class TestSolveLoop:
             raise RuntimeError("Element is not attached to the DOM")
 
         solver._solve_single = flaky
-        with pytest.raises(RuntimeError):
+        with pytest.raises(CaptchaSolveError, match="after 6 solve loops"):
             solver.solve(FakePage())
-        assert calls["n"] >= 3
+        assert calls["n"] == 6, "a stale handle ended the solve before its loops were spent"
 
-    def test_stale_handle_before_any_interaction_is_surfaced(self):
+    def test_a_stale_handle_before_any_interaction_counts_a_loop(self):
         solver = _solver()
         solver.detect_captcha = lambda _page: _widget(FakeElement(src="https://hcaptcha.com/?frame=challenge"))
+        calls = {"n": 0}
 
         def raise_detached(*_):
+            calls["n"] += 1
             raise RuntimeError("Element is not attached to the DOM")
 
         solver._solve_single = raise_detached
-        with pytest.raises(RuntimeError):
+        with pytest.raises(CaptchaSolveError, match="went stale"):
             solver.solve(FakePage())
+        assert calls["n"] == 6
 
-    def test_underselect_error_retries_once_then_aborts(self):
-        solver = _solver()
+    def test_underselect_error_asks_for_the_missed_tiles_until_the_loops_are_spent(self):
+        solver = _solver(post_solve_outcome_timeout_ms=1)
         solver.detect_captcha = lambda _page: _widget(FakeElement(src="recaptcha/api2/bframe"))
         solver.is_captcha_solved = lambda _page: False
         solver._is_challenge_freshly_rendered = lambda _page: False
@@ -293,10 +303,10 @@ class TestSolveLoop:
             return True, []
 
         solver._solve_single = record
-        with pytest.raises(CaptchaSolveError, match="under-selection"):
+        with pytest.raises(CaptchaSolveError, match="after 6 solve loops"):
             solver.solve(FakePage())
         assert seen_retry_modes[0] is None
-        assert "missed-tiles" in seen_retry_modes
+        assert seen_retry_modes[1:] == ["missed-tiles"] * 5
 
     def test_solved_signal_short_circuits_the_loop(self):
         solver = _solver()

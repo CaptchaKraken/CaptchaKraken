@@ -9,7 +9,7 @@ browser — bring your own — and every inference goes to a model endpoint you
 point it at. The `serve` extra is what turns this box into that endpoint.
 
 Repo, guides and the full agent guide:
-<https://github.com/JWriter20/CaptchaKraken>
+<https://github.com/CaptchaKraken/CaptchaKraken>
 
 ---
 
@@ -71,10 +71,15 @@ module docstring of `captchakraken/cli.py` lists every mode with its arguments.
 ## 4. Errors
 
 `PageSolver.solve()` raises from `captchakraken.page_solver`:
-`NoCaptchaFoundError` (no interactive widget — usually not a failure),
-`UnsupportedChallengeError`, `AnimatedChallengeError` (the challenge could not
-be *recorded*), `PageClosedError`, and `CaptchaSolveError`, which is the base
-class of the other four — catch it last or it swallows them. The TypeScript
+`NoCaptchaFoundError` (no interactive widget appeared within
+`detection_timeout_ms` — usually not a failure), `VendorBlockedError` (the
+vendor refused to serve this client at all), `UnsupportedChallengeError`,
+`AnimatedChallengeError` (the challenge could not be *recorded*),
+`PageClosedError`, and `CaptchaSolveError`, which is the base class of the
+other five — catch it last or it swallows them. Apart from a vendor refusal, a
+closed page and the time budget, a solve only gives up once every one of
+`max_solve_loops` has been spent. `result.verdicts` holds the vendor's own
+answer to each round where its answer-check response is readable. The TypeScript
 port raises none of these; it exports one error class and throws plain `Error`
 otherwise.
 
@@ -100,7 +105,7 @@ generation and the weights drift apart.
 
 - **Never invent a number.** Every accuracy, latency and price figure we publish
   is on one page —
-  [docs/benchmarks.md](https://github.com/JWriter20/CaptchaKraken/blob/main/docs/benchmarks.md).
+  [docs/benchmarks.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/benchmarks.md).
   Quote it as written; do not derive, round, or convert anything, and do not
   read a static-image rate as a promise about a browser run.
 - **Never print an API key** into a transcript, a log, or a commit. Use
@@ -116,7 +121,7 @@ generation and the weights drift apart.
 - **Respect the licence.** Building automation with this is fine; selling the
   solve, or shipping it inside a browser or automation product, is not. See
   [LICENSE](./LICENSE) and
-  [docs/licensing.md](https://github.com/JWriter20/CaptchaKraken/blob/main/docs/licensing.md).
+  [docs/licensing.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/licensing.md).
 - **Changing this package's own code?** Its rules are in
-  [CONTRIBUTING.md](https://github.com/JWriter20/CaptchaKraken/blob/main/CONTRIBUTING.md),
+  [CONTRIBUTING.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/CONTRIBUTING.md),
   not here.

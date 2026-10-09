@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JWriter20/CaptchaKraken/main/docs/assets/logo-card.png" alt="CaptchaKraken" width="128" height="128">
+  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/logo-card.png" alt="CaptchaKraken" width="128" height="128">
 </p>
 
 <h1 align="center">captchakraken</h1>
 
 <p align="center">
   <b>A captcha solver for browser automation.</b><br>
-  The Python engine and CLI behind <a href="https://github.com/JWriter20/CaptchaKraken">CaptchaKraken</a>.
+  The Python engine and CLI behind <a href="https://github.com/CaptchaKraken/CaptchaKraken">CaptchaKraken</a>.
 </p>
 
 OpenCV tile detection plus a fine-tuned **Qwen3.5-9B** vision model. Give it a
@@ -19,14 +19,14 @@ nothing at all.
 
 > For demo videos, accuracy numbers, the browser driver, and the full
 > self-hosting guide, see the main repo
-> **[CaptchaKraken](https://github.com/JWriter20/CaptchaKraken)**.
+> **[CaptchaKraken](https://github.com/CaptchaKraken/CaptchaKraken)**.
 
 ## Watch it work
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JWriter20/CaptchaKraken/main/docs/assets/demo/recaptcha_4x4.webp" width="260"
+  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/recaptcha_4x4.webp" width="260"
        alt="A live reCAPTCHA 4×4 tile grid challenge being solved end to end">
-  <img src="https://raw.githubusercontent.com/JWriter20/CaptchaKraken/main/docs/assets/demo/geetest_slide.webp" width="260"
+  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/geetest_slide.webp" width="260"
        alt="A live GeeTest slide jigsaw challenge being solved end to end">
 </p>
 
@@ -37,7 +37,7 @@ they run shorter than the solves they show.
 
 **More puzzle types**, as video and with the full method, at
 [captchakraken.com](https://captchakraken.com) and in the
-[main repo](https://github.com/JWriter20/CaptchaKraken#watch-it-work).
+[main repo](https://github.com/CaptchaKraken/CaptchaKraken#watch-it-work).
 
 ## What it solves
 
@@ -64,7 +64,7 @@ pip install "captchakraken[serve]"   # + the serving stack (vLLM/torch) to self-
 The base install is lightweight — everything you need to solve captchas against
 a vLLM server (local or remote). The `[serve]` extra pulls the heavy stack only
 if you want to run the model yourself. The one-command
-[`setup.sh`](https://github.com/JWriter20/CaptchaKraken) installs `[serve]`,
+[`setup.sh`](https://github.com/CaptchaKraken/CaptchaKraken) installs `[serve]`,
 downloads the weights, and writes an env file for you.
 
 ## No GPU? Use the hosted API

@@ -1,3 +1,4 @@
+import type { RoundVerdict } from './verdicts';
 import type { Humanizer, TouchTransform } from './humanize.js';
 import type { ActionKind, FrameRole, HumanizationMode, PromptFamily, SolveStage, Vendor } from './kinds';
 
@@ -42,9 +43,11 @@ export interface CaptchaKrakenConfig {
   startingMousePosition?: { x: number, y: number };
   /** Solve rounds that fit the timeout. Default 6. */
   maxSolveLoops?: number;
-  /** Consecutive identical answers before the solve is abandoned. Default 2. */
+  /** How long to keep looking for a widget the page has not drawn yet, before "no captcha" is believed. Not charged to `overallSolveTimeoutMs`. Default 15000. */
+  detectionTimeoutMs?: number;
+  /** Repeats of one answer on one board before the solve ends; the first repeats are re-asked at a fresh sample. Default 2. */
   maxNoProgressRounds?: number;
-  /** Dwell after a round that answered nothing. Default 1200. */
+  /** @deprecated Ignored since 3.2.0: a round that performed nothing goes straight on to the next. */
   postSolveDelayMs?: number;
   /** Whole-solve time limit. Default 45000. */
   overallSolveTimeoutMs?: number;
@@ -118,11 +121,11 @@ export interface CaptchaKrakenConfig {
   elementScreenshotTimeoutMs?: number;
   /** Timeout for an `onStep` screenshot. Default 2000. */
   stepScreenshotTimeoutMs?: number;
-  /** Re-detect retries after a stale handle. Default 3. */
+  /** @deprecated Ignored since 3.2.0: a stale handle now counts against `maxSolveLoops`. */
   maxStaleElementRetries?: number;
-  /** Backoff before re-detecting. Default 900. */
+  /** The pause before a failed round is tried again. Default 900. */
   staleElementBackoffMs?: number;
-  /** Retries when "unsupported" arrives mid-solve on a transitional frame. Default 3. */
+  /** @deprecated Ignored since 3.2.0: an unusable answer now counts against `maxSolveLoops`. */
   maxUnsupportedReSolves?: number;
 }
 
@@ -201,4 +204,6 @@ export interface SolveResult {
   };
   /** Milliseconds per phase, plus `total`. */
   phases?: Record<string, number>;
+  /** What the vendor's own server answered, in order, for the vendors whose answer is readable. */
+  verdicts: RoundVerdict[];
 }

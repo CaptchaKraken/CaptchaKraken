@@ -104,6 +104,15 @@ class Outcome(StrEnum):
     FAILED = "failed"
 
 
+class Verdict(StrEnum):
+    """What the vendor's own server answered a round: BLOCKED is a refusal to serve at all, not a wrong answer."""
+
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    NEW_CHALLENGE = "new-challenge"
+    BLOCKED = "blocked"
+
+
 class Phase(StrEnum):
     """Timing phases. Only INFERENCE and MOUSE are productive; everything else is waiting."""
 

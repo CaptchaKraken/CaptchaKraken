@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import itertools
 import json
+import math
 import os
 import random
 import re
@@ -22,15 +24,21 @@ from . import planner
 from .action_types import CaptchaAction
 from .humanize import Humanizer, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
-                    RecaptchaBanner, RetryMode, SettleVerdict, Vendor)
+                    RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
 from .selectors import (ACCEPTED_SELECTORS, PIECE_SELECTORS, RESPONSE_SELECTORS, SELECTORS, SLIDER_HANDLE_SELECTORS,
                         SUBMIT_SELECTORS, TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, VENDORS, WIDGET_PROBES,
                         VendorSelectors, WidgetProbe)
 from .solver import CaptchaSolver, UnsupportedCaptchaError
 from .timing import PhaseBudget, timings_enabled
+from .verdicts import RoundVerdict, VerdictLog
 
 DEBUG = os.getenv("CAPTCHA_DEBUG", "0") == "1"
 _SESSION_ENV = "CAPTCHA_KRAKEN_SESSION"
+_VENDOR_ENV = "CAPTCHA_KRAKEN_VENDOR"
+_SITE_ENV = "CAPTCHA_KRAKEN_SITE"
+_WIDGET_HOST_ENV = "CAPTCHA_KRAKEN_WIDGET_HOST"
+# How often a page that has not drawn its widget yet is looked at again.
+_DETECTION_POLL_MS = 250
 
 
 def _log(message: str) -> None:
@@ -70,21 +78,71 @@ def _sha1(path: str) -> str:
         return hashlib.sha1(fh.read()).hexdigest()
 
 
+class CaptureRect(NamedTuple):
+    """Whole CSS pixels, in viewport coordinates."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+def enclosing_rect(box: Dict[str, float]) -> CaptureRect:
+    """The whole pixels a bounding box covers: the rect Playwright's element screenshot clips to."""
+    x, y = math.floor(box["x"] + 1e-3), math.floor(box["y"] + 1e-3)
+    return CaptureRect(x, y, math.ceil(box["x"] + box["width"] - 1e-3) - x,
+                       math.ceil(box["y"] + box["height"] - 1e-3) - y)
+
+
+def crop_png(png: bytes, rect: CaptureRect, css_width: float) -> bytes:
+    """Cut `rect` out of a viewport capture `css_width` CSS pixels wide, at the capture's own device pixel ratio."""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png)) as img:
+        scale = img.width / css_width
+        out = io.BytesIO()
+        img.crop((round(rect.x * scale), round(rect.y * scale), round((rect.x + rect.width) * scale),
+                  round((rect.y + rect.height) * scale))).save(out, format="PNG", compress_level=1)
+        return out.getvalue()
+
+
+_VIEWPORT_JS = "() => ({ width: window.innerWidth, height: window.innerHeight })"
+_FRAME_JS = ("() => ({ width: window.innerWidth, height: window.innerHeight,"
+             " scale: window.visualViewport ? window.visualViewport.scale : 1 })")
+
+
+def _viewport_of(page: Any) -> Dict[str, float]:
+    """`viewport_size` is None on a context launched without one (camoufox), where only the window knows."""
+    return page.viewport_size or page.evaluate(_VIEWPORT_JS)
+
+
+def _layout_is_the_viewport(page: Any, view: Dict[str, float]) -> bool:
+    """Does a viewport capture speak the bounding box's coordinates? Not on a page laid out wider than the device and zoomed out to fit, which is every mobile layout of a desktop page: there the box is in layout pixels and the capture is not."""
+    frame = page.evaluate(_FRAME_JS)
+    return abs(frame.get("scale", 1) - 1) < 1e-3 and abs(frame["width"] - view["width"]) <= 1
+
+
+def _within(rect: CaptureRect, view: Dict[str, float]) -> bool:
+    return rect.x >= 0 and rect.y >= 0 and rect.x + rect.width <= view["width"] and rect.y + rect.height <= view["height"]
+
+
+def _off_board_point(box: Dict[str, float], at: Tuple[float, float],
+                     view: Dict[str, float]) -> Optional[Tuple[float, float]]:
+    """A point just outside the board, past the edge nearest the pointer, that is still inside the viewport."""
+    x, y = at
+    gap = 24 + random.random() * 40
+    right, bottom = box["x"] + box["width"], box["y"] + box["height"]
+    exits = sorted([(x - box["x"], (box["x"] - gap, y)), (right - x, (right + gap, y)),
+                    (y - box["y"], (x, box["y"] - gap)), (bottom - y, (x, bottom + gap))])
+    return next((p for _, p in exits if 0 <= p[0] < view["width"] and 0 <= p[1] < view["height"]), None)
+
+
 class CaptchaSolveError(Exception):
     pass
 
 
 class AnimatedChallengeError(CaptchaSolveError):
     pass
-
-
-class NothingFilmedError(AnimatedChallengeError):
-    """The burst caught no frame at all.
-
-    `_burst` only returns nothing when EVERY screenshot in its window failed, so this is not a verdict
-    about the board — a still photographs fine. It is a widget that would not screenshot, and the
-    commonest reason for that is that it is closing, because the answer was accepted.
-    """
 
 
 class UnsupportedChallengeError(CaptchaSolveError):
@@ -97,6 +155,10 @@ class NoCaptchaFoundError(CaptchaSolveError):
 
 class PageClosedError(CaptchaSolveError):
     pass
+
+
+class VendorBlockedError(CaptchaSolveError):
+    """The vendor refused to serve this client at all, so no further round can succeed."""
 
 
 #: `bounding box of captcha element` is in here because the JS port has always had it
@@ -131,6 +193,8 @@ class SolveResult:
     final_mouse_position: Tuple[float, float]
     token_usage: List[Dict[str, Any]] = field(default_factory=list)
     phases: Dict[str, float] = field(default_factory=dict)
+    # What the vendor's own server answered, in order, for the vendors whose answer is readable.
+    verdicts: List[RoundVerdict] = field(default_factory=list)
 
 
 @dataclass
@@ -183,6 +247,9 @@ def measured_fps(frames: int, elapsed_ms: float, nominal_fps: float) -> float:
 _MOVED_DURING_INFERENCE_DIFF = 0.002
 _NOT_THIS_BOARD_DIFF = 0.5
 _NOT_THIS_BOARD_POLLS = 3
+# How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read
+# inside this window is wearing our own feedback, which is not a screen it ever showed by itself.
+INPUT_SETTLE_MS = 400
 
 
 @dataclass
@@ -195,13 +262,20 @@ class PageSolverConfig:
     expert: Optional[PromptFamily] = None
     max_solve_loops: int = 6
     overall_solve_timeout_ms: int = 45_000
+    # A page just navigated has often not drawn its widget; this long is spent looking before "no captcha" is
+    # believed. It is not charged to overall_solve_timeout_ms, which starts when there is something to solve.
+    detection_timeout_ms: int = 15_000
+    # Repeats of one answer on one board before the solve ends; the first repeats are re-asked at a fresh sample.
     max_no_progress_rounds: int = 2
+    # Deprecated and ignored since 3.2.0: a round that performed nothing goes straight on to the next.
     post_solve_delay_ms: int = 1_200
     post_solve_outcome_timeout_ms: int = 1_000
     post_solve_outcome_poll_ms: int = 75
     element_screenshot_timeout_ms: int = 8_000
+    # Deprecated and ignored since 3.2.0: each of these failures now counts against max_solve_loops.
     max_unsupported_resolves: int = 3
     max_stale_element_retries: int = 3
+    # The pause before a failed round is tried again.
     stale_element_backoff_ms: int = 900
     stale_frame_resolve_enabled: bool = True
     stale_frame_diff_threshold: float = 0.02
@@ -354,6 +428,11 @@ class PageSolver:
         # Has this board EVER shown the same screen twice? A board that has not cannot prove it was replaced
         # and has no cycle left to find, so a re-ask neither re-films it at length nor throws its film away.
         self._film_cycled: bool = False
+        self._verdicts: Optional[VerdictLog] = None
+        # The page being solved: every capture is taken of its viewport. Set by `solve`.
+        self._page: Any = None
+        # When our last gesture ended; the board's reaction to it is never read as the board's own motion.
+        self._last_input_ms: float = -math.inf
         self._reset_animated_state()
 
     @property
@@ -372,6 +451,15 @@ class PageSolver:
         with self._budget.phase(name):
             yield
 
+    @contextmanager
+    def _gesture(self):
+        """A pointer gesture, timed as MOUSE and remembered: see `INPUT_SETTLE_MS`."""
+        try:
+            with self._phase(Phase.MOUSE):
+                yield
+        finally:
+            self._last_input_ms = _now()
+
     # ── per-solve state ──────────────────────────────────────────────────
 
     def _reset_animated_state(self) -> None:
@@ -380,7 +468,6 @@ class PageSolver:
         self._animated_probe_armed = False
         self._animated_probe_done = False
         self._video_budget_granted = False
-        self._retried_unusable_answer = False
         self._stop_animated_film()
         self._keyframe_mode: Optional[KeyframeMode] = None
         self._keyframe_steady_screens = 0
@@ -406,8 +493,7 @@ class PageSolver:
         sig = self._answer_signature(actions, retry_mode)
         if sig is not None and sig == self._last_answer_sig:
             self._no_progress_rounds += 1
-            _log(f"[no-progress] the model returned the same answer again "
-                 f"({self._no_progress_rounds}/{self.config.max_no_progress_rounds})")
+            _log(f"[no-progress] the model returned the same answer again ({self._no_progress_rounds} in a row)")
             self._resample_level += 1
             self._apply_sampling()
             self._invalidate_animated_answer()
@@ -527,7 +613,7 @@ class PageSolver:
     # ── gestures ─────────────────────────────────────────────────────────
 
     def _smooth_move(self, page: Any, x: float, y: float) -> None:
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.move(page, (x, y))
 
     def _move_to_element(self, page: Any, element: Any, padding_percentage: float = 25.0) -> None:
@@ -552,7 +638,7 @@ class PageSolver:
 
     def _move_and_click(self, page: Any, element: Any) -> None:
         self._move_to_element(page, element)
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.click(page, self._last_mouse)
 
     @staticmethod
@@ -582,11 +668,11 @@ class PageSolver:
         at = (element_box["x"] + rel[0], element_box["y"] + rel[1])
         if await_keyframe:
             # Park on the target first, so only a mouse-down separates the right screen from the click.
-            with self._phase(Phase.MOUSE):
+            with self._gesture():
                 self._human.move(page, at)
             self._wait_for_keyframe(element, await_keyframe,
                                     (rel[0] / element_box["width"], rel[1] / element_box["height"]))
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.click(page, at)
 
     def _click_when_frame_matches(self, page: Any, element: Any, action: Dict[str, Any],
@@ -600,7 +686,7 @@ class PageSolver:
             return (element_box["x"] + (float(bbox[0]) + float(bbox[2])) / 2 * element_box["width"],
                     element_box["y"] + (float(bbox[1]) + float(bbox[3])) / 2 * element_box["height"])
 
-        with self._phase(Phase.MOUSE):
+        with self._gesture():
             self._human.drag(page, center(action["source_bounding_box"]), center(action["target_bounding_box"]))
 
     def _find_control(self, scope: Any, selectors: Sequence[str]) -> Optional[Any]:
@@ -643,7 +729,9 @@ class PageSolver:
             _log("type action, but no text box in the widget; skipping")
             return False
         self._move_and_click(page, field_el)
-        if not self._human.type_text(page, field_el, text):
+        typed = self._human.type_text(page, field_el, text)
+        self._last_input_ms = _now()
+        if not typed:
             return False
         _log(f"typed {len(text)} character(s) into the captcha field")
         return True
@@ -682,7 +770,7 @@ class PageSolver:
                 _log("slide action, but the widget has neither a slider nor a draggable piece")
                 return False
             target_y = (float(tb[1]) + float(tb[3])) / 2 * element_box["height"]
-            with self._phase(Phase.MOUSE):
+            with self._gesture():
                 self._human.drag(page, (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2),
                                  (element_box["x"] + target_x, element_box["y"] + target_y))
             return True
@@ -746,6 +834,7 @@ class PageSolver:
                 self._human.release(page)
             except Exception:
                 pass
+            self._last_input_ms = _now()
             for shot in shots:
                 _unlink(shot)
         return True
@@ -830,15 +919,55 @@ class PageSolver:
         blob = " ".join(str(n) for n in (names or []))
         return [vendor for vendor, s in VENDORS if any(h in blob for h in s.hosts)]
 
+    def _unmatched_vendor_frames(self, page: Any) -> List[Vendor]:
+        """Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame
+        (an invisible badge) is not a widget, so what is left is markup the table no longer matches."""
+        return [vendor for vendor, s in VENDORS if s.hosts and len(_visible(page, [f'iframe[src*="{h}"]' for h in s.hosts]))
+                > len(_visible(page, s.passive))]
+
     def _no_widget_message(self, page: Any) -> str:
-        base = "no interactive captcha widget detected"
+        base = f"no interactive captcha widget detected within {self.config.detection_timeout_ms}ms"
         loaded = self.vendors_on_the_wire(page)
         if not loaded:
             return (f"{base} (no vendor captcha code loaded on this page — likely reCAPTCHA v3 / "
                     "invisible, or a click-triggered challenge that has not been triggered)")
-        return (f"{base}, BUT {'/'.join(loaded)} code IS loaded and running on this page. The "
-                "vendor's markup no longer matches anything in SELECTORS — the table needs "
-                "re-measuring against the vendor's current markup, in both solver ports")
+        framed = self._unmatched_vendor_frames(page)
+        if framed:
+            return (f"{base}, BUT {'/'.join(framed)} is showing a frame that matches nothing in SELECTORS. The "
+                    "vendor's markup has changed — the table needs re-measuring against the vendor's current "
+                    "markup, in both solver ports")
+        return (f"{base}; {'/'.join(loaded)} code is loaded but drew no widget — the challenge may be invisible "
+                "or not triggered yet, or an in-page widget's markup has changed")
+
+    def _await_widget(self, page: Any) -> Tuple[Optional[Widget], float]:
+        """A page that has not drawn its widget yet is looked at again until `detection_timeout_ms`, and the time
+        spent is returned so the solve budget can start after it. Solving straight after `domcontentloaded` failed
+        3/3 on a demo page whose frames arrived a moment later."""
+        started = _now()
+        widget = None
+        with self._phase(Phase.DETECT):
+            while (widget is None and _now() - started < self.config.detection_timeout_ms
+                   and not self.is_captcha_solved(page)):
+                _delay(_DETECTION_POLL_MS)
+                widget = self.detect_captcha(page)
+        return widget, _now() - started
+
+    def _is_blocked(self, page: Any) -> bool:
+        """The vendor showing its refusal screen: rate-limited or flagged, with no board to answer."""
+        for probe in WIDGET_PROBES:
+            blocked = SELECTORS[probe.vendor].blocked
+            if probe.role != FrameRole.CHALLENGE or not blocked:
+                continue
+            at = next(iter(_visible(page, (probe.selector,))), None)
+            frame = _frame_of(at) if at is not None else None
+            if frame and any(self._visible_with_text(frame, selector) for selector in blocked):
+                return True
+        return False
+
+    def _vendor_verdict(self) -> Optional[Verdict]:
+        """What the vendor's server said since the last look: BLOCKED outranks everything, else the latest answer."""
+        fresh = [v.verdict for v in (self._verdicts.fresh() if self._verdicts else ()) if v.verdict != Verdict.NEW_CHALLENGE]
+        return Verdict.BLOCKED if Verdict.BLOCKED in fresh else (fresh[-1] if fresh else None)
 
     def is_captcha_solved(self, page: Any) -> bool:
         """The vendor's own done signal: a response token, a painted success state, or a checked box."""
@@ -898,6 +1027,69 @@ class PageSolver:
             pass
         return None
 
+    def _click_checkbox(self, page: Any, widget: Widget, frame: Any) -> None:
+        """Tick the box and wait for what it opens. A checkbox is not a board: it is never polled, filmed or asked about.
+
+        Treated as a board it cost 70 screenshots and three model calls in one measured solve, two of them answering
+        the checkbox picture with a drag.
+        """
+        box = self._checkbox_box(frame, widget.vendor)
+        if box is not None:
+            self._move_to_element(page, box)
+        else:
+            self._smooth_move(page, *self._find_checkbox_on_screen(widget.element))
+        self._human.pause(PauseKind.BETWEEN)
+        with self._gesture():
+            self._human.click(page, self._last_mouse)
+        self._await_what_the_checkbox_opened(page)
+
+    def _checkbox_box(self, frame: Any, vendor: Vendor) -> Optional[Any]:
+        """The box in a checkbox frame once the frame has drawn it; None when the DOM cannot reach it.
+
+        Turnstile's box is in a closed shadow root, and a frame can refuse access; both are found on screen instead.
+        """
+        box = SELECTORS[vendor].box
+        if frame is None or not box:
+            return None
+        try:
+            return frame.wait_for_selector(", ".join(box), state="visible", timeout=self.config.detection_timeout_ms)
+        except Exception as exc:
+            _log(f"[checkbox] the box is out of the DOM's reach ({str(exc).splitlines()[0]}); finding it on screen")
+            return None
+
+    def _find_checkbox_on_screen(self, element: Any) -> Tuple[float, float]:
+        """One capture and OpenCV: a point inside the tick box, in page coordinates. No model is asked."""
+        from .tool_calls.find_checkbox import find_checkbox
+
+        box = element.bounding_box()
+        if not box:
+            raise CaptchaSolveError("could not get bounding box of captcha element")
+        shot = _tmp_png("checkbox")
+        try:
+            with self._phase(Phase.SCREENSHOT):
+                self._screenshot(element, shot, timeout_ms=self.config.element_screenshot_timeout_ms)
+            found = find_checkbox(shot)
+            scale = self._shot_scale(shot, box["width"])
+        finally:
+            _unlink(shot)
+        if found is None:
+            raise UnsupportedCaptchaError("the checkbox widget shows no tick box to click")
+        x, y, w, h = (v / scale for v in found)
+        return box["x"] + x + w * (0.3 + random.random() * 0.4), box["y"] + y + h * (0.3 + random.random() * 0.4)
+
+    def _await_what_the_checkbox_opened(self, page: Any) -> None:
+        """A clicked checkbox passes or opens a challenge, and both show in the DOM.
+
+        Without this wait the next round found the same checkbox still up and clicked it again.
+        """
+        deadline = _now() + self.config.post_submit_change_timeout_ms
+        with self._phase(Phase.AWAIT_NEXT_ROUND):
+            while _now() < deadline and not self.is_captcha_solved(page):
+                widget = self.detect_captcha(page)
+                if widget is None or widget.role != FrameRole.CHECKBOX:
+                    return
+                _delay(self.config.post_solve_outcome_poll_ms)
+
     def _get_verify_button(self, scope: Any) -> Optional[Any]:
         return self._find_control(scope, SUBMIT_SELECTORS)
 
@@ -905,9 +1097,61 @@ class PageSolver:
 
     def _screenshot(self, element: Any, path: str, timeout_ms: Optional[int] = None,
                     animations: str = "disabled") -> None:
-        """Short timeout; `disabled` freezes CSS animation, so bursts and the keyframe gate pass `allow`."""
-        element.screenshot(path=path, timeout=2_500 if timeout_ms is None else timeout_ms,
-                           animations=animations)
+        """Every capture the driver takes: the whole viewport, cropped here to the element.
+
+        Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at
+        the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
+        capture repaints nothing, and measured twice as fast. Short timeout; `disabled` freezes CSS animation,
+        so bursts and the keyframe gate pass `allow`.
+        """
+        timeout = 2_500 if timeout_ms is None else timeout_ms
+        page = self._page
+        view = _viewport_of(page)
+        rect = self._rect_in_view(element, view) if _layout_is_the_viewport(page, view) else None
+        if rect is None:
+            # Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
+            # coordinates, so the element photographs itself.
+            element.screenshot(path=path, timeout=timeout, animations=animations)
+            return
+        png = crop_png(page.screenshot(timeout=timeout, animations=animations), rect, view["width"])
+        with open(path, "wb") as fh:
+            fh.write(png)
+
+    @staticmethod
+    def _rect_of(element: Any) -> CaptureRect:
+        box = element.bounding_box()
+        rect = enclosing_rect(box) if box else None
+        if rect is None or rect.width <= 0 or rect.height <= 0:
+            raise CaptchaSolveError("the element is not visible: it has no bounding box to photograph")
+        return rect
+
+    def _rect_in_view(self, element: Any, view: Dict[str, float]) -> Optional[CaptureRect]:
+        """Where the element sits in the viewport, scrolled in when it is merely off screen; None when it cannot fit."""
+        rect = self._rect_of(element)
+        if rect.width > view["width"] or rect.height > view["height"]:
+            return None
+        if not _within(rect, view):
+            element.scroll_into_view_if_needed(timeout=2_000)
+            rect = self._rect_of(element)
+        return rect if _within(rect, view) else None
+
+    def _step_off_the_board(self, page: Any, element: Any) -> None:
+        """Take the pointer off the board and let our own feedback fade before the board is judged still or animated.
+
+        A hovered or pressed control repaints, and a board wearing our highlight read as motion: a still board
+        was filmed as animated because of the Verify button under the cursor.
+        """
+        # Only a board we pointed at wears our feedback. One the vendor dealt under a resting pointer has
+        # nothing of ours to fade, and stepping off it cost every round its own gesture and settle window.
+        if not self._acted_on_board:
+            return
+        box = element.bounding_box()
+        x, y = self._last_mouse
+        if box and self._human.hovers and box["x"] <= x <= box["x"] + box["width"] and box["y"] <= y <= box["y"] + box["height"]:
+            spot = _off_board_point(box, (x, y), _viewport_of(page))
+            if spot is not None:
+                self._smooth_move(page, *spot)
+        _delay(self._last_input_ms + INPUT_SETTLE_MS - _now())
 
     def _element_frame_hash(self, element: Any) -> Optional[str]:
         path = _tmp_png("fh")
@@ -1145,12 +1389,14 @@ class PageSolver:
                     raise CaptchaSolveError(
                         f"the animated recording stalled: {len(frames)} frames in "
                         f"{burst_hang_deadline_ms(cfg):.0f}ms. The widget is not screenshotting.")
-                try:
-                    self._screenshot(element, shot, animations="allow")
-                    img = cv2.imread(shot)
-                except Exception as exc:
-                    _debug(f"burst frame failed: {exc}")
-                    img = None
+                img = None
+                # A frame taken while the board still wears our last gesture is not a screen it showed by itself.
+                if _now() - self._last_input_ms >= INPUT_SETTLE_MS:
+                    try:
+                        self._screenshot(element, shot, animations="allow")
+                        img = cv2.imread(shot)
+                    except Exception as exc:
+                        _debug(f"burst frame failed: {exc}")
                 if img is not None:
                     frames.append(img)
                     d = _sha1(shot)
@@ -1254,13 +1500,9 @@ class PageSolver:
             element, known=self._film_digests,
             max_ms=float(cfg.video_burst_duration_ms) if reask and not self._film_cycled else None)
         if not frames:
-            # ONLY the speculative second look gets the soft landing. A board this solve has PROVEN
-            # animated is a real dead end when it will not film, and must fail loudly as it always
-            # has: measured, treating both the same took the two video types from 3 solved and 10
-            # keyframe calls to 0 and 0, because the first failed film spends `_animated_probe_done`
-            # and every round after it is answered as a still.
-            if not self._known_animated:
-                raise NothingFilmedError("could not record the animated challenge (no frame screenshotted)")
+            # Not a verdict about the board — a still photographs fine. A widget that would not screenshot for a
+            # whole window is usually closing because the answer was accepted, so the loop asks before it counts
+            # the round. A board proven animated keeps that verdict, and is filmed again rather than read as a still.
             raise AnimatedChallengeError("could not record the animated challenge (no frame screenshotted)")
         _log(f"[animated] recorded {len(frames)} frames in {burst_ms / 1000:.1f}s "
              f"({measured_fps(len(frames), burst_ms, cfg.video_burst_fps):.1f}fps)")
@@ -1587,8 +1829,19 @@ class PageSolver:
 
     def _solve_single(self, page: Any, widget: Widget, retry_mode: Optional[RetryMode]) -> Tuple[bool, List[Dict[str, Any]]]:
         element, puzzle_source, role = widget.element, widget.vendor, widget.role
+        os.environ[_VENDOR_ENV] = puzzle_source.value
         frame = element.content_frame()
+        # The widget's own host comes from its iframe; an inline widget has none to report.
+        widget_host = _hostname(frame) if frame else ""
+        if widget_host:
+            os.environ[_WIDGET_HOST_ENV] = widget_host
+        else:
+            os.environ.pop(_WIDGET_HOST_ENV, None)
         scope = frame or widget.at
+
+        if role == FrameRole.CHECKBOX:
+            self._click_checkbox(page, widget, frame)
+            return True, []
 
         if frame and role == FrameRole.CHALLENGE and SELECTORS[puzzle_source].images:
             if self._last_submit_frame_hash:
@@ -1614,8 +1867,10 @@ class PageSolver:
         if text_mode:
             _log("widget has a text box; solving as a distorted-text captcha")
 
-        # A checkbox is clicked, not filmed, and a reCAPTCHA board is read by its grid below.
-        filmable = role != FrameRole.CHECKBOX and puzzle_source != Vendor.RECAPTCHA and not text_mode
+        # A reCAPTCHA board is read by its grid below, not filmed.
+        filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode
+        if filmable and not self._known_animated:
+            self._step_off_the_board(page, element)
         is_animated = filmable and self._settle_or_animated(element)
         # hCaptcha keeps its challenge iframe visible ~2s after the final submit; read as a fresh puzzle it burned ~18s.
         if role == FrameRole.CHALLENGE and self.is_captcha_solved(page):
@@ -1770,12 +2025,21 @@ class PageSolver:
         usage: List[Dict[str, Any]] = []
         self._last_submit_frame_hash = None
         self._deadline_ms = start + self.config.overall_solve_timeout_ms
+        self._page = page
         self._human.reset(page)
         self._reset_animated_state()
         self._budget = PhaseBudget()
-        # One session id per solve groups its inference rounds into one billable attempt.
-        previous_session = os.environ.get(_SESSION_ENV)
+        self._verdicts = None
+        # One session id per solve groups its inference rounds into one billable attempt; vendor and site say
+        # where it was, and are set as they become known.
+        previous = {name: os.environ.get(name) for name in (_SESSION_ENV, _VENDOR_ENV, _SITE_ENV, _WIDGET_HOST_ENV)}
         session_id = os.environ[_SESSION_ENV] = str(uuid.uuid4())
+        os.environ.pop(_VENDOR_ENV, None)
+        os.environ.pop(_SITE_ENV, None)
+        os.environ.pop(_WIDGET_HOST_ENV, None)
+        site = _hostname(page)
+        if site:
+            os.environ[_SITE_ENV] = site
         solved = False
         try:
             result = self._solve_impl(page, start, usage)
@@ -1786,27 +2050,47 @@ class PageSolver:
             if timings_enabled():
                 print(self._budget.report(), file=sys.stderr)
             self._deadline_ms = None
+            if self._verdicts is not None:
+                self._verdicts.close()
+            # The vendor's own verdict when it was readable; the DOM's done-signal only when it was not.
+            said = self._verdicts.decisive() if self._verdicts is not None else None
             try:
                 # On by default: it is the only way a hosted account's failures can be found at all.
-                self._solver.planner.report_outcome(session_id, solved)
+                self._solver.planner.report_outcome(session_id, solved if said is None else said == Verdict.ACCEPTED)
             except Exception as exc:
                 _log(f"[outcome] could not report: {exc}")
-            if previous_session is None:
-                os.environ.pop(_SESSION_ENV, None)
-            else:
-                os.environ[_SESSION_ENV] = previous_session
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
     def _solve_impl(self, page: Any, start: float, usage: List[Dict[str, Any]]) -> SolveResult:
+        """Give up only when the vendor refuses to serve us, or when every one of `max_solve_loops` has been spent.
+
+        Any other failed round — a stale handle, an unusable or repeated answer, a board that would not film —
+        counts one loop, pauses, and goes again.
+        """
         cfg = self.config
         pending_retry_mode: Optional[RetryMode] = None
-        retried_underselect = False
-        unsupported_retries = stale_retries = render_waits = 0
         has_interacted = False
-        # Strictly fewer than the loops, else the no-widget branch for invisible reCAPTCHA never fires.
-        max_render_waits = min(6, cfg.max_solve_loops - 1)
+        last_failure: Optional[CaptchaSolveError] = None
+        verdicts = self._verdicts = VerdictLog(page)
 
         def done() -> SolveResult:
-            return SolveResult(True, self._last_mouse, _aggregate(usage))
+            return SolveResult(True, self._last_mouse, _aggregate(usage), verdicts=list(verdicts.verdicts))
+
+        def blocked(how: str) -> VendorBlockedError:
+            return VendorBlockedError(f"the vendor refused to serve this client ({how}); no further round can succeed")
+
+        def again(failure: CaptchaSolveError, *, in_transition: bool = False) -> None:
+            """Count the loop. Only a widget caught mid-transition is worth waiting out; a refused or repeated
+            answer changed nothing on the page, and pausing after it only spends the solve's budget."""
+            nonlocal last_failure
+            last_failure = failure
+            _log(f"{failure}; counting this loop and going again")
+            if in_transition:
+                _delay(cfg.stale_element_backoff_ms)
 
         for attempt in range(1, cfg.max_solve_loops + 1):
             # A round that failed arms the second look only while its board is still up. A board the vendor has
@@ -1823,6 +2107,12 @@ class PageSolver:
                 raise CaptchaSolveError(
                     f"captcha solve timed out after {deadline - start:.0f}ms (attempt {attempt}/{cfg.max_solve_loops})"
                     + (f", including {granted:.0f}ms granted for recording an animated challenge" if granted > 0 else ""))
+            said = self._vendor_verdict()
+            if said == Verdict.ACCEPTED:
+                _log("[verdict] the vendor accepted the answer; finishing.")
+                return done()
+            if said == Verdict.BLOCKED:
+                raise blocked("its server answered 429")
             if has_interacted and self.is_captcha_solved(page):
                 _log("captcha reports solved; finishing.")
                 return done()
@@ -1830,105 +2120,88 @@ class PageSolver:
             with self._phase(Phase.DETECT):
                 widget = self.detect_captcha(page)
             if not widget:
-                if has_interacted:
+                # A widget that vanished right after the vendor refused the answer was not solved.
+                if has_interacted and verdicts.decisive() != Verdict.REJECTED:
                     _log("no supported captcha remains after interaction; considering solved.")
                     return done()
-                if self.is_captcha_solved(page):
-                    _log("captcha already satisfied; nothing to solve.")
-                    return done()
-                if self.has_interactive_widget_in_dom(page) and render_waits < max_render_waits:
-                    render_waits += 1
-                    _log(f"widget in DOM but not yet rendered; waiting ({render_waits}/{max_render_waits}).")
-                    _delay(800 + random.random() * 300)
-                    continue
-                raise NoCaptchaFoundError(self._no_widget_message(page))
+                widget, waited = self._await_widget(page)
+                # The budget is for solving; the page drawing its widget is not charged to it.
+                start += waited
+                if self._deadline_ms is not None:
+                    self._deadline_ms += waited
+                if widget is None:
+                    if self.is_captcha_solved(page):
+                        _log("captcha already satisfied; nothing to solve.")
+                        return done()
+                    if has_interacted:
+                        raise CaptchaSolveError(f"the vendor rejected the last answer and its widget did not come "
+                                                f"back within {cfg.detection_timeout_ms}ms")
+                    raise NoCaptchaFoundError(self._no_widget_message(page))
 
             _log(f"--- captcha solve loop {attempt}/{cfg.max_solve_loops} ---")
             retry_mode, pending_retry_mode = pending_retry_mode, None
             try:
                 did_interact, round_usage = self._solve_single(page, widget, retry_mode)
-            except NothingFilmedError as nothing_filmed:
-                # A WIDGET THAT WILL NOT SCREENSHOT IS USUALLY A WIDGET THAT IS CLOSING, and it closes
-                # because the answer was accepted. Every other failure in this loop asks
-                # `is_captcha_solved` before giving up; this one re-raised through the branch below and
-                # threw away boards the vendor had already taken. Measured: prosopo_grid_3x3 was 8/8
-                # green across six runs on 09-12 and 09-13, then lost four attempts on 09-17 to exactly
-                # this — each one after its FIRST board came back from /fx/verify graded `solved: true`,
-                # with the solve dying on the second board the vendor dealt.
-                if has_interacted:
-                    try:
-                        if self.is_captcha_solved(page):
-                            _log("nothing left to film because the board was accepted; finishing.")
-                            return done()
-                    except Exception:
-                        pass
-                    # Not solved: the handle is stale for the same reason it is unscreenshottable, so
-                    # take the stale-handle recovery rather than ending a solve with loops still in it.
-                    if stale_retries < cfg.max_stale_element_retries:
-                        stale_retries += 1
-                        _log(f"the widget would not screenshot; re-detecting "
-                             f"({stale_retries}/{cfg.max_stale_element_retries}).")
-                        _delay(cfg.stale_element_backoff_ms)
-                        continue
-                raise
-            except AnimatedChallengeError:
-                raise
             except UnsupportedCaptchaError as unsupported:
-                # Mid-solve, a transitional blank frame reads as unsupported; settle and retry.
-                if has_interacted and unsupported_retries < cfg.max_unsupported_resolves:
-                    unsupported_retries += 1
-                    again = self.detect_captcha(page)
-                    with self._phase(Phase.SETTLE):
-                        settled = again and self._wait_for_element_settled(again.element)
-                    if settled == SettleVerdict.ANIMATED and not cfg.video_solve_enabled:
-                        raise AnimatedChallengeError("the challenge never settles and video_solve_enabled is off")
-                    _log(f'"unsupported" mid-solve; retrying ({unsupported_retries}/{cfg.max_unsupported_resolves}).')
-                    continue
-                raise UnsupportedChallengeError(f"cannot solve this kind of captcha — {unsupported}") from unsupported
+                # The model had nothing usable for this board. The next round re-asks, often of a board the
+                # vendor has replaced.
+                again(UnsupportedChallengeError(f"cannot solve this kind of captcha — {unsupported}"))
+                continue
+            except AnimatedChallengeError as animated:
+                if not cfg.video_solve_enabled:
+                    raise
+                # A widget that will not screenshot is usually one that is closing, because the answer was
+                # accepted: measured, a vendor that deals several boards lost four attempts to exactly this, each
+                # after its first board came back graded solved.
+                if has_interacted and self.is_captcha_solved(page):
+                    _log("nothing left to film because the board was accepted; finishing.")
+                    return done()
+                again(animated, in_transition=True)
+                continue
             except Exception as exc:
                 message = str(exc)
                 closed = bool(_CLOSED_TARGET_RE.search(message))
-                if has_interacted and (closed or _STALE_HANDLE_RE.search(message)):
-                    # The handle most often went stale because the answer was accepted.
-                    try:
-                        if self.is_captcha_solved(page):
-                            _log("captcha reports solved; finishing.")
-                            return done()
-                    except Exception:
-                        pass
-                    if closed:
-                        raise PageClosedError(
-                            "the page, context or browser closed mid-solve, after the answer had been "
-                            "submitted but before the vendor's verdict could be read — the solve may in "
-                            "fact have succeeded") from exc
-                    if stale_retries < cfg.max_stale_element_retries:
-                        stale_retries += 1
-                        _log(f"stale challenge handle after submit; re-detecting ({stale_retries}/{cfg.max_stale_element_retries}).")
-                        _delay(cfg.stale_element_backoff_ms)
-                        continue
-                raise
+                if not (closed or _STALE_HANDLE_RE.search(message)):
+                    raise
+                # The handle most often went stale because the answer was accepted.
+                try:
+                    if has_interacted and self.is_captcha_solved(page):
+                        _log("captcha reports solved; finishing.")
+                        return done()
+                except Exception:
+                    pass
+                if closed:
+                    raise PageClosedError(
+                        "the page, context or browser closed mid-solve"
+                        + (", after the answer had been submitted but before the vendor's verdict could be read — "
+                           "the solve may in fact have succeeded" if has_interacted else "")) from exc
+                again(CaptchaSolveError(f"the challenge handle went stale ({message.splitlines()[0]})"), in_transition=True)
+                continue
 
             has_interacted = has_interacted or did_interact
-            if self._no_progress_rounds >= cfg.max_no_progress_rounds:
-                raise CaptchaSolveError(
-                    f"no progress: the model returned the same answer {self._no_progress_rounds + 1} times "
-                    f"running and the challenge is still up (attempt {attempt}/{cfg.max_solve_loops})")
-            render_waits = 0
             usage.extend(round_usage)
 
             # One polled wait per round: the vendor's verdict, the widget going away, or a fresh board. The flat
-            # sleep it replaced observed nothing and cost 1200-1500ms per finished round.
-            window_ms = (cfg.post_solve_outcome_timeout_ms if did_interact
-                         else cfg.post_solve_delay_ms + random.random() * 300)
+            # sleep it replaced observed nothing and cost 1200-1500ms per finished round. A round that performed
+            # nothing gave the page nothing to react to, so it looks once and goes on: waiting there cost every
+            # refused or repeated answer the full window.
+            window_ms = cfg.post_solve_outcome_timeout_ms if did_interact else 0
             deadline = _now() + window_ms
             t0 = time.perf_counter()
             solved = False
+            said = None
             widget_gone = 0
-            while _now() < deadline:
+            looked = False
+            while not looked or _now() < deadline:
+                looked = True
+                said = self._vendor_verdict() or said
+                if said in (Verdict.ACCEPTED, Verdict.BLOCKED):
+                    solved = said == Verdict.ACCEPTED
+                    break
                 if self.is_captcha_solved(page):
                     solved = True
                     break
-                widget_gone = widget_gone + 1 if self.detect_captcha(page) is None else 0
+                widget_gone = widget_gone + 1 if said != Verdict.REJECTED and self.detect_captcha(page) is None else 0
                 if widget_gone >= 2:
                     solved = True
                     break
@@ -1942,34 +2215,48 @@ class PageSolver:
             if solved:
                 _log(f"[verdict] success signal arrived after {verdict_ms:.0f}ms")
                 return done()
+            if said == Verdict.BLOCKED:
+                raise blocked("its server answered 429")
+            if self._is_blocked(page):
+                raise blocked("it is showing its try-again-later screen")
+            if said == Verdict.REJECTED:
+                _log(f"[verdict] the vendor rejected the answer after {verdict_ms:.0f}ms")
 
             if self._banner_is_fatal_after_retry(self._banner_kind(page)):
-                if retried_underselect:
-                    raise CaptchaSolveError(
-                        "reCAPTCHA still showing the under-selection error after retry; aborting "
-                        "(model unable to identify the missed tile)")
-                _log("reCAPTCHA under-selection error; retrying with missed-tiles prompt.")
-                pending_retry_mode, retried_underselect = RetryMode.MISSED_TILES, True
+                _log("reCAPTCHA under-selection error; the next round asks for the missed tiles.")
+                pending_retry_mode = RetryMode.MISSED_TILES
 
-            if not self.detect_captcha(page):
+            if said != Verdict.REJECTED and not self.detect_captcha(page):
                 return done()
-            if not did_interact and not self._no_progress_rounds:
-                # AN ANSWER WITH NOTHING TO EXECUTE IS NOT PROOF THE PAGE IS STUCK. The abort below
-                # exists for a driver that cannot act at all; an answer the driver could not use is a
-                # different thing, and on an animated board it is what a still expert returns when the
-                # board is not a still — measured on the hosted arms: a drag with no source box, "slide
-                # action, but the widget has neither a slider nor a draggable piece", solve over in 6s
-                # with the recording never taken. So buy the recording path one round first.
-                if self.config.video_solve_enabled and not self._retried_unusable_answer:
-                    self._retried_unusable_answer = True
+            if self._no_progress_rounds:
+                stuck = CaptchaSolveError(f"no progress: the model returned the same answer "
+                                          f"{self._no_progress_rounds + 1} times running")
+                # A board answered the same way after every resample is one the model cannot read: measured, no
+                # solve ever followed a third identical answer, and each further round cost the board 3-7s.
+                if self._no_progress_rounds >= cfg.max_no_progress_rounds:
+                    raise stuck
+                again(stuck)
+            elif not did_interact:
+                # An answer with nothing to execute is not proof the page is stuck; on an animated board it is
+                # what a still expert returns when the board is not a still, so the next round takes a second look.
+                if cfg.video_solve_enabled:
                     self._arm_animated_probe()
-                    _log("the answer had nothing this widget could execute; taking a second look "
-                         "before giving up")
-                    continue
-                raise CaptchaSolveError(
-                    "captcha still detected but the solver performed no interactions; aborting to avoid an infinite loop")
+                again(CaptchaSolveError("the solver performed no interactions this round"))
 
-        raise CaptchaSolveError(f"captcha still detected after {cfg.max_solve_loops} solve loops")
+        if isinstance(last_failure, UnsupportedChallengeError):
+            raise UnsupportedChallengeError(f"{last_failure} (after {cfg.max_solve_loops} solve loops)")
+        raise CaptchaSolveError(f"captcha still detected after {cfg.max_solve_loops} solve loops"
+                                + (f"; the last failed round: {last_failure}" if last_failure else ""))
+
+
+def _hostname(page: Any) -> str:
+    """The page's host alone: a path or query can carry a user's own data."""
+    from urllib.parse import urlparse
+
+    try:
+        return (urlparse(page.url).hostname or "").lower()
+    except Exception:
+        return ""
 
 
 def _bbox_center(bbox: Sequence[float]) -> Tuple[float, float]:
