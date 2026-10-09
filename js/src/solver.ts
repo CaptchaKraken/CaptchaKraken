@@ -350,6 +350,9 @@ export class CaptchaKrakenSolver {
    * filmed as animated because of the Verify button under the cursor.
    */
   private async stepOffTheBoard(page: Page, el: ElementHandle): Promise<void> {
+    // Only a board we pointed at wears our feedback. One the vendor dealt under a resting pointer has nothing of
+    // ours to fade, and stepping off it cost every round its own gesture and settle window.
+    if (!this.actedOnBoard) return;
     const box = await el.boundingBox();
     const [x, y] = this.human.at;
     if (box && this.human.hovers && x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
@@ -592,7 +595,11 @@ export class CaptchaKrakenSolver {
 
       if (roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page))) return done();
       if (this.noProgressRounds) {
-        await again(`No progress: the model returned the same answer ${this.noProgressRounds + 1} times running`);
+        const stuck = `No progress: the model returned the same answer ${this.noProgressRounds + 1} times running`;
+        // A board answered the same way after every resample is one the model cannot read: measured, no solve ever
+        // followed a third identical answer, and each further round cost the board 3-7s.
+        if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2)) throw new Error(`${stuck}.`);
+        await again(stuck);
       } else if (!didInteract) {
         // An answer with nothing to execute is not proof the page is stuck; on an animated board it is what a still
         // expert returns when the board is not a still, so the next round takes a second look.

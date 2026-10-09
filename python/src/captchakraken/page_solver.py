@@ -265,7 +265,7 @@ class PageSolverConfig:
     # A page just navigated has often not drawn its widget; this long is spent looking before "no captcha" is
     # believed. It is not charged to overall_solve_timeout_ms, which starts when there is something to solve.
     detection_timeout_ms: int = 15_000
-    # Deprecated and ignored since 3.2.0: a round that makes no progress now counts against max_solve_loops.
+    # Repeats of one answer on one board before the solve ends; the first repeats are re-asked at a fresh sample.
     max_no_progress_rounds: int = 2
     # Deprecated and ignored since 3.2.0: a round that performed nothing goes straight on to the next.
     post_solve_delay_ms: int = 1_200
@@ -1141,6 +1141,10 @@ class PageSolver:
         A hovered or pressed control repaints, and a board wearing our highlight read as motion: a still board
         was filmed as animated because of the Verify button under the cursor.
         """
+        # Only a board we pointed at wears our feedback. One the vendor dealt under a resting pointer has
+        # nothing of ours to fade, and stepping off it cost every round its own gesture and settle window.
+        if not self._acted_on_board:
+            return
         box = element.bounding_box()
         x, y = self._last_mouse
         if box and self._human.hovers and box["x"] <= x <= box["x"] + box["width"] and box["y"] <= y <= box["y"] + box["height"]:
@@ -2225,8 +2229,13 @@ class PageSolver:
             if said != Verdict.REJECTED and not self.detect_captcha(page):
                 return done()
             if self._no_progress_rounds:
-                again(CaptchaSolveError(f"no progress: the model returned the same answer "
-                                        f"{self._no_progress_rounds + 1} times running"))
+                stuck = CaptchaSolveError(f"no progress: the model returned the same answer "
+                                          f"{self._no_progress_rounds + 1} times running")
+                # A board answered the same way after every resample is one the model cannot read: measured, no
+                # solve ever followed a third identical answer, and each further round cost the board 3-7s.
+                if self._no_progress_rounds >= cfg.max_no_progress_rounds:
+                    raise stuck
+                again(stuck)
             elif not did_interact:
                 # An answer with nothing to execute is not proof the page is stuck; on an animated board it is
                 # what a still expert returns when the board is not a still, so the next round takes a second look.
