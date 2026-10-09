@@ -350,6 +350,9 @@ export class CaptchaKrakenSolver {
    * filmed as animated because of the Verify button under the cursor.
    */
   private async stepOffTheBoard(page: Page, el: ElementHandle): Promise<void> {
+    // Only a board we pointed at wears our feedback. One the vendor dealt under a resting pointer has nothing of
+    // ours to fade, and stepping off it cost every round its own gesture and settle window.
+    if (!this.actedOnBoard) return;
     const box = await el.boundingBox();
     const [x, y] = this.human.at;
     if (box && this.human.hovers && x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
@@ -446,10 +449,12 @@ export class CaptchaKrakenSolver {
       tokenUsage: aggregateTokenUsage(cumulativeTokenUsage), verdicts: [...verdicts.verdicts] });
     const blocked = (how: string) => new Error(`The vendor refused to serve this client (${how}); no further round can succeed.`);
     let lastFailure: { message: string; unsupported: boolean } | null = null;
-    const again = async (message: string, unsupported = false) => {
+    // Count the loop. Only a widget caught mid-transition is worth waiting out; a refused or repeated answer changed
+    // nothing on the page, and pausing after it only spends the solve's budget.
+    const again = async (message: string, { unsupported = false, inTransition = false } = {}) => {
       lastFailure = { message, unsupported };
       console.log(`${message}; counting this loop and going again.`);
-      await delay(cfg.staleElementBackoffMs ?? 900);
+      if (inTransition) await delay(cfg.staleElementBackoffMs ?? 900);
     };
 
     let pendingRetryMode: RetryMode | null = null;
@@ -507,7 +512,7 @@ export class CaptchaKrakenSolver {
         const emsg = String((e && (e as any).message) || e);
         if (e?.unsupported) {
           // The model had nothing usable for this board. The next round re-asks, often of a board the vendor has replaced.
-          await again(`Cannot solve this kind of captcha — ${emsg}`, true);
+          await again(`Cannot solve this kind of captcha — ${emsg}`, { unsupported: true });
           continue;
         }
         if (e?.animated) {
@@ -518,7 +523,7 @@ export class CaptchaKrakenSolver {
             console.log('nothing left to film because the board was accepted; finishing.');
             return done();
           }
-          await again(emsg);
+          await again(emsg, { inTransition: true });
           continue;
         }
         const closed = isClosedTargetError(emsg);
@@ -533,21 +538,25 @@ export class CaptchaKrakenSolver {
             ? ', after the answer had been submitted but before the vendor\'s verdict could be read — the solve may in fact have succeeded.'
             : '.'));
         }
-        await again(`the challenge handle went stale (${emsg.split('\n')[0]})`);
+        await again(`the challenge handle went stale (${emsg.split('\n')[0]})`, { inTransition: true });
         continue;
       }
       hasInteracted = hasInteracted || didInteract;
       cumulativeTokenUsage.push(...tokenUsage);
 
       // One polled wait per round, not a flat sleep: the sleep observed nothing and cost 1200-1500ms a round, and
-      // hCaptcha keeps its iframe visible ~2s while verifying, which read as a fresh puzzle and burned ~18s.
-      const settleMs = didInteract ? (cfg.postSolveOutcomeTimeoutMs ?? 1000) : (cfg.postSolveDelayMs ?? 1200) + Math.random() * 300;
+      // hCaptcha keeps its iframe visible ~2s while verifying, which read as a fresh puzzle and burned ~18s. A round that
+      // performed nothing gave the page nothing to react to, so it looks once and goes on: waiting there cost every
+      // refused or repeated answer the full window.
+      const settleMs = didInteract ? (cfg.postSolveOutcomeTimeoutMs ?? 1000) : 0;
       const deadline = Date.now() + settleMs;
       const verdictT0 = Date.now();
       let solved = false;
       let roundSaid: Verdict | null = null;
       let widgetGone = 0;
-      while (Date.now() < deadline) {
+      let looked = false;
+      while (!looked || Date.now() < deadline) {
+        looked = true;
         roundSaid = (await this.vendorVerdict()) ?? roundSaid;
         if (roundSaid === Verdict.ACCEPTED || roundSaid === Verdict.BLOCKED) { solved = roundSaid === Verdict.ACCEPTED; break; }
         if (await this.isCaptchaSolved(page)) { solved = true; break; }
@@ -586,7 +595,11 @@ export class CaptchaKrakenSolver {
 
       if (roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page))) return done();
       if (this.noProgressRounds) {
-        await again(`No progress: the model returned the same answer ${this.noProgressRounds + 1} times running`);
+        const stuck = `No progress: the model returned the same answer ${this.noProgressRounds + 1} times running`;
+        // A board answered the same way after every resample is one the model cannot read: measured, no solve ever
+        // followed a third identical answer, and each further round cost the board 3-7s.
+        if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2)) throw new Error(`${stuck}.`);
+        await again(stuck);
       } else if (!didInteract) {
         // An answer with nothing to execute is not proof the page is stuck; on an animated board it is what a still
         // expert returns when the board is not a still, so the next round takes a second look.

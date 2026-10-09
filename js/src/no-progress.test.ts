@@ -115,3 +115,23 @@ test('invalidating twice is not an error', () => {
   assert.equal(s.animatedPlan.response, null);
   assert.equal(s.animatedPlan.burstDir, '/tmp/burst-abc');
 });
+
+test('a board answered the same way three times ends the solve', async () => {
+  // No solve ever followed a third identical answer; the loops left would only cost the board 3-7s each.
+  const s: any = new CaptchaKrakenSolver({ maxSolveLoops: 6, videoSolveEnabled: false });
+  let rounds = 0;
+  s.isCaptchaSolved = async () => false;
+  s.detectCaptcha = async () => ({ el: {}, at: {}, vendor: 'hcaptcha', role: 'challenge' });
+  s.bannerKind = async () => null;
+  s.human.reset = async () => {};
+  s.isChallengeFreshlyRendered = async () => false;
+  s.solveSingle = async () => {
+    rounds++;
+    s.noteAnswer(click([0.31, 0.226, 0.334, 0.25]), null);   // the model answers this board the same way every round
+    return { didInteract: false, tokenUsage: [] };
+  };
+  let message = '';
+  await s.solveImpl({}).catch((e: Error) => { message = e.message; });
+  assert.match(message, /same answer 3 times/);
+  assert.equal(rounds, 3, `spent ${rounds} rounds on a board the model cannot read`);
+});

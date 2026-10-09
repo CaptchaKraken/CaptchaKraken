@@ -265,8 +265,9 @@ class PageSolverConfig:
     # A page just navigated has often not drawn its widget; this long is spent looking before "no captcha" is
     # believed. It is not charged to overall_solve_timeout_ms, which starts when there is something to solve.
     detection_timeout_ms: int = 15_000
-    # Deprecated and ignored since 3.2.0: a round that makes no progress now counts against max_solve_loops.
+    # Repeats of one answer on one board before the solve ends; the first repeats are re-asked at a fresh sample.
     max_no_progress_rounds: int = 2
+    # Deprecated and ignored since 3.2.0: a round that performed nothing goes straight on to the next.
     post_solve_delay_ms: int = 1_200
     post_solve_outcome_timeout_ms: int = 1_000
     post_solve_outcome_poll_ms: int = 75
@@ -1140,6 +1141,10 @@ class PageSolver:
         A hovered or pressed control repaints, and a board wearing our highlight read as motion: a still board
         was filmed as animated because of the Verify button under the cursor.
         """
+        # Only a board we pointed at wears our feedback. One the vendor dealt under a resting pointer has
+        # nothing of ours to fade, and stepping off it cost every round its own gesture and settle window.
+        if not self._acted_on_board:
+            return
         box = element.bounding_box()
         x, y = self._last_mouse
         if box and self._human.hovers and box["x"] <= x <= box["x"] + box["width"] and box["y"] <= y <= box["y"] + box["height"]:
@@ -2078,11 +2083,14 @@ class PageSolver:
         def blocked(how: str) -> VendorBlockedError:
             return VendorBlockedError(f"the vendor refused to serve this client ({how}); no further round can succeed")
 
-        def again(failure: CaptchaSolveError) -> None:
+        def again(failure: CaptchaSolveError, *, in_transition: bool = False) -> None:
+            """Count the loop. Only a widget caught mid-transition is worth waiting out; a refused or repeated
+            answer changed nothing on the page, and pausing after it only spends the solve's budget."""
             nonlocal last_failure
             last_failure = failure
             _log(f"{failure}; counting this loop and going again")
-            _delay(cfg.stale_element_backoff_ms)
+            if in_transition:
+                _delay(cfg.stale_element_backoff_ms)
 
         for attempt in range(1, cfg.max_solve_loops + 1):
             # A round that failed arms the second look only while its board is still up. A board the vendor has
@@ -2148,7 +2156,7 @@ class PageSolver:
                 if has_interacted and self.is_captcha_solved(page):
                     _log("nothing left to film because the board was accepted; finishing.")
                     return done()
-                again(animated)
+                again(animated, in_transition=True)
                 continue
             except Exception as exc:
                 message = str(exc)
@@ -2167,22 +2175,25 @@ class PageSolver:
                         "the page, context or browser closed mid-solve"
                         + (", after the answer had been submitted but before the vendor's verdict could be read — "
                            "the solve may in fact have succeeded" if has_interacted else "")) from exc
-                again(CaptchaSolveError(f"the challenge handle went stale ({message.splitlines()[0]})"))
+                again(CaptchaSolveError(f"the challenge handle went stale ({message.splitlines()[0]})"), in_transition=True)
                 continue
 
             has_interacted = has_interacted or did_interact
             usage.extend(round_usage)
 
             # One polled wait per round: the vendor's verdict, the widget going away, or a fresh board. The flat
-            # sleep it replaced observed nothing and cost 1200-1500ms per finished round.
-            window_ms = (cfg.post_solve_outcome_timeout_ms if did_interact
-                         else cfg.post_solve_delay_ms + random.random() * 300)
+            # sleep it replaced observed nothing and cost 1200-1500ms per finished round. A round that performed
+            # nothing gave the page nothing to react to, so it looks once and goes on: waiting there cost every
+            # refused or repeated answer the full window.
+            window_ms = cfg.post_solve_outcome_timeout_ms if did_interact else 0
             deadline = _now() + window_ms
             t0 = time.perf_counter()
             solved = False
             said = None
             widget_gone = 0
-            while _now() < deadline:
+            looked = False
+            while not looked or _now() < deadline:
+                looked = True
                 said = self._vendor_verdict() or said
                 if said in (Verdict.ACCEPTED, Verdict.BLOCKED):
                     solved = said == Verdict.ACCEPTED
@@ -2218,8 +2229,13 @@ class PageSolver:
             if said != Verdict.REJECTED and not self.detect_captcha(page):
                 return done()
             if self._no_progress_rounds:
-                again(CaptchaSolveError(f"no progress: the model returned the same answer "
-                                        f"{self._no_progress_rounds + 1} times running"))
+                stuck = CaptchaSolveError(f"no progress: the model returned the same answer "
+                                          f"{self._no_progress_rounds + 1} times running")
+                # A board answered the same way after every resample is one the model cannot read: measured, no
+                # solve ever followed a third identical answer, and each further round cost the board 3-7s.
+                if self._no_progress_rounds >= cfg.max_no_progress_rounds:
+                    raise stuck
+                again(stuck)
             elif not did_interact:
                 # An answer with nothing to execute is not proof the page is stuck; on an animated board it is
                 # what a still expert returns when the board is not a still, so the next round takes a second look.

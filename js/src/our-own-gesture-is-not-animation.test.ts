@@ -23,6 +23,7 @@ const onBoard = ([x, y]: [number, number]) => x >= BOARD.x && x <= BOARD.x + BOA
 
 test('the pointer leaves the board before the board is judged', async () => {
   const { solver, moves } = solverAt([150, 250]);
+  solver.actedOnBoard = true;
   solver.lastInputAt = Date.now();
   await solver.stepOffTheBoard(page, board);
   assert.equal(moves.length, 1, 'the pointer stayed on the board it was about to judge');
@@ -30,6 +31,15 @@ test('the pointer leaves the board before the board is judged', async () => {
   assert.ok(!onBoard([x, y]) && x >= 0 && x < 1280 && y >= 0 && y < 800, `moved to ${[x, y]}`);
   assert.ok(x < BOARD.x, 'left by a far edge instead of the nearest one');
   assert.ok(Date.now() - solver.lastInputAt >= INPUT_SETTLE_MS - 1, 'judged while our own feedback was still fading');
+});
+
+test('a board dealt under a resting pointer is not stepped off', async () => {
+  // Nothing of ours is on a board we have not pointed at, so stepping off it would only cost the round a gesture.
+  const { solver, moves } = solverAt([150, 250]);
+  const t0 = Date.now();
+  await solver.stepOffTheBoard(page, board);
+  assert.deepEqual(moves, [], 'moved off a board we never touched');
+  assert.ok(Date.now() - t0 < INPUT_SETTLE_MS / 2, 'waited out feedback that was never there');
 });
 
 test('a pointer already off the board is not moved', async () => {

@@ -45,9 +45,9 @@ export interface CaptchaKrakenConfig {
   maxSolveLoops?: number;
   /** How long to keep looking for a widget the page has not drawn yet, before "no captcha" is believed. Not charged to `overallSolveTimeoutMs`. Default 15000. */
   detectionTimeoutMs?: number;
-  /** @deprecated Ignored since 3.2.0: a round that makes no progress now counts against `maxSolveLoops`. */
+  /** Repeats of one answer on one board before the solve ends; the first repeats are re-asked at a fresh sample. Default 2. */
   maxNoProgressRounds?: number;
-  /** Dwell after a round that answered nothing. Default 1200. */
+  /** @deprecated Ignored since 3.2.0: a round that performed nothing goes straight on to the next. */
   postSolveDelayMs?: number;
   /** Whole-solve time limit. Default 45000. */
   overallSolveTimeoutMs?: number;

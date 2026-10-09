@@ -12,13 +12,17 @@ semantic versioning; v2 is a major, **breaking** release.
   `overallSolveTimeoutMs` (still 45 s by default) runs out.** A refused answer, a board that would not
   screenshot, an answer the widget could not use, the same answer twice, a
   second under-selection banner and a round that pressed nothing each ended the
-  solve early before, often with loops still in hand. Each now counts one loop,
-  pauses `stale_element_backoff_ms` / `staleElementBackoffMs`, and the next
-  round goes again. `UnsupportedChallengeError` is raised once every loop came
-  back unusable; a solve that runs out of loops says what its last failed round
-  was. The time budget, a closed page and hosted API refusals still end a solve
-  at once. `max_no_progress_rounds`, `max_stale_element_retries` and
-  `max_unsupported_resolves` (and their TypeScript twins) are deprecated and
+  solve early before, often with loops still in hand. Each now counts one loop
+  and the next round goes again. The one exception is a board the model answers
+  identically after every resample: a third identical answer still ends the
+  solve, as `max_no_progress_rounds` / `maxNoProgressRounds` (default 2) says. A round that performed nothing starts the next
+  at once; only a widget caught mid-transition (a stale handle, a board that
+  would not screenshot) pauses `stale_element_backoff_ms` /
+  `staleElementBackoffMs` first. `UnsupportedChallengeError` is raised once every
+  loop came back unusable; a solve that runs out of loops says what its last
+  failed round was. The time budget, a closed page and hosted API refusals still
+  end a solve at once. `max_stale_element_retries`, `max_unsupported_resolves`
+  and `post_solve_delay_ms` (and their TypeScript twins) are deprecated and
   ignored; they will be removed in 4.0.
 
 - **`solve()` waits for a widget the page has not drawn yet.** Calling it

@@ -70,16 +70,18 @@ everything else, including every loop spent without a solve.
 
 A solve gives up when the vendor refuses to serve the client, when
 `max_solve_loops` is spent, or when `overall_solve_timeout_ms` (default 45 s)
-runs out; any other failed round counts a loop and the next one goes again. A
+runs out; any other failed round counts a loop and the next one goes again,
+except that a board the model answers identically
+`max_no_progress_rounds + 1` times (default 3) ends the solve. A
 solve that takes much longer reads as automated to the vendor, so raise the
 budget only for a page that needs it. It also waits up to `detection_timeout_ms` (default 15 s) for a
 widget the page has not drawn yet, so you can call `solve()` straight after
 `goto(..., wait_until="domcontentloaded")`; that wait is not charged to
 `overall_solve_timeout_ms`. Where the vendor's answer-check response is
 readable, `result.verdicts` lists its answer to each round, and an accepted
-verdict is what ends the solve. `max_no_progress_rounds`,
-`max_stale_element_retries` and `max_unsupported_resolves` are still accepted
-but ignored since 3.2.0.
+verdict is what ends the solve. `max_stale_element_retries`,
+`max_unsupported_resolves` and `post_solve_delay_ms` are still accepted but
+ignored since 3.2.0.
 
 Tune with `PageSolverConfig`. Its fields are the snake_cased names of the
 TypeScript `CaptchaKrakenConfig` keys, so a value tuned on one driver is
