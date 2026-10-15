@@ -3,6 +3,22 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [3.2.1] - 2026-10-15
+
+### Fixed
+
+- **A widget drawn inside an enclave frame is found again.** One vendor's newer
+  loader puts no frame on the host page: every frame it draws sits inside a
+  full-viewport enclave iframe, one per render, and only the visible enclave
+  holds the open challenge. Detection only searched the host page, so a
+  challenge that was on screen read as "no captcha", and the error blamed the
+  selector table. Both drivers now read every host-page selector inside each
+  visible enclave as well — detection, the solved and fresh-round checks, the
+  verdict banners and the refusal screen — so the token the vendor writes
+  inside the enclave counts as a solve. A hidden enclave is skipped. The
+  enclave and the vendor's invisible-checkbox frame are no longer counted as
+  markup the table missed.
+
 ## [3.2.0] - 2026-10-07
 
 ### Changed
