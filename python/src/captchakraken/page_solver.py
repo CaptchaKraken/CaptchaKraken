@@ -25,7 +25,7 @@ from .action_types import CaptchaAction
 from .humanize import Humanizer, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
                     RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
-from .selectors import (ACCEPTED_SELECTORS, PIECE_SELECTORS, RESPONSE_SELECTORS, SELECTORS, SLIDER_HANDLE_SELECTORS,
+from .selectors import (ACCEPTED_SELECTORS, ENCLAVE_SELECTORS, PIECE_SELECTORS, RESPONSE_SELECTORS, SELECTORS, SLIDER_HANDLE_SELECTORS,
                         SUBMIT_SELECTORS, TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, VENDORS, WIDGET_PROBES,
                         VendorSelectors, WidgetProbe)
 from .solver import CaptchaSolver, UnsupportedCaptchaError
@@ -364,6 +364,16 @@ def _frame_of(at: Any) -> Optional[Any]:
         return handle.content_frame() if handle else None
     except Exception:
         return None
+
+
+def _host_scopes(page: Any) -> List[Any]:
+    """Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave
+    is skipped because Playwright judges an element visible within its own document, whatever its frame's visibility."""
+    return [page, *(f for f in map(_frame_of, _visible(page, ENCLAVE_SELECTORS)) if f is not None)]
+
+
+def _visible_in(scopes: Sequence[Any], selectors: Sequence[str]) -> List[Any]:
+    return [at for scope in scopes for at in _visible(scope, selectors)]
 
 
 def _input_value(handle: Any) -> str:
@@ -864,13 +874,15 @@ class PageSolver:
 
     # ── detection ────────────────────────────────────────────────────────
 
-    def _has_value(self, page: Any, selector: str) -> bool:
+    def _has_value(self, scopes: Sequence[Any], selector: str) -> bool:
         """Any element at `selector` carrying a non-blank value; response fields are hidden, so no visibility filter."""
-        try:
-            fields = _handles(page.locator(selector).all())
-        except Exception:
-            return False
-        return any(_input_value(f).strip() for f in fields)
+        def fields(scope: Any) -> List[Any]:
+            try:
+                return _handles(scope.locator(selector).all())
+            except Exception:
+                return []
+
+        return any(_input_value(f).strip() for scope in scopes for f in fields(scope))
 
     def _visible_with_text(self, scope: Any, selector: str) -> bool:
         """A visible match carrying text; an empty banner or prompt is a placeholder, not a signal."""
@@ -895,20 +907,21 @@ class PageSolver:
 
     def detect_captcha(self, page: Any) -> Optional[Widget]:
         """Open challenges first, then unsolved checkboxes, then the inline vendors."""
+        scopes = _host_scopes(page)
         for probe in WIDGET_PROBES:
-            at = next(iter(_visible(page, (probe.selector,))), None)
-            if at is None or self._already_accepted(page, at, probe):
+            at = next(iter(_visible_in(scopes, (probe.selector,))), None)
+            if at is None or self._already_accepted(scopes, at, probe):
                 continue
             element = _handle_of(at)
             return Widget(element, at, probe.vendor, probe.role) if element is not None else None
         return None
 
-    def _already_accepted(self, page: Any, at: Any, probe: WidgetProbe) -> bool:
+    def _already_accepted(self, scopes: Sequence[Any], at: Any, probe: WidgetProbe) -> bool:
         """A checkbox the vendor has already accepted is not a captcha to solve."""
         s = SELECTORS[probe.vendor]
         if probe.role != FrameRole.CHECKBOX:
             return False
-        return bool(s.response and self._has_value(page, s.response)) or bool(s.checked and self._checked_in(at, s.checked))
+        return bool(s.response and self._has_value(scopes, s.response)) or bool(s.checked and self._checked_in(at, s.checked))
 
     def vendors_on_the_wire(self, page: Any) -> List[Vendor]:
         """Which vendors' code the page loaded. Resource timing, because a request listener would have to have been attached before navigation."""
@@ -921,9 +934,10 @@ class PageSolver:
 
     def _unmatched_vendor_frames(self, page: Any) -> List[Vendor]:
         """Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame
-        (an invisible badge) is not a widget, so what is left is markup the table no longer matches."""
-        return [vendor for vendor, s in VENDORS if s.hosts and len(_visible(page, [f'iframe[src*="{h}"]' for h in s.hosts]))
-                > len(_visible(page, s.passive))]
+        (an invisible badge, an enclave) is not a widget, so what is left is markup the table no longer matches."""
+        scopes = _host_scopes(page)
+        return [vendor for vendor, s in VENDORS if s.hosts and len(_visible_in(scopes, [f'iframe[src*="{h}"]' for h in s.hosts]))
+                > len(_visible_in(scopes, s.passive))]
 
     def _no_widget_message(self, page: Any) -> str:
         base = f"no interactive captcha widget detected within {self.config.detection_timeout_ms}ms"
@@ -954,11 +968,12 @@ class PageSolver:
 
     def _is_blocked(self, page: Any) -> bool:
         """The vendor showing its refusal screen: rate-limited or flagged, with no board to answer."""
+        scopes = _host_scopes(page)
         for probe in WIDGET_PROBES:
             blocked = SELECTORS[probe.vendor].blocked
             if probe.role != FrameRole.CHALLENGE or not blocked:
                 continue
-            at = next(iter(_visible(page, (probe.selector,))), None)
+            at = next(iter(_visible_in(scopes, (probe.selector,))), None)
             frame = _frame_of(at) if at is not None else None
             if frame and any(self._visible_with_text(frame, selector) for selector in blocked):
                 return True
@@ -972,13 +987,14 @@ class PageSolver:
     def is_captcha_solved(self, page: Any) -> bool:
         """The vendor's own done signal: a response token, a painted success state, or a checked box."""
         try:
-            if any(self._has_value(page, s) for s in RESPONSE_SELECTORS) or _visible(page, ACCEPTED_SELECTORS):
+            scopes = _host_scopes(page)
+            if any(self._has_value(scopes, s) for s in RESPONSE_SELECTORS) or _visible_in(scopes, ACCEPTED_SELECTORS):
                 return True
             for probe in WIDGET_PROBES:
                 checked = SELECTORS[probe.vendor].checked
                 if probe.role != FrameRole.CHECKBOX or not checked:
                     continue
-                at = next(iter(_visible(page, (probe.selector,))), None)
+                at = next(iter(_visible_in(scopes, (probe.selector,))), None)
                 if at is not None and self._checked_in(at, checked):
                     return True
         except Exception:
@@ -988,11 +1004,12 @@ class PageSolver:
     def _is_challenge_freshly_rendered(self, page: Any) -> bool:
         """A next round has painted, as opposed to the answered frame animating closed."""
         try:
+            scopes = _host_scopes(page)
             for probe in WIDGET_PROBES:
                 fresh = SELECTORS[probe.vendor].fresh
                 if probe.role != FrameRole.CHALLENGE or not fresh:
                     continue
-                at = next(iter(_visible(page, (probe.selector,))), None)
+                at = next(iter(_visible_in(scopes, (probe.selector,))), None)
                 element = _handle_of(at) if at is not None else None
                 if element is None:
                     continue
@@ -1012,11 +1029,12 @@ class PageSolver:
     def _banner_kind(self, page: Any) -> Optional[RecaptchaBanner]:
         """Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error."""
         try:
+            scopes = _host_scopes(page)
             for probe in WIDGET_PROBES:
                 banners = SELECTORS[probe.vendor].banners
                 if probe.role != FrameRole.CHALLENGE or not banners:
                     continue
-                at = next(iter(_visible(page, (probe.selector,))), None)
+                at = next(iter(_visible_in(scopes, (probe.selector,))), None)
                 frame = _frame_of(at) if at is not None else None
                 if not frame:
                     continue

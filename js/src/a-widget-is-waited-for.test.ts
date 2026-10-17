@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 
 import { CaptchaKrakenSolver } from './solver';
 import type { PlaywrightPage } from './playwright-types';
+import { iframeMatches } from './fake-dom.test';
 
 function driver(appearsAfterMs: number, detectionTimeoutMs: number) {
   const solver: any = new CaptchaKrakenSolver({ detectionTimeoutMs, maxSolveLoops: 1, overallSolveTimeoutMs: 1_000,
@@ -68,12 +69,11 @@ test('a frame nothing matches is reported as changed markup', async () => {
   assert.match(await message(['hcaptcha'], ['hcaptcha']), /hcaptcha is showing a frame that matches nothing in SELECTORS/);
 });
 
-/** Answers `iframe[src*="..."]` from a list of frame URLs, which is all the unmatched-frame check asks. */
+/** Answers `iframe[src*="..."]` from a list of frame URLs, which is all the unmatched-frame check asks. Frames hold no document. */
 function framesPage(srcs: string[]): PlaywrightPage {
   const locator = (selector: string): any => {
-    const needle = selector.includes('src*="') ? selector.split('src*="')[1].split('"')[0] : null;
-    const hits = srcs.filter((s) => needle && s.includes(needle));
-    return { filter: () => locator(selector), all: async () => hits.map(() => ({})), count: async () => hits.length };
+    const hits = srcs.filter((s) => iframeMatches(s, [selector]).length > 0);
+    return { filter: () => locator(selector), all: async () => hits.map(() => ({ elementHandle: async () => null })), count: async () => hits.length };
   };
   return { locator } as unknown as PlaywrightPage;
 }

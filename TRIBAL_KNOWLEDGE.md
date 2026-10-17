@@ -273,6 +273,22 @@ made Tencent's entry silently the only thing detecting MTCaptcha and hid that
 `.mtcap` matched nothing. BotDetect is absent from the markers on purpose: it
 is self-hosted and has no vendor host.
 
+**Host-page selectors also read inside a visible enclave.** On 2026-10-15 a
+live page was found loading a vendor's enclave loader, which draws no frame on
+the host page: each render gets a full-viewport enclave iframe, and the
+challenge and checkbox frames live inside it. Every host-page selector still matched inside its frame, so the
+table was not stale; it was being read in the wrong document. The enclave is a
+row field (`enclave`) rather than a recursive frame walk, because a walk would
+also descend into every ad and login frame on the page. Only a visible enclave
+is read: Playwright judges an element's visibility within its own document, so
+a frame inside a hidden enclave measures as visible unless the enclave's own
+document hides it too. Playwright's
+`boundingBox()` is relative to the top frame through any depth of nesting,
+which is what lets the crop and the clicks work unchanged; that was checked on
+the recorded page in Chromium and in a Firefox-based browser. The enclave itself is `passive`,
+or a page showing nothing but an idle enclave would be reported as markup the
+table no longer matches.
+
 **Yandex and MTCaptcha are iframed.** `.CheckboxCaptcha` and `.mtcap` live
 inside the frame document and `querySelector` does not cross a frame boundary,
 so on the host page those entries matched nothing, ever. Iframe selectors go

@@ -11,6 +11,8 @@ export interface VendorSelectors {
   readonly challenge?: readonly string[];
   /** On the host page: the checkbox. Detected while `response` is empty and `checked` is not showing. */
   readonly checkbox?: readonly string[];
+  /** On the host page: a frame the vendor draws its other frames inside. Every host-page selector also reads the inside of a visible one. */
+  readonly enclave?: readonly string[];
   /** On the host page: inline widget shapes, detected last. Iframe selectors go first; a class that lives inside the frame document (.CheckboxCaptcha, .mtcap) only ever matches an inline embed. */
   readonly widget?: readonly string[];
   /** On the host page: the field the vendor fills on success. Read first and unconditionally, because hCaptcha's overlay hides the anchor. */
@@ -59,17 +61,20 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     blocked: ['.rc-doscaptcha-header-text'],
     passive: ['iframe[src*="size=invisible"]'],
   },
-  // Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com.
+  // Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com. secure-api.js
+  // draws every frame inside a full-viewport enclave, one per render, and only a visible one holds an open challenge.
   [Vendor.HCAPTCHA]: {
     hosts: ['hcaptcha.com'],
     challenge: ['iframe[src*="hcaptcha"][src*="frame=challenge"]'],
-    checkbox: ['iframe[src*="hcaptcha"][src*="frame=checkbox"]'],
+    checkbox: ['iframe[src*="hcaptcha"][src*="frame=checkbox"]:not([src*="frame=checkbox-invisible"])'],
+    enclave: ['iframe[src*="hcaptcha"][src*="frame=enclave"]'],
     response: '[name="h-captcha-response"]',
     checked: '#checkbox[aria-checked="true"]',
     box: ['#checkbox'],
     fresh: '.prompt-text',
     images: ['.task-image .image', '.task .image', '.challenge-example img', '.image-wrapper img'],
     submit: ['.button-submit'],
+    passive: ['iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'],
   },
   [Vendor.TURNSTILE]: {
     hosts: ['challenges.cloudflare.com'],
@@ -142,6 +147,7 @@ export const WIDGET_PROBES: ReadonlyArray<WidgetProbe> = ([
   [FrameRole.CHALLENGE, 'challenge'], [FrameRole.CHECKBOX, 'checkbox'], [FrameRole.UNKNOWN, 'widget'],
 ] as const).flatMap(([role, key]) => VENDORS.flatMap(([vendor, s]) => (s[key] ?? []).map((selector) => ({ vendor, role, selector }))));
 
+export const ENCLAVE_SELECTORS: readonly string[] = ofEveryVendor('enclave');
 export const RESPONSE_SELECTORS: readonly string[] = VENDORS.flatMap(([, s]) => s.response ?? []);
 export const ACCEPTED_SELECTORS: readonly string[] = VENDORS.flatMap(([, s]) => s.accepted ?? []);
 

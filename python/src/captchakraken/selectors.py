@@ -18,6 +18,9 @@ class VendorSelectors:
     challenge: Sequence[str] = ()
     # On the host page: the checkbox. Detected while `response` is empty and `checked` is not showing.
     checkbox: Sequence[str] = ()
+    # On the host page: a frame the vendor draws its other frames inside. Every host-page selector also reads the
+    # inside of a visible one.
+    enclave: Sequence[str] = ()
     # On the host page: inline widget shapes, detected last. Iframe selectors go first; a class that lives inside the
     # frame document (.CheckboxCaptcha, .mtcap) only ever matches an inline embed.
     widget: Sequence[str] = ()
@@ -68,17 +71,20 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         blocked=(".rc-doscaptcha-header-text",),
         passive=('iframe[src*="size=invisible"]',),
     ),
-    # Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com.
+    # Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com. secure-api.js
+    # draws every frame inside a full-viewport enclave, one per render, and only a visible one holds an open challenge.
     Vendor.HCAPTCHA: VendorSelectors(
         hosts=("hcaptcha.com",),
         challenge=('iframe[src*="hcaptcha"][src*="frame=challenge"]',),
-        checkbox=('iframe[src*="hcaptcha"][src*="frame=checkbox"]',),
+        checkbox=('iframe[src*="hcaptcha"][src*="frame=checkbox"]:not([src*="frame=checkbox-invisible"])',),
+        enclave=('iframe[src*="hcaptcha"][src*="frame=enclave"]',),
         response='[name="h-captcha-response"]',
         checked='#checkbox[aria-checked="true"]',
         box=("#checkbox",),
         fresh=".prompt-text",
         images=(".task-image .image", ".task .image", ".challenge-example img", ".image-wrapper img"),
         submit=(".button-submit",),
+        passive=('iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'),
     ),
     Vendor.TURNSTILE: VendorSelectors(
         hosts=("challenges.cloudflare.com",),
@@ -161,6 +167,7 @@ WIDGET_PROBES: Sequence[WidgetProbe] = tuple(
     for vendor, s in VENDORS
     for selector in getattr(s, key))
 
+ENCLAVE_SELECTORS: Sequence[str] = _of_every_vendor("enclave")
 RESPONSE_SELECTORS: Sequence[str] = tuple(s.response for _, s in VENDORS if s.response)
 ACCEPTED_SELECTORS: Sequence[str] = tuple(s.accepted for _, s in VENDORS if s.accepted)
 
