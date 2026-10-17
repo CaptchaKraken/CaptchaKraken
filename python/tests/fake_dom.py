@@ -3,6 +3,7 @@ The locator half is the Playwright surface the driver duck-types (`locator/filte
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -100,3 +101,15 @@ def fake_scope(nodes: Optional[Sequence[FakeNode]], unparsable: Sequence[str] = 
         return [FakeHandle(n) for n in (nodes or ()) if _hit(selector, n.matches)]
 
     return FakeScope(lookup)
+
+
+def iframe_matches(src: str, selectors: Sequence[str]) -> List[str]:
+    """The iframe selectors an element with this `src` answers to, the way a CSS engine would read them."""
+    def wants(sel: str) -> List[str]:
+        return re.findall(r'\[src\*="([^"]+)"\]', sel)
+
+    def hit(sel: str) -> bool:
+        positive, _, negative = sel.partition(":not(")
+        return all(s in src for s in wants(positive)) and not any(s in src for s in wants(negative))
+
+    return [sel for sel in selectors if sel.startswith("iframe[src") and hit(sel)]

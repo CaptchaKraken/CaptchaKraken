@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- hCaptcha's secure-api.js enclave frame, recorded on a live job-board posting on 2026-10-15 with its challenge open.
+     The script stands in for hCaptcha's: the challenge's token lands in this frame's response field, not the host page's. -->
+<html lang="en"><head><meta charset="utf-8"><title>hCaptcha</title></head>
+<body class="no-selection" style="overflow-y: auto;">
+<div style="background-color: rgb(255, 255, 255); border: 1px solid rgb(215, 215, 215); box-shadow: rgba(0, 0, 0, 0.1) 0px 0px 4px; border-radius: 4px; left: 440px; top: 150px; z-index: 2147483647; position: absolute; pointer-events: auto; opacity: 1; visibility: visible; display: block;"><div style="position: relative; z-index: 1; width: 400px; height: 600px;"><iframe src="hcaptcha.html#frame=challenge&amp;id=0so2b8l008q&amp;host=careers.example.com&amp;size=invisible&amp;theme=light" frameborder="0" scrolling="no" allow="private-state-token-redemption" title="hCaptcha challenge" style="border: 0px; z-index: 2000000000; position: relative; width: 400px; height: 600px;"></iframe></div><div style="width: 100%; height: 100%; position: fixed; pointer-events: auto; top: 0px; left: 0px; z-index: 0; background-color: rgb(255, 255, 255); opacity: 0.05; cursor: pointer;"></div></div>
+<iframe aria-hidden="true" data-hcaptcha-widget-id="0so2b8l008q" data-hcaptcha-response="" src="hcaptcha.html#frame=checkbox-invisible" style="display: none;"></iframe>
+<textarea id="g-recaptcha-response-0so2b8l008q" name="g-recaptcha-response" style="display: none;"></textarea>
+<textarea id="h-captcha-response-0so2b8l008q" name="h-captcha-response" style="display: none;"></textarea>
+<script>
+  addEventListener('message', (e) => {
+    if (e.data && e.data.hcaptchaToken) document.querySelector('[name="h-captcha-response"]').value = e.data.hcaptchaToken;
+  });
+</script>
+</body>
+</html>

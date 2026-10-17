@@ -87,9 +87,9 @@ export function fakeDom(nodes: FakeNode[], opts: Options = {}): PlaywrightFrame 
 }
 
 /** The host-page iframe selectors an element with this `src` answers to, the way a CSS engine would read them. */
-export function iframeMatches(src: string): string[] {
+export function iframeMatches(src: string, selectors: readonly string[] = WIDGET_PROBES.map((p) => p.selector)): string[] {
   const wants = (sel: string) => [...sel.matchAll(/\[src\*="([^"]+)"\]/g)].map((m) => m[1]);
-  return WIDGET_PROBES.map((p) => p.selector).filter((sel) => {
+  return selectors.filter((sel) => {
     if (!sel.startsWith('iframe[src')) return false;
     const [positive, negative = ''] = sel.split(':not(');
     return wants(positive).every((s) => src.includes(s)) && wants(negative).every((s) => !src.includes(s));

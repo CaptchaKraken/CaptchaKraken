@@ -116,10 +116,9 @@ class _Scope:
         self.srcs = srcs
 
     def locator(self, selector: str) -> Any:
-        from fake_dom import FakeLocator
+        from fake_dom import FakeLocator, iframe_matches
 
-        needle = selector.split('src*="', 1)[1].split('"', 1)[0] if 'src*="' in selector else None
-        return FakeLocator(lambda: [_Frame(s) for s in self.srcs if needle and needle in s])
+        return FakeLocator(lambda: [_Frame(s) for s in self.srcs if iframe_matches(s, [selector])])
 
 
 def test_an_invisible_badge_is_not_an_unmatched_frame():
