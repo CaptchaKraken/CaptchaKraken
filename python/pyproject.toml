@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "captchakraken"
-version = "3.2.1"
+version = "3.2.2"
 description = "Captcha-solving engine and CLI: OpenCV grid detection plus a fine-tuned Qwen3.5-9B vision model, for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -65,7 +65,7 @@ dependencies = [
   # never vendored or bundled, which is the arrangement the licence is written
   # for — see NOTICE. Its TypeScript port `cursory-js` is the JS driver's
   # dependency, and the two agree bit for bit on a seed.
-  "cursory==2.0.0",
+  "cursory==2.1.0",
 ]
 
 [project.optional-dependencies]
