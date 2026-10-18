@@ -3,6 +3,18 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [3.2.2] - 2026-10-18
+
+### Changed
+
+- **The mouse no longer kinks as it arrives.** Both drivers move to Cursory
+  2.1.0 (`cursory==2.1.0` in Python, `cursory-js@2.1.0` in JS), which morphs the
+  recorded movement onto the requested endpoints before roughening it and fades
+  the jitter and knots to nothing at both ends. A move used to be able to swing
+  a few pixels past its target and come back in its last samples; it now leaves
+  and arrives the way the person who recorded it did. A seed gives a different
+  path than it did on 3.2.1, and the two drivers still agree on it bit for bit.
+
 ## [3.2.1] - 2026-10-15
 
 ### Fixed
