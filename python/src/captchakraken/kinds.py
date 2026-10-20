@@ -16,6 +16,7 @@ class Vendor(StrEnum):
     PROSOPO = "prosopo"
     MTCAPTCHA = "mtcaptcha"
     BOTDETECT = "botdetect"
+    HUMAN = "human"
     UNKNOWN = "unknown"
 
 
@@ -26,6 +27,7 @@ class ActionKind(StrEnum):
     WAIT = "wait"
     DONE = "done"
     HOLD = "hold"
+    REFRESH = "refresh"
 
 
 class PixelAnswerKind(StrEnum):
@@ -36,6 +38,7 @@ class PixelAnswerKind(StrEnum):
     SLIDE = "slide"
     TYPE = "type"
     HOLD = "hold"
+    REFRESH = "refresh"
 
 
 class RetryMode(StrEnum):

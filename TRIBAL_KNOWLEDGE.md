@@ -168,6 +168,25 @@ f-string, a `.join()`, a constant reference or an enum member reads as "unset"
 to that gate, and the gate going quiet is how prompt drift shipped on
 2026-07-18: every drag failed as "unsupported" with CI green.
 
+**Prompt generation 3 is one model asked one prompt.** Its `BUILTIN_PROMPTS`
+entry is the single `general` prompt: the puzzle's type is never named, and a
+generation-3 model is never routed by family, even if its registry entry
+declares `experts`. The driver still decides how the board is SHOWN — a grid
+that `find_grid`, `_grid_dims` and `_is_real_grid` accept is sent with its
+cells numbered, anything else as the plain picture — because the model was
+trained on exactly what those three would number. Its `ids` name cells; when
+they name none, the cells its points land in do. An animated board is refused
+on generation 3 rather than sent as keyframes: that generation reads a video
+with each frame's number drawn into it, which the client does not send yet,
+and keyframes under the general prompt would answer silently worse.
+
+**`refresh` is an answer, not a failure.** Some boards a person would not
+solve, and solving them instantly is itself a tell, so generation 3 may ask for
+a new puzzle. The driver presses the vendor's own control (`refresh` in the
+selector table), else the model's point on it, else ends the round. Nothing
+after it — Verify included — belongs to the replaced board, and a second
+refresh is a second board, never counted as a repeated answer.
+
 **The pin decides the registry entry.** Reading `base_model` and `lora_name`
 off `latest` while `CAPTCHA_LORA_ADAPTER` named Abyss-27B downloaded a 9B base,
 tried to load a 27B adapter onto it, and errored deep inside vLLM as a shape

@@ -178,7 +178,13 @@ export interface HoldAction extends AnimatedActionFields {
   target_bounding_box: [number, number, number, number];
 }
 
-export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction | HoldAction;
+/** Load a new puzzle instead of solving this one (prompt generation 3). The box is the model's point on the control, or null when it saw none; the driver presses the vendor's own control first either way. */
+export interface RefreshAction {
+  action: typeof ActionKind.REFRESH;
+  target_bounding_box?: [number, number, number, number] | null;
+}
+
+export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction | HoldAction | RefreshAction;
 export type SolverResult = CaptchaAction | CaptchaAction[];
 
 export interface TokenUsage {

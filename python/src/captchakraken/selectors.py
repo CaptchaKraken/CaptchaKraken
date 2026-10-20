@@ -51,6 +51,8 @@ class VendorSelectors:
     slider_handle: Sequence[str] = ()
     # Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.
     piece: Sequence[str] = ()
+    # Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.
+    refresh: Sequence[str] = ()
 
 
 SELECTORS: Mapping[Vendor, VendorSelectors] = {
@@ -63,6 +65,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         box=("#recaptcha-anchor",),
         fresh=".rc-imageselect-instructions, #rc-imageselect",
         submit=("#recaptcha-verify-button",),
+        refresh=("#recaptcha-reload-button",),
         banners=(
             (".rc-imageselect-error-select-more", RecaptchaBanner.SELECT_MORE),
             (".rc-imageselect-error-dynamic-more", RecaptchaBanner.DYNAMIC_MORE),
@@ -84,6 +87,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         fresh=".prompt-text",
         images=(".task-image .image", ".task .image", ".challenge-example img", ".image-wrapper img"),
         submit=(".button-submit",),
+        refresh=(".refresh.button",),
         passive=('iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'),
     ),
     Vendor.TURNSTILE: VendorSelectors(
@@ -97,6 +101,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         accepted=(".geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, "
                   ".geetest_captcha.geetest_lock_success"),
         submit=(".geetest_submit",),
+        refresh=(".geetest_refresh", ".geetest_refresh_1"),
         slider_handle=(".geetest_slider_button", ".geetest_btn", ".geetest_slider .geetest_arrow"),
         piece=(".geetest_slice",),
     ),
@@ -108,12 +113,14 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
                 'iframe[id^="tcaptcha"]', 'iframe[src*="captcha.gtimg.com"]', 'iframe[src*="captcha.qq.com"]'),
         slider_handle=(".tencent-captcha-dy__slider-block", "#tcaptcha_drag_thumb", ".tc-slider-normal", "[id*=slideBlock]"),
         piece=(".tencent-captcha-dy__fg-item",),
+        refresh=(".tencent-captcha-dy__footer-icon--refresh",),
     ),
     Vendor.YIDUN: VendorSelectors(
         hosts=("dun.163.com", "cstaticdun.126.net", "necaptcha.nosdn.127.net"),
         widget=(".yidun_panel", ".yidun"),
         slider_handle=(".yidun_slider", ".yidun_jigsaw"),
         piece=(".yidun_jigsaw",),
+        refresh=(".yidun_refresh",),
     ),
     Vendor.YANDEX: VendorSelectors(
         hosts=("smartcaptcha.yandexcloud.net",),
@@ -135,12 +142,20 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         hosts=("mtcaptcha.com",),
         widget=('iframe[src*="service.mtcaptcha.com"]', 'iframe[id^="mtcaptcha-iframe"]', ".mtcaptcha", ".mtcap"),
         text_input=("input.mtcap-inputtext", ".mtcap input[type=text]"),
+        refresh=(".mtcap-refresh",),
     ),
     Vendor.BOTDETECT: VendorSelectors(
         hosts=(),
         widget=(".BDC_CaptchaDiv",),
         text_input=("input[id*=captchaCode]", "input#captchaCode", "input[id*=validateCaptcha]",
                     ".BDC_CaptchaDiv input[type=text]"),
+        refresh=('a[id*="ReloadLink"]', ".BDC_ReloadIcon"),
+    ),
+    # The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's
+    # iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.
+    Vendor.HUMAN: VendorSelectors(
+        hosts=(),
+        widget=("#px-captcha",),
     ),
     Vendor.UNKNOWN: VendorSelectors(hosts=()),
 }
@@ -198,4 +213,5 @@ SLIDER_HANDLE_SELECTORS: Sequence[str] = (
     '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
     '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
 )
+REFRESH_SELECTORS: Sequence[str] = _of_every_vendor("refresh")
 PIECE_SELECTORS: Sequence[str] = (*_of_every_vendor("piece"), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]')

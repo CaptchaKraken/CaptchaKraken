@@ -41,6 +41,8 @@ export interface VendorSelectors {
   readonly sliderHandle?: readonly string[];
   /** Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track. */
   readonly piece?: readonly string[];
+  /** Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`. */
+  readonly refresh?: readonly string[];
 }
 
 export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
@@ -53,6 +55,7 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     box: ['#recaptcha-anchor'],
     fresh: '.rc-imageselect-instructions, #rc-imageselect',
     submit: ['#recaptcha-verify-button'],
+    refresh: ['#recaptcha-reload-button'],
     banners: [
       ['.rc-imageselect-error-select-more', RecaptchaBanner.SELECT_MORE],
       ['.rc-imageselect-error-dynamic-more', RecaptchaBanner.DYNAMIC_MORE],
@@ -74,6 +77,7 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     fresh: '.prompt-text',
     images: ['.task-image .image', '.task .image', '.challenge-example img', '.image-wrapper img'],
     submit: ['.button-submit'],
+    refresh: ['.refresh.button'],
     passive: ['iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'],
   },
   [Vendor.TURNSTILE]: {
@@ -86,6 +90,7 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     widget: ['.geetest_box', '.geetest_panel_box', '.geetest_popup_window', '.geetest_widget'],
     accepted: '.geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, .geetest_captcha.geetest_lock_success',
     submit: ['.geetest_submit'],
+    refresh: ['.geetest_refresh', '.geetest_refresh_1'],
     sliderHandle: ['.geetest_slider_button', '.geetest_btn', '.geetest_slider .geetest_arrow'],
     piece: ['.geetest_slice'],
   },
@@ -96,12 +101,14 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     widget: ['#tcaptcha_transform_dy', '#tCaptchaDyContent', '.tencent-captcha-dy__content', 'iframe#tcaptcha_iframe_dy', 'iframe[id^="tcaptcha"]', 'iframe[src*="captcha.gtimg.com"]', 'iframe[src*="captcha.qq.com"]'],
     sliderHandle: ['.tencent-captcha-dy__slider-block', '#tcaptcha_drag_thumb', '.tc-slider-normal', '[id*=slideBlock]'],
     piece: ['.tencent-captcha-dy__fg-item'],
+    refresh: ['.tencent-captcha-dy__footer-icon--refresh'],
   },
   [Vendor.YIDUN]: {
     hosts: ['dun.163.com', 'cstaticdun.126.net', 'necaptcha.nosdn.127.net'],
     widget: ['.yidun_panel', '.yidun'],
     sliderHandle: ['.yidun_slider', '.yidun_jigsaw'],
     piece: ['.yidun_jigsaw'],
+    refresh: ['.yidun_refresh'],
   },
   [Vendor.YANDEX]: {
     hosts: ['smartcaptcha.yandexcloud.net'],
@@ -122,11 +129,19 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     hosts: ['mtcaptcha.com'],
     widget: ['iframe[src*="service.mtcaptcha.com"]', 'iframe[id^="mtcaptcha-iframe"]', '.mtcaptcha', '.mtcap'],
     textInput: ['input.mtcap-inputtext', '.mtcap input[type=text]'],
+    refresh: ['.mtcap-refresh'],
   },
   [Vendor.BOTDETECT]: {
     hosts: [],
     widget: ['.BDC_CaptchaDiv'],
     textInput: ['input[id*=captchaCode]', 'input#captchaCode', 'input[id*=validateCaptcha]', '.BDC_CaptchaDiv input[type=text]'],
+    refresh: ['a[id*="ReloadLink"]', '.BDC_ReloadIcon'],
+  },
+  // The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's
+  // iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.
+  [Vendor.HUMAN]: {
+    hosts: [],
+    widget: ['#px-captcha'],
   },
   [Vendor.UNKNOWN]: { hosts: [] },
 };
@@ -172,4 +187,5 @@ export const SLIDER_HANDLE_SELECTORS: readonly string[] = [...ofEveryVendor('sli
   '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
   '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
 ];
+export const REFRESH_SELECTORS: readonly string[] = ofEveryVendor('refresh');
 export const PIECE_SELECTORS: readonly string[] = [...ofEveryVendor('piece'), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]'];

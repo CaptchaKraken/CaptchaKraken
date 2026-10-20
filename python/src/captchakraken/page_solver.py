@@ -25,9 +25,9 @@ from .action_types import CaptchaAction
 from .humanize import Humanizer, hold, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
                     RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
-from .selectors import (ACCEPTED_SELECTORS, ENCLAVE_SELECTORS, PIECE_SELECTORS, RESPONSE_SELECTORS, SELECTORS, SLIDER_HANDLE_SELECTORS,
-                        SUBMIT_SELECTORS, TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, VENDORS, WIDGET_PROBES,
-                        VendorSelectors, WidgetProbe)
+from .selectors import (ACCEPTED_SELECTORS, ENCLAVE_SELECTORS, PIECE_SELECTORS, REFRESH_SELECTORS, RESPONSE_SELECTORS,
+                        SELECTORS, SLIDER_HANDLE_SELECTORS, SUBMIT_SELECTORS, TEXT_INPUT_SELECTORS,
+                        TEXT_INPUT_VENDOR_SELECTORS, VENDORS, WIDGET_PROBES, VendorSelectors, WidgetProbe)
 from .solver import CaptchaSolver, UnsupportedCaptchaError
 from .timing import PhaseBudget, timings_enabled
 from .verdicts import RoundVerdict, VerdictLog
@@ -505,6 +505,12 @@ class PageSolver:
     def _note_answer(self, actions: Sequence[Any], retry_mode: Optional[RetryMode]) -> bool:
         """True when this answer already ran and changed nothing: resample, re-ask, and arm the probe."""
         sig = self._answer_signature(actions, retry_mode)
+        # A refresh asks for a different board, so the same refresh twice is two boards, not a refused answer. An
+        # answer that could not be signed could not be read either, and is not looked into.
+        if sig is not None and any(_as_dict(a).get("action") == ActionKind.REFRESH for a in actions):
+            self._no_progress_rounds = 0
+            self._last_answer_sig = None
+            return False
         if sig is not None and sig == self._last_answer_sig:
             self._no_progress_rounds += 1
             _log(f"[no-progress] the model returned the same answer again ({self._no_progress_rounds} in a row)")
@@ -726,6 +732,21 @@ class PageSolver:
             completed = hold(self._human, page, at, done, HOLD_MAX_MS)
         _log("held until the widget completed." if completed else f"released the hold at the {HOLD_MAX_MS}ms cap.")
         return completed
+
+    def _execute_refresh(self, page: Any, scope: Any, action: Dict[str, Any],
+                         element_box: Optional[Dict[str, float]]) -> bool:
+        """Deal a new puzzle: the vendor's own control, else the model's point on one. False when there is neither."""
+        control = self._find_control(scope, REFRESH_SELECTORS)
+        if control is not None:
+            self._acted_on_board = True
+            self._move_and_click(page, control)
+        elif action.get("target_bounding_box") and element_box:
+            self._execute_click(page, action, element_box)
+        else:
+            _log("the model asked for a new puzzle, and there is no control to deal one; ending the round.")
+            return False
+        _log("asked for a new puzzle instead of solving this one.")
+        return True
 
     def _execute_drag(self, page: Any, action: Dict[str, Any], element_box: Dict[str, float]) -> None:
         self._acted_on_board = True
@@ -1845,6 +1866,10 @@ class PageSolver:
                     loading, _ = self._watch_clicked_tiles(page, element, session, clicked_order)
                     self._wait_for_any_clicked_tile_loaded(page, element, session, loading)
                 continue
+            if kind == ActionKind.REFRESH:
+                # A new board replaces this one: nothing clicked on it is submitted; the next loop reads the new one.
+                refreshed = self._execute_refresh(page, element.content_frame(), action, element_box)
+                return refreshed or performed, all_usage
             if kind != ActionKind.CLICK:
                 _log(f"[recaptcha-grid] round {round_index}: unexpected action; re-solving.")
                 continue
@@ -2051,6 +2076,9 @@ class PageSolver:
                     # The widget submits itself when the hold completes, like a slide on release.
                     self._execute_hold(page, action, element_box, element)
                     performed = slid = True
+                elif kind == ActionKind.REFRESH:
+                    # Nothing after a refresh, Verify included, belongs to the board it replaces.
+                    return self._execute_refresh(page, scope, action, element_box), all_usage
                 elif kind == ActionKind.WAIT:
                     duration = int(action.get("duration_ms") or 0)
                     if duration > 0:

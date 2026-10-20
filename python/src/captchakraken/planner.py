@@ -206,6 +206,20 @@ def _warn_legacy_model_once(model: str) -> None:
     print(f"[captchakraken] {prompts.LEGACY_MODEL_WARNING.format(model=model)}", file=sys.stderr)
 
 
+def _norm_xy(x: Any, y: Any) -> Optional[tuple]:
+    """A model point on the 0-1000 scale as 0-1; a normalised pair passes, anything off the image is clamped."""
+    try:
+        fx, fy = float(x) / 1000.0, float(y) / 1000.0
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
+        if 0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0:
+            fx, fy = float(x), float(y)
+        else:
+            fx, fy = min(max(fx, 0.0), 1.0), min(max(fy, 0.0), 1.0)
+    return (fx, fy)
+
+
 class ActionPlanner:
 
     def __init__(
@@ -485,8 +499,17 @@ class ActionPlanner:
                 out.append(iv)
         return out
 
+    def get_general_actions(self, image_path: str) -> List[Dict[str, Any]]:
+        """Generation 3: the one prompt, whatever the puzzle, and no family to route by."""
+        raw = self._chat_with_image(self.prompts.general or "", image_path, max_tokens=512)
+        actions = self._normalize_general(self._parse_json(raw))
+        self._log(f"general actions -> {actions}")
+        return actions
+
     def get_pixel_actions(self, image_path: str, text_mode: bool = False) -> List[Dict[str, Any]]:
-        prompt = self.prompts.text_prompt() if text_mode else self.prompts.action_prompt
+        if self.prompts.general is not None:
+            return self.get_general_actions(image_path)
+        prompt = self.prompts.text_prompt() if text_mode else self.prompts.pixel_prompt()
         raw = self._chat_with_image(prompt, image_path, max_tokens=512,
                                     family=PromptFamily.TEXT if text_mode else PromptFamily.PIXEL)
         data = self._parse_json(raw)
@@ -523,19 +546,29 @@ class ActionPlanner:
         return n if 1 <= n <= n_keyframes else None
 
     @staticmethod
+    def _normalize_general(data: Any) -> List[Dict[str, Any]]:
+        """Generation 3's answer. Click and refresh are read here because an empty point list means something for
+        them (nothing matches; no control seen) and a click may name boxed ids; drag, hold and type have generation
+        2's shape and go through `_normalize_pixel`."""
+        if not isinstance(data, dict):
+            return []
+        act = data.get("action")
+        if act not in (ActionKind.CLICK, ActionKind.REFRESH):
+            return ActionPlanner._normalize_pixel(data)
+        raw_points = data.get("points")
+        points = [xy for xy in (_norm_xy(p[0], p[1]) for p in (raw_points if isinstance(raw_points, list) else [])
+                                if isinstance(p, (list, tuple)) and len(p) >= 2) if xy]
+        if act == ActionKind.REFRESH:
+            return [{"kind": PixelAnswerKind.REFRESH, "points": points[:1]}]
+        raw_ids = data.get("ids")
+        ids = [int(i) for i in (raw_ids if isinstance(raw_ids, list) else [])
+               if not isinstance(i, bool) and str(i).strip().isdigit()]
+        return [{"kind": PixelAnswerKind.CLICK, "points": points, "ids": ids}]
+
+    @staticmethod
     def _normalize_pixel(data: Any) -> List[Dict[str, Any]]:
         """Every answer shape the model has been seen to produce, oldest last; `kind` is a PixelAnswerKind."""
-        def norm_xy(x: Any, y: Any) -> Optional[tuple]:
-            try:
-                fx, fy = float(x) / 1000.0, float(y) / 1000.0
-            except (TypeError, ValueError):
-                return None
-            if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
-                if 0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0:
-                    fx, fy = float(x), float(y)
-                else:
-                    fx, fy = min(max(fx, 0.0), 1.0), min(max(fy, 0.0), 1.0)
-            return (fx, fy)
+        norm_xy = _norm_xy
 
         def flat_numbers(v: Any) -> List[float]:
             nums: List[float] = []

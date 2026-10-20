@@ -20,7 +20,7 @@ import * as os from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { PhaseBudget, timingsEnabled } from './timing';
 import { CaptureRect, cropPng, enclosingRect } from './png';
-import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, HoldAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
+import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, HoldAction, RefreshAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
 import { ActionKind, FrameRole, KeyframeMode, Outcome, PaintVerdict, PauseKind, Phase, RecaptchaBanner, RetryMode, SettleVerdict, SolveStage, Vendor, Verdict, isOneOf } from './kinds';
 import { VerdictLog } from './verdicts';
 import { aggregateTokenUsage } from './token-usage';
@@ -31,7 +31,7 @@ import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
 import { solveSlideGeometry, MIN_PIECE_PX, MAX_PIECE_FRACTION } from './slide-geometry';
 import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
 import { SELECTORS, VENDORS, VendorSelectors, WIDGET_PROBES, WidgetProbe, ENCLAVE_SELECTORS, RESPONSE_SELECTORS, ACCEPTED_SELECTORS, SUBMIT_SELECTORS,
-  TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS } from './selectors';
+  TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS, REFRESH_SELECTORS } from './selectors';
 
 const execFileAsync = promisify(execFile);
 /** The ceiling on one ask, matching the Python planner's own default. */
@@ -961,6 +961,11 @@ export class CaptchaKrakenSolver {
             performedAction = answered = true;
             await this.emitStep(captchaElement, SolveStage.TYPE, 'typed the code', puzzleSource, frameRole, attempt, { action });
           }
+        } else if (action.action === ActionKind.REFRESH) {
+          // Nothing after a refresh, Verify included, belongs to the board it replaces.
+          const refreshed = await this.executeRefresh(page, captchaElement, scope, action as RefreshAction, elementBox);
+          if (refreshed) await this.emitStep(captchaElement, SolveStage.REFRESH, 'asked for a new puzzle', puzzleSource, frameRole, attempt, { action });
+          return { didInteract: refreshed, tokenUsage: allTokenUsage };
         } else if (action.action === ActionKind.WAIT && (action as any).duration_ms > 0) {
           await delay((action as any).duration_ms);
           performedAction = true;
@@ -1556,6 +1561,12 @@ export class CaptchaKrakenSolver {
         });
         continue;
       }
+      if (action.action === ActionKind.REFRESH) {
+        // A new board replaces this one: nothing clicked on it is submitted, and the next loop reads the new one.
+        const frame = await captchaElement.contentFrame();
+        const refreshed = !!frame && await this.executeRefresh(page, captchaElement, frame, action as RefreshAction, elementBox);
+        return { didInteract: refreshed || performedAction, tokenUsage: allTokenUsage };
+      }
       if (action.action !== ActionKind.CLICK) {
         console.warn(`[recaptcha-grid] round ${round}: unexpected action '${(action as any).action}'; re-solving.`);
         continue;
@@ -2062,6 +2073,13 @@ export class CaptchaKrakenSolver {
   /** True when this answer already ran and changed nothing: resample, and let the recording path have a go. */
   private noteAnswer(actions: any[], retryMode: RetryMode | null): boolean {
     const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode);
+    // A refresh asks for a different board, so the same refresh twice is two boards, not a refused answer. An
+    // answer that could not be signed could not be read either, and is not looked into.
+    if (sig !== null && actions.some((a) => a?.action === ActionKind.REFRESH)) {
+      this.noProgressRounds = 0;
+      this.lastAnswerSig = null;
+      return false;
+    }
     if (sig !== null && sig === this.lastAnswerSig) {
       this.noProgressRounds++;
       console.log(`[no-progress] the model returned the same answer again (${this.noProgressRounds} in a row) — the previous one already ran and changed nothing`);
@@ -2442,6 +2460,22 @@ export class CaptchaKrakenSolver {
       return seen.changed && Date.now() - seen.since >= HOLD_SETTLE_MS;
     };
     return this.gesture(() => hold(this.human, page, [elementBox.x + rel[0], elementBox.y + rel[1]], done, HOLD_MAX_MS));
+  }
+
+  /** Deal a new puzzle: the vendor's own control, else the model's point on one. False when there is neither. */
+  private async executeRefresh(page: Page, element: ElementHandle, scope: Scope, action: RefreshAction, elementBox: Box | null): Promise<boolean> {
+    const control = await this.findControl(scope, REFRESH_SELECTORS);
+    if (control) {
+      this.actedOnBoard = true;
+      await this.moveAndClick(page, control);
+    } else if (action.target_bounding_box && elementBox) {
+      await this.executeClick(page, element, { action: ActionKind.CLICK, target_bounding_box: action.target_bounding_box }, elementBox);
+    } else {
+      console.log('The model asked for a new puzzle, and there is no control to deal one; ending the round.');
+      return false;
+    }
+    console.log('Asked for a new puzzle instead of solving this one.');
+    return true;
   }
 
   private async executeDrag(page: Page, _element: ElementHandle,

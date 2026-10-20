@@ -136,92 +136,42 @@ BUILTIN_PROMPTS = {
         ),
     },
     "3": {
-        "action_pixel": (
-            "Your task is to solve the captcha. Read the instruction at the top of the image carefully.\n\n"
-            "Look at the puzzle and decide what action solves it. All coordinates you return must be on a "
-            "normalized 0–1000 image scale (top-left = (0, 0), bottom-right = (1000, 1000)).\n\n"
-            "Name WHAT each object is with a short 1–2 word label, then give its position. "
-            "Choose ONE response:\n\n"
-            "FOR CLICK PUZZLES:\n"
-            "  Label each thing you click and give its point — subjects[i] names points[i]:\n"
-            "  → \"action\": \"click\", \"subjects\": [\"<label>\", ...], "
-            "\"points\": [[x1, y1], [x2, y2], ...]\n\n"
-            "FOR DRAG PUZZLES:\n"
-            "  Drag ONE item at a time. Label the source (the piece you pick up) and the destination "
-            "(where it belongs), each with a short 1–2 word label, and give both points:\n"
-            "  → \"action\": \"drag\", \"drags\": [{ \"source\": \"<label>\", \"from\": [x, y], "
-            "\"destination\": \"<label>\", \"to\": [x, y] }, ...]\n\n"
-            "FOR PUZZLE PIECE SLIDER PUZZLES:\n"
-            "  A single jigsaw piece has to end up in the piece-shaped slot cut into the picture. "
-            "Do not pick up the piece or the slider handle — leave the source EMPTY and give only "
-            "the destination, the CENTER OF THE SLOT the piece belongs in:\n"
-            "  → \"action\": \"drag\", \"drags\": [{ \"source\": \"\", \"from\": [], "
-            "\"destination\": \"<label>\", \"to\": [x, y] }]\n\n"
-            "FOR PRESS-AND-HOLD PUZZLES:\n"
-            "  One button has to be pressed and HELD down until the page confirms, not clicked. "
-            "Label the button and give its point:\n"
-            "  → \"action\": \"hold\", \"subjects\": [\"<label>\"], \"points\": [[x, y]]\n\n"
-            "Respond ONLY with JSON:\n"
-            "{\n"
-            "  \"action\": \"click\", \"subjects\": [ ... ], \"points\": [ ... ]\n"
-            "  // OR \"action\": \"drag\", \"drags\": [ ... ]\n"
-            "  // OR \"action\": \"hold\", \"subjects\": [ ... ], \"points\": [ ... ]\n"
-            "}"
-        ),
-        "grid": (
-            "Solve the captcha grid by choosing the cell numbers that match the description "
-            "from the captcha image prompt.\n\nGrid: {rows}x{cols} ({total} cells)\n{grid_hint}\n\n"
-            "A cell that is already selected — small checkmark badge, border or highlight — "
-            "still counts. Include it if it matches.\n\n"
-            "A cell being REPLACED does not: a large checkmark over the middle of the picture, "
-            "a picture fading to white, or a new picture fading in. That cell is on its way to "
-            "showing something else, so leave it out however well it matches.\n\n"
-            "If no cells match the description, return an empty list for target_ids: [].\n\n"
-            "Return JSON Array: [list of cell numbers (1-{total})]"
-        ),
-        "video": (
-            "Your task is to solve the captcha. This challenge is animated, so instead of one "
-            "picture you are given {n} still keyframes cut from a short recording of it, in "
-            "order: {listing}.\n\n"
-            "Every keyframe shows the SAME puzzle at a different moment. Read the instruction at "
-            "the top of the keyframes carefully. What you need to act on may be visible in only "
-            "some of the frames — sprites fade in and out, boards cycle their contents — so pick "
-            "the ONE frame in which your target is clearest and report its number as \"frame\".\n\n"
-            "The frame number is there so the solver knows WHEN to press the mouse: it waits for the "
-            "widget to look like that frame before clicking. If your answer does not depend on the "
-            "frame — the target is in the same place in every one of them — then there is nothing to "
-            "wait for, and you may leave \"frame\" out entirely.\n\n"
-            "Read your coordinates off THAT frame. All coordinates must be on a normalized 0–1000 "
-            "image scale (top-left = (0, 0), bottom-right = (1000, 1000)).\n\n"
-            "Name WHAT each object is with a short 1–2 word label, then give its position. "
-            "Choose ONE response:\n\n"
-            "FOR CLICK PUZZLES:\n"
-            "  Label each thing you click and give its point — subjects[i] names points[i]:\n"
-            "  → \"frame\": <1-{n}>, \"action\": \"click\", \"subjects\": [\"<label>\", ...], "
-            "\"points\": [[x1, y1], [x2, y2], ...]\n\n"
-            "FOR DRAG PUZZLES:\n"
-            "  Drag ONE item at a time. Label the source (the piece you pick up) and the "
-            "destination (where it belongs), each with a short 1–2 word label, and give both "
-            "points:\n"
-            "  → \"frame\": <1-{n}>, \"action\": \"drag\", \"drags\": [{{ \"source\": \"<label>\", "
-            "\"from\": [x, y], \"destination\": \"<label>\", \"to\": [x, y] }}, ...]\n\n"
-            "Respond ONLY with JSON:\n"
-            "{{\n"
-            "  \"frame\": <1-{n}>,   // omit if your answer holds in every frame\n"
-            "  \"action\": \"click\", \"subjects\": [ ... ], \"points\": [ ... ]\n"
-            "  // OR \"action\": \"drag\", \"drags\": [ ... ]\n"
-            "}}"
-        ),
-        "text": (
-            "Your task is to solve the captcha. The image shows a short code drawn in distorted, "
-            "overlapping or warped characters, sometimes over a busy background.\n\n"
-            "Read the code exactly as printed. Preserve letter case when the characters clearly "
-            "show it, and do not add spaces the image does not show. Decoration — strike-through "
-            "lines, dots, blobs, background texture — is not part of the code.\n\n"
-            "Respond ONLY with JSON:\n"
-            "{\n"
-            "  \"action\": \"type\", \"text\": \"<the code>\"\n"
-            "}"
+        "general": (
+            "Your task is to solve the captcha. Read its instruction, usually at the top, and decide "
+            "what a person would do to solve it.\n\n"
+            "You are given either one screenshot or a video. In a video every frame shows its own "
+            "number in the top-left corner; that number is ours, not part of the puzzle.\n\n"
+            "Some screenshots have numbered boxes drawn over the things you can interact with — "
+            "tiles, buttons, pieces, handles. The boxes and numbers are ours, not part of the "
+            "puzzle. When something you act on has a box, also give its number as an id. Not "
+            "everything is boxed and many screenshots have no boxes at all: a point is always "
+            "required, an id never is.\n\n"
+            "Points are on a 0–1000 scale of the image: (0, 0) is the top-left corner, (1000, 1000) "
+            "the bottom-right.\n\n"
+            "Choose ONE action:\n\n"
+            "CLICK one or more things, in the order to click them:\n"
+            "  {\"action\": \"click\", \"points\": [[x, y], ...], \"ids\": [n, ...]}\n"
+            "  When the instruction asks for every match, a tile that is already selected (a small "
+            "checkmark, border or highlight) still counts; a tile being replaced (a large checkmark, a "
+            "picture fading out or in) does not. If nothing matches, give empty points.\n\n"
+            "DRAG pieces, one drag per piece:\n"
+            "  {\"action\": \"drag\", \"drags\": [{\"from\": [x, y], \"to\": [x, y], \"from_id\": n, "
+            "\"to_id\": n}, ...]}\n"
+            "  For a puzzle-piece slider, where a jigsaw piece slides into a matching slot cut into "
+            "the picture, leave \"from\" out and give the centre of the slot as \"to\".\n\n"
+            "PRESS AND HOLD a button until the page confirms:\n"
+            "  {\"action\": \"hold\", \"points\": [[x, y]], \"ids\": [n]}\n\n"
+            "TYPE the characters shown, exactly as printed — keep their case, add no spaces; "
+            "strike-throughs, dots and background texture are not characters:\n"
+            "  {\"action\": \"type\", \"text\": \"...\"}\n\n"
+            "REFRESH instead of solving if the puzzle looks impossible, or would take a reasonable "
+            "person more than a minute. Click the control that loads a new puzzle, usually a "
+            "circular arrow (empty points if there is none):\n"
+            "  {\"action\": \"refresh\", \"points\": [[x, y]]}\n\n"
+            "For a video, put \"frame\" first: the number in the corner of the frame where your "
+            "answer is clearest, so the solver can wait for that moment. Leave it out if the answer "
+            "is the same throughout.\n\n"
+            "Leave out any key you have no value for. Respond ONLY with the JSON."
         ),
     },
 }
@@ -302,43 +252,52 @@ def requires_auth(model: Optional[str]) -> bool:
 
 @dataclass
 class PromptSet:
+    """One generation's prompts. Generations 1 and 2 ask a prompt per family; generation 3 asks `general`, one
+    prompt for every puzzle, and has no family templates at all."""
 
     version: str
-    action_prompt: str
-    grid_template: str
+    action_prompt: Optional[str]
+    grid_template: Optional[str]
     video_template: Optional[str]
     text_template: Optional[str]
     grid_by_type: Dict[str, str]
     source: str
+    general: Optional[str] = None
+
+    def _family(self, template: Optional[str], family: str) -> str:
+        if template is None:
+            raise ValueError(
+                f"prompt generation {self.version} has no {family} prompt"
+                + (" — it asks one general prompt for every puzzle" if self.general else
+                   f" — model was trained before the {family} family existed. Use a model on "
+                   "generation 2 or later."))
+        return template
+
+    def pixel_prompt(self) -> str:
+        return self._family(self.action_prompt, "click-and-drag")
 
     def grid_prompt(self, *, rows: int, cols: int, grid_hint: str = "",
                     puzzle_type: Optional[str] = None) -> str:
         if puzzle_type and puzzle_type in self.grid_by_type:
             return self.grid_by_type[puzzle_type]
-        return self.grid_template.format(rows=rows, cols=cols,
-                                         total=rows * cols, grid_hint=grid_hint)
+        return self._family(self.grid_template, "grid").format(rows=rows, cols=cols,
+                                                               total=rows * cols, grid_hint=grid_hint)
 
     def video_prompt(self, n_keyframes: int) -> str:
         n = int(n_keyframes)
         if n < 1:
             raise ValueError(f"a keyframe request needs at least one frame, got {n_keyframes}")
-        if self.video_template is None:
+        if self.general is not None:
+            # Generation 3 reads an animated board as a video with each frame's number drawn into it, and
+            # was never trained on keyframes; sending them under the general prompt would answer silently worse.
             raise ValueError(
-                f"prompt generation {self.version} has no animated-puzzle prompt — "
-                f"model was trained before the video family existed. Use a model on "
-                f"generation 2 or later for animated captchas."
-            )
+                f"prompt generation {self.version} reads an animated captcha as a frame-numbered video, "
+                "which this client does not send. Use a model on generation 2 for animated captchas.")
         listing = ", ".join(f"frame {i}" for i in range(1, n + 1))
-        return self.video_template.format(n=n, listing=listing)
+        return self._family(self.video_template, "animated-puzzle").format(n=n, listing=listing)
 
     def text_prompt(self) -> str:
-        if self.text_template is None:
-            raise ValueError(
-                f"prompt generation {self.version} has no distorted-text prompt — "
-                f"model was trained before the text family existed. Use a model on "
-                f"generation 2 or later for BotDetect/MTCaptcha/Yandex text captchas."
-            )
-        return self.text_template
+        return self._family(self.text_template, "distorted-text")
 
 
 def builtin(version: str) -> Optional[PromptSet]:
@@ -347,12 +306,13 @@ def builtin(version: str) -> Optional[PromptSet]:
         return None
     return PromptSet(
         version=str(version),
-        action_prompt=spec["action_pixel"],
-        grid_template=spec["grid"],
-        video_template=spec["video"],
-        text_template=spec["text"],
+        action_prompt=spec.get("action_pixel"),
+        grid_template=spec.get("grid"),
+        video_template=spec.get("video"),
+        text_template=spec.get("text"),
         grid_by_type={},
         source=f"built-in v{version}",
+        general=spec.get("general"),
     )
 
 
@@ -370,6 +330,7 @@ def _from_doc(doc: Dict[str, Any], source: str) -> PromptSet:
         text_template=templates.get("text") or base.text_template,
         grid_by_type=grid_by_type,
         source=source,
+        general=templates.get("general") or base.general,
     )
 
 
@@ -489,6 +450,10 @@ def experts(model: Optional[str]) -> Dict[PromptFamily, str]:
     entry = (registered_models().get(repo_id) or {}) if repo_id else {}
     mapping = entry.get("experts")
     if not isinstance(mapping, dict):
+        return {}
+    if (builtin(str(entry.get("prompt_version", ""))) or builtin(LATEST_PROMPT_VERSION)).general is not None:
+        _warn(f"model {repo_id!r} is on prompt generation {entry.get('prompt_version')}, which is one model "
+              "asked one prompt; its `experts` are never routed to.")
         return {}
     out: Dict[PromptFamily, str] = {}
     for family in PromptFamily:

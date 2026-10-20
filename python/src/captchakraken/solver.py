@@ -9,7 +9,8 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from PIL import Image
 
-from .action_types import CaptchaAction, ClickAction, DoneAction, DragAction, HoldAction, TypeAction, WaitAction
+from .action_types import (CaptchaAction, ClickAction, DoneAction, DragAction, HoldAction, RefreshAction, TypeAction,
+                           WaitAction)
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode, Vendor
 from .planner import ActionPlanner
 from .tool_calls.find_checkbox import find_checkbox
@@ -117,23 +118,27 @@ class CaptchaSolver:
             return actions
         raise UnsupportedCaptchaError("Cannot solve this kind of captcha")
 
-    def solve_keyframes(self, keyframe_paths: Sequence[str]) -> List[Union[ClickAction, DragAction]]:
+    def solve_keyframes(self, keyframe_paths: Sequence[str]) -> List[CaptchaAction]:
         """Solve an animated challenge from its keyframes, in model order (frame 1 first)."""
         paths = [str(p) for p in keyframe_paths]
         if not paths:
             raise UnsupportedCaptchaError("no keyframes to solve from")
         with Image.open(paths[0]) as im:
             self._image_size = im.size
-        actions = self._to_actions(self.planner.get_keyframe_actions(paths), keyframe_paths=paths)
+        try:
+            raw = self.planner.get_keyframe_actions(paths)
+        except ValueError as exc:
+            raise UnsupportedCaptchaError(str(exc)) from exc
+        actions = self._to_actions(raw, keyframe_paths=paths)
         if actions:
             return actions
         raise UnsupportedCaptchaError("Cannot solve this animated captcha")
 
-    def _solve_pixel(self, image_path: str, text_mode: bool = False) -> List[Union[ClickAction, DragAction]]:
+    def _solve_pixel(self, image_path: str, text_mode: bool = False) -> List[CaptchaAction]:
         return self._to_actions(self.planner.get_pixel_actions(image_path, text_mode=text_mode))
 
     def _to_actions(self, raw_actions: List[dict],
-                    keyframe_paths: Optional[Sequence[str]] = None) -> List[Union[ClickAction, DragAction]]:
+                    keyframe_paths: Optional[Sequence[str]] = None) -> List[CaptchaAction]:
         """Normalised 0-1 points become small boxes; a slide is a drag with no source."""
         r = _PIXEL_BOX_HALF
 
@@ -147,13 +152,14 @@ class CaptchaSolver:
                 return {}
             return {"frame": frame, "await_keyframe": str(keyframe_paths[frame - 1])}
 
-        out: List[Union[ClickAction, DragAction]] = []
+        out: List[CaptchaAction] = []
         for a in raw_actions:
             kind = PixelAnswerKind(a["kind"])
             if kind == PixelAnswerKind.CLICK:
                 boxes = [box(x, y) for (x, y) in a.get("points", [])]
-                if boxes:
-                    out.append(ClickAction(action=ActionKind.CLICK, target_bounding_boxes=boxes, **wait_for(a)))
+                # Only generation 3 sends an empty click, and it means nothing on the board matches: submit as is.
+                out.append(ClickAction(action=ActionKind.CLICK, target_bounding_boxes=boxes, **wait_for(a)) if boxes
+                           else DoneAction(action=ActionKind.DONE))
             elif kind in (PixelAnswerKind.DRAG, PixelAnswerKind.SLIDE):
                 src = box(*a["src"]) if kind == PixelAnswerKind.DRAG else None
                 out.append(DragAction(action=ActionKind.DRAG, source_bounding_box=src,
@@ -162,6 +168,10 @@ class CaptchaSolver:
                 out.append(TypeAction(action=ActionKind.TYPE, text=a["text"]))
             elif kind == PixelAnswerKind.HOLD and a.get("points"):
                 out.append(HoldAction(action=ActionKind.HOLD, target_bounding_box=box(*a["points"][0])))
+            elif kind == PixelAnswerKind.REFRESH:
+                points = a.get("points")
+                out.append(RefreshAction(action=ActionKind.REFRESH,
+                                         target_bounding_box=box(*points[0]) if points else None))
         return out
 
     def solveVideo(self, *args, **kwargs):
@@ -215,8 +225,19 @@ class CaptchaSolver:
             _debug(f"_is_real_grid check errored ({e}); accepting grid.")
             return True
 
+    def _cells_of(self, click: dict, grid_boxes: List[Tuple[int, int, int, int]]) -> List[int]:
+        """The 1-based cells a generation-3 click names: its ids when any is a cell, else where its points land."""
+        n = len(grid_boxes)
+        ids = [i for i in click.get("ids", []) if 1 <= i <= n]
+        if not ids:
+            img_w, img_h = self._image_size
+            ids = [c for c in (next((k + 1 for k, (x1, y1, x2, y2) in enumerate(grid_boxes)
+                                     if x1 <= x * img_w <= x2 and y1 <= y * img_h <= y2), None)
+                               for (x, y) in click.get("points", [])) if c is not None]
+        return list(dict.fromkeys(ids))
+
     def _solve_grid(self, image_path: str, grid_boxes: List[Tuple[int, int, int, int]], rows: int, cols: int,
-                    retry_mode: Optional[RetryMode] = None) -> Union[ClickAction, DoneAction, WaitAction]:
+                    retry_mode: Optional[RetryMode] = None) -> Union[CaptchaAction, List[CaptchaAction]]:
         try:
             cv_selected, cv_loading = detect_selected_cells(image_path, grid_boxes)
         except Exception as e:
@@ -228,7 +249,15 @@ class CaptchaSolver:
             overlay_path = tf.name
         self._temp_files.append(overlay_path)
         get_numbered_grid_overlay(image_path, grid_boxes, output_path=overlay_path)
-        selected = self.planner.get_grid_selection(overlay_path, rows=rows, cols=cols, retry_mode=retry_mode)
+        if self.planner.prompts.general is not None:
+            raw = self.planner.get_general_actions(overlay_path)
+            if not raw:
+                raise UnsupportedCaptchaError("the model's answer to the grid could not be read")
+            if raw[0]["kind"] != PixelAnswerKind.CLICK:
+                return self._to_actions(raw)
+            selected = self._cells_of(raw[0], grid_boxes)
+        else:
+            selected = self.planner.get_grid_selection(overlay_path, rows=rows, cols=cols, retry_mode=retry_mode)
 
         final = []
         for n in selected:

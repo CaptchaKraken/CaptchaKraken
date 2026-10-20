@@ -59,4 +59,12 @@ class HoldAction(Action):
     target_bounding_box: BoundingBox
 
 
-CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction, HoldAction]
+class RefreshAction(Action):
+    """Load a new puzzle instead of solving this one (prompt generation 3). The box is the model's point on the
+    control, or None when it saw none; the driver presses the vendor's own control first either way."""
+
+    action: Literal[ActionKind.REFRESH]
+    target_bounding_box: Optional[BoundingBox] = None
+
+
+CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction, HoldAction, RefreshAction]
