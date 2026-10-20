@@ -172,7 +172,13 @@ export interface WaitAction {
   duration_ms: number;
 }
 
-export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction;
+/** Press on the box and keep pressing until the widget completes (prompt generation 3). */
+export interface HoldAction extends AnimatedActionFields {
+  action: typeof ActionKind.HOLD;
+  target_bounding_box: [number, number, number, number];
+}
+
+export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction | HoldAction;
 export type SolverResult = CaptchaAction | CaptchaAction[];
 
 export interface TokenUsage {

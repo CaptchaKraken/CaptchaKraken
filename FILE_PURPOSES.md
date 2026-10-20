@@ -176,6 +176,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/slide-aims-before-it-corrects.test.ts` | The slider opens with one sweep at the slot and corrects from what the screen shows, instead of spending two nudges calibrating before the drag starts. |
 | `js/src/slide-hidpi.test.ts` | The slider missed every attempt on a phone: device pixel ratio was applied twice. |
 | `js/src/board-paint-gate.test.ts` | A still board is not a loaded board: the driver waits for the widget to paint a puzzle before photographing it for the model. |
+| `js/src/a-hold-is-held-until-the-widget-completes.test.ts` | A press-and-hold is one press kept down until the widget completes, and the button is released even when the completion check fails. |
 | `js/src/a-board-that-will-not-film-may-already-be-solved.test.ts` | A recording that caught nothing is a widget that would not screenshot — usually one closing on an accepted answer — so the loop asks before it gives up. |
 | `js/src/a-missing-prompt-is-not-a-reason-to-wait.test.ts` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
 | `js/src/geetest-accept-is-a-signal.test.ts` | GeeTest's accepted state is a banner inside the still-open panel, not a token and not an absence — reading it saves an inference per solve. |
@@ -377,6 +378,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_slow_camera_does_not_stretch_the_burst.py` | The burst's windows are budgets in milliseconds, so a camera slower than the interval must not spend more of the solve than a fast one. |
 | `python/tests/test_a_refused_clip_is_not_re_asked.py` | A recording with no steady screen cannot answer differently, so a refusal must throw the frames away rather than re-ask them. |
 | `python/tests/test_a_repeated_answer_is_not_re_performed.py` | An answer the widget already refused is not pressed again; the round re-asks instead. |
+| `python/tests/test_a_hold_is_held_until_the_widget_completes.py` | A `hold` answer survives parsing as a hold, and the press lasts until the widget's fill has finished, never longer than the cap. |
 | `python/tests/test_a_burst_cannot_trip_its_own_deadline.py` | The burst plans its frames from the ceiling, so it must not be able to exceed the deadline it was given. |
 | `python/tests/test_cycling_board_waits_for_its_screen.py` | The Python twin of the frame-gate regression: hold until the page shows the keyframe the model chose. |
 | `python/tests/test_every_keyframe_write_names_its_stem.py` | Both entries into the animated path write keyframes the same way; only one of them used to be exercised. |

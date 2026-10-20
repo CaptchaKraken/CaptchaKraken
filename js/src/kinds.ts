@@ -20,7 +20,7 @@ export const Vendor = {
 } as const;
 export type Vendor = (typeof Vendor)[keyof typeof Vendor];
 
-export const ActionKind = { CLICK: 'click', DRAG: 'drag', TYPE: 'type', WAIT: 'wait', DONE: 'done' } as const;
+export const ActionKind = { CLICK: 'click', DRAG: 'drag', TYPE: 'type', WAIT: 'wait', DONE: 'done', HOLD: 'hold' } as const;
 export type ActionKind = (typeof ActionKind)[keyof typeof ActionKind];
 
 export const RetryMode = { MISSED_TILES: 'missed-tiles' } as const;
@@ -75,7 +75,7 @@ export const Phase = {
 } as const;
 export type Phase = (typeof Phase)[keyof typeof Phase];
 
-export const SolveStage = { INITIAL: 'initial', CLICK: 'click', DRAG: 'drag', TYPE: 'type', WAIT: 'wait', SUBMIT: 'submit', ROUND: 'round' } as const;
+export const SolveStage = { INITIAL: 'initial', CLICK: 'click', DRAG: 'drag', TYPE: 'type', WAIT: 'wait', SUBMIT: 'submit', ROUND: 'round', HOLD: 'hold' } as const;
 export type SolveStage = (typeof SolveStage)[keyof typeof SolveStage];
 
 export const FrameRole = { CHECKBOX: 'checkbox', CHALLENGE: 'challenge', UNKNOWN: 'unknown' } as const;

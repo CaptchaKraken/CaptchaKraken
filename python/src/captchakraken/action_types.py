@@ -52,4 +52,11 @@ class DoneAction(Action):
     action: Literal[ActionKind.DONE]
 
 
-CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction]
+class HoldAction(Action):
+    """Press on the box and keep pressing until the widget completes (prompt generation 3)."""
+
+    action: Literal[ActionKind.HOLD]
+    target_bounding_box: BoundingBox
+
+
+CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction, HoldAction]

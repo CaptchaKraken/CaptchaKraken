@@ -11,7 +11,7 @@ import {
   ViewportSize,
 } from './playwright-types';
 import { watchPage, CaptchaWatcher, WatchOptions } from './watcher';
-import { Humanizer, resolveHumanizer } from './humanize.js';
+import { Humanizer, hold, resolveHumanizer } from './humanize.js';
 import { execFile, spawn, spawnSync, ChildProcessWithoutNullStreams } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -20,7 +20,7 @@ import * as os from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { PhaseBudget, timingsEnabled } from './timing';
 import { CaptureRect, cropPng, enclosingRect } from './png';
-import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
+import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, HoldAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
 import { ActionKind, FrameRole, KeyframeMode, Outcome, PaintVerdict, PauseKind, Phase, RecaptchaBanner, RetryMode, SettleVerdict, SolveStage, Vendor, Verdict, isOneOf } from './kinds';
 import { VerdictLog } from './verdicts';
 import { aggregateTokenUsage } from './token-usage';
@@ -173,6 +173,10 @@ const NOT_THIS_BOARD_POLLS = 3;
 // How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read inside
 // this window is wearing our own feedback, which is not a screen it ever showed by itself.
 export const INPUT_SETTLE_MS = 400;
+// A press-and-hold is released once the widget's picture has stopped changing for this long after its fill
+// moved, and at HOLD_MAX_MS whatever it shows. Press & Hold widgets ask for seconds, not tens of seconds.
+export const HOLD_SETTLE_MS = 900;
+export const HOLD_MAX_MS = 12_000;
 
 /** `viewportSize()` is null on a context launched without one (camoufox), where only the window knows. */
 async function viewportOf(page: Page): Promise<ViewportSize> {
@@ -947,6 +951,11 @@ export class CaptchaKrakenSolver {
           await this.executeDrag(page, captchaElement, action as any, requireBox());
           performedAction = answered = true;
           await this.emitStep(captchaElement, SolveStage.DRAG, 'drag', puzzleSource, frameRole, attempt, { action });
+        } else if (action.action === ActionKind.HOLD) {
+          // The widget submits itself when the hold completes, like a slide on release.
+          const completed = await this.executeHold(page, captchaElement, action as HoldAction, requireBox());
+          performedAction = slid = true;
+          await this.emitStep(captchaElement, SolveStage.HOLD, completed ? 'held until the widget completed' : 'released the hold at the cap', puzzleSource, frameRole, attempt, { action });
         } else if (action.action === ActionKind.TYPE) {
           if (await this.executeType(page, scope, action as TypeAction, widget.at)) {
             performedAction = answered = true;
@@ -2410,6 +2419,29 @@ export class CaptchaKrakenSolver {
       return;
     }
     await this.gesture(() => this.human.click(page, [elementBox.x + rel[0], elementBox.y + rel[1]]));
+  }
+
+  /**
+   * Press-and-hold until the widget completes: true when it did, false when the cap ran out. Complete is the vendor's
+   * done signal, the widget closing, or its picture having changed (the fill) and then sat still for HOLD_SETTLE_MS.
+   */
+  private async executeHold(page: Page, element: ElementHandle, action: HoldAction, elementBox: Box): Promise<boolean> {
+    this.actedOnBoard = true;
+    const rel = this.clickPointFor({ action: ActionKind.CLICK, target_bounding_box: action.target_bounding_box }, elementBox);
+    if (!rel) return false;
+    const first = await this.elementFrameHash(element);
+    const seen = { hash: first, since: Date.now(), changed: false };
+    const done = async (): Promise<boolean> => {
+      if (await this.isCaptchaSolved(page)) return true;
+      if (!(await element.boundingBox().catch(() => null))) return true;
+      const h = await this.elementFrameHash(element);
+      if (h !== seen.hash) {
+        Object.assign(seen, { hash: h, since: Date.now(), changed: seen.changed || h !== first });
+        return false;
+      }
+      return seen.changed && Date.now() - seen.since >= HOLD_SETTLE_MS;
+    };
+    return this.gesture(() => hold(this.human, page, [elementBox.x + rel[0], elementBox.y + rel[1]], done, HOLD_MAX_MS));
   }
 
   private async executeDrag(page: Page, _element: ElementHandle,

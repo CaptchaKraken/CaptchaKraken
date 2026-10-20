@@ -22,7 +22,7 @@ from typing import AbstractSet, Any, Callable, Dict, List, NamedTuple, Optional,
 
 from . import planner
 from .action_types import CaptchaAction
-from .humanize import Humanizer, resolve as resolve_humanizer
+from .humanize import Humanizer, hold, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
                     RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
 from .selectors import (ACCEPTED_SELECTORS, ENCLAVE_SELECTORS, PIECE_SELECTORS, RESPONSE_SELECTORS, SELECTORS, SLIDER_HANDLE_SELECTORS,
@@ -250,6 +250,10 @@ _NOT_THIS_BOARD_POLLS = 3
 # How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read
 # inside this window is wearing our own feedback, which is not a screen it ever showed by itself.
 INPUT_SETTLE_MS = 400
+# A press-and-hold is released once the widget's picture has stopped changing for this long after its fill
+# moved, and at HOLD_MAX_MS whatever it shows. Press & Hold widgets ask for seconds, not tens of seconds.
+HOLD_SETTLE_MS = 900
+HOLD_MAX_MS = 12000
 
 
 @dataclass
@@ -688,6 +692,40 @@ class PageSolver:
     def _click_when_frame_matches(self, page: Any, element: Any, action: Dict[str, Any],
                                   element_box: Dict[str, float], await_keyframe: str) -> None:
         self._execute_click(page, action, element_box, element, await_keyframe)
+
+    def _execute_hold(self, page: Any, action: Dict[str, Any], element_box: Dict[str, float], element: Any) -> bool:
+        """Press-and-hold until the widget completes: True when it did, False when the cap ran out.
+
+        Complete is the vendor's done signal, the widget closing, or its picture having changed (the fill)
+        and then sat still for HOLD_SETTLE_MS. A widget that draws no progress at all is held to HOLD_MAX_MS.
+        """
+        self._acted_on_board = True
+        rel = self._click_point_for(action, element_box)
+        if rel is None:
+            _log("hold action without a bounding box; skipping")
+            return False
+        at = (element_box["x"] + rel[0], element_box["y"] + rel[1])
+        first = self._element_frame_hash(element)
+        seen = {"hash": first, "since": time.monotonic(), "changed": False}
+
+        def done() -> bool:
+            if self.is_captcha_solved(page):
+                return True
+            try:
+                if not element.bounding_box():
+                    return True
+            except Exception:
+                return True
+            h, now = self._element_frame_hash(element), time.monotonic()
+            if h != seen["hash"]:
+                seen.update(hash=h, since=now, changed=seen["changed"] or h != first)
+                return False
+            return seen["changed"] and (now - seen["since"]) * 1000.0 >= HOLD_SETTLE_MS
+
+        with self._gesture():
+            completed = hold(self._human, page, at, done, HOLD_MAX_MS)
+        _log("held until the widget completed." if completed else f"released the hold at the {HOLD_MAX_MS}ms cap.")
+        return completed
 
     def _execute_drag(self, page: Any, action: Dict[str, Any], element_box: Dict[str, float]) -> None:
         self._acted_on_board = True
@@ -2009,6 +2047,10 @@ class PageSolver:
                 elif kind == ActionKind.TYPE:
                     if self._execute_type(page, scope, action, widget.at):
                         performed = answered = True
+                elif kind == ActionKind.HOLD:
+                    # The widget submits itself when the hold completes, like a slide on release.
+                    self._execute_hold(page, action, element_box, element)
+                    performed = slid = True
                 elif kind == ActionKind.WAIT:
                     duration = int(action.get("duration_ms") or 0)
                     if duration > 0:

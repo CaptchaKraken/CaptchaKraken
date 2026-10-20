@@ -38,6 +38,30 @@ export function trajectory(start: Point, end: Point, frequency: number): [Point[
 
 /** Every inter-gesture wait the driver takes, named, so each device supplies its own table. */
 export const PAUSE_KINDS: readonly PauseKind[] = Object.values(PauseKind);
+/** How often a held press looks at the widget, in ms: a frame hash per look, so not every frame. */
+export const HOLD_POLL_MS: readonly [number, number] = [180, 320];
+
+/**
+ * Press at `to` until `done()` says the widget completed, or `maxMs` passes; true when it completed.
+ * Built on move/press/release so any humanizer can hold. The hand drifts a pixel or so meanwhile, because a
+ * press that does not move for seconds is a synthetic one, and the button is released whatever `done` throws.
+ */
+export async function hold(human: Humanizer, page: Page, to: Point, done: () => Promise<boolean>, maxMs: number): Promise<boolean> {
+  await human.move(page, to);
+  const anchor: Point = [human.at[0], human.at[1]];
+  await human.press(page);
+  const t0 = Date.now();
+  try {
+    for (;;) {
+      await delay(uniform(HOLD_POLL_MS[0], HOLD_POLL_MS[1]));
+      await human.move(page, [anchor[0] + gauss(0.8), anchor[1] + gauss(0.8)]).catch(() => undefined);
+      if (await done()) return true;
+      if (Date.now() - t0 >= maxMs) return false;
+    }
+  } finally {
+    await human.release(page);
+  }
+}
 
 export interface Humanizer {
   readonly name: string;

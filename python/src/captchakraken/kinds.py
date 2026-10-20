@@ -25,6 +25,7 @@ class ActionKind(StrEnum):
     TYPE = "type"
     WAIT = "wait"
     DONE = "done"
+    HOLD = "hold"
 
 
 class PixelAnswerKind(StrEnum):
@@ -34,6 +35,7 @@ class PixelAnswerKind(StrEnum):
     DRAG = "drag"
     SLIDE = "slide"
     TYPE = "type"
+    HOLD = "hold"
 
 
 class RetryMode(StrEnum):

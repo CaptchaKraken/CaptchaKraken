@@ -696,6 +696,9 @@ class ActionPlanner:
                     xy = None
                 if xy:
                     pts.append(xy)
+            if pts and data.get("action") == ActionKind.HOLD:
+                # One button, held: a second point would be a second press the widget never asked for.
+                return [{"kind": PixelAnswerKind.HOLD, "points": pts[:1]}]
             if pts:
                 out.append({"kind": PixelAnswerKind.CLICK, "points": pts})
         return out

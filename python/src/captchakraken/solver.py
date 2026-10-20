@@ -9,7 +9,7 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from PIL import Image
 
-from .action_types import CaptchaAction, ClickAction, DoneAction, DragAction, TypeAction, WaitAction
+from .action_types import CaptchaAction, ClickAction, DoneAction, DragAction, HoldAction, TypeAction, WaitAction
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode, Vendor
 from .planner import ActionPlanner
 from .tool_calls.find_checkbox import find_checkbox
@@ -160,6 +160,8 @@ class CaptchaSolver:
                                       target_bounding_box=box(*a["dst"]), **wait_for(a)))
             elif kind == PixelAnswerKind.TYPE:
                 out.append(TypeAction(action=ActionKind.TYPE, text=a["text"]))
+            elif kind == PixelAnswerKind.HOLD and a.get("points"):
+                out.append(HoldAction(action=ActionKind.HOLD, target_bounding_box=box(*a["points"][0])))
         return out
 
     def solveVideo(self, *args, **kwargs):
