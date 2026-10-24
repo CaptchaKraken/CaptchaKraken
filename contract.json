@@ -1,6 +1,6 @@
 {
   "python": {
-    "version": "3.2.2",
+    "version": "3.3.0",
     "exports": [
       "ActionKind",
       "ActionPlanner",
@@ -391,6 +391,7 @@
     ],
     "js_only_config": [
       "apiKey",
+      "baseUrl",
       "idleMouseWander",
       "maxStaleFrameReSolves",
       "maxUnsupportedReSolves",
@@ -464,6 +465,7 @@
       "animatedChallengeAfterMs",
       "animatedMotionStreak",
       "apiKey",
+      "baseUrl",
       "boardPaintFloor",
       "boardPaintPollMs",
       "boardPaintTimeoutMs",

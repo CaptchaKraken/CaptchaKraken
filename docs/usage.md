@@ -110,6 +110,7 @@ side has:
 | `slide_tolerance_px` | `idleMouseWander` |
 | `slide_max_corrections` | `repoPath`, `pythonCommand` — where the bundled engine lives |
 | | `model`, `apiKey` — Python takes these on `PageSolver(...)` itself |
+| | `baseUrl` — Python reads `VLLM_BASE_URL` |
 
 Everything that decides **accuracy** — the prompts, the CV, the pixel budget,
 the model — lives in the shared Python half and is identical by construction.
