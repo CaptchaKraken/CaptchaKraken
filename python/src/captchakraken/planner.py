@@ -608,6 +608,8 @@ class ActionPlanner:
         if not isinstance(data, dict):
             return []
         act = data.get("action")
+        if act == ActionKind.SLIDE:
+            return ActionPlanner._normalize_slide(data)
         if act not in (ActionKind.CLICK, ActionKind.REFRESH):
             return ActionPlanner._normalize_pixel(data)
         raw_points = data.get("points")
@@ -619,6 +621,21 @@ class ActionPlanner:
         ids = [int(i) for i in (raw_ids if isinstance(raw_ids, list) else [])
                if not isinstance(i, bool) and str(i).strip().isdigit()]
         return [{"kind": PixelAnswerKind.CLICK, "points": points, "ids": ids}]
+
+    @staticmethod
+    def _normalize_slide(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """All three points or nothing: a slide missing one has no defined stop, and guessing it would steer the
+        handle to a place the model never named."""
+        def point(key: str) -> Optional[tuple]:
+            v = data.get(key)
+            if not isinstance(v, (list, tuple)) or len(v) < 2 or any(isinstance(c, bool) for c in v[:2]):
+                return None
+            return _norm_xy(v[0], v[1])
+
+        handle, src, dst = point("handle"), point("from"), point("to")
+        if handle is None or src is None or dst is None:
+            return []
+        return [{"kind": PixelAnswerKind.SLIDE, "handle": handle, "src": src, "dst": dst}]
 
     @staticmethod
     def _normalize_pixel(data: Any) -> List[Dict[str, Any]]:

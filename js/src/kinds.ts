@@ -21,7 +21,7 @@ export const Vendor = {
 } as const;
 export type Vendor = (typeof Vendor)[keyof typeof Vendor];
 
-export const ActionKind = { CLICK: 'click', DRAG: 'drag', TYPE: 'type', WAIT: 'wait', DONE: 'done', HOLD: 'hold', REFRESH: 'refresh' } as const;
+export const ActionKind = { CLICK: 'click', DRAG: 'drag', TYPE: 'type', WAIT: 'wait', DONE: 'done', HOLD: 'hold', REFRESH: 'refresh', SLIDE: 'slide' } as const;
 export type ActionKind = (typeof ActionKind)[keyof typeof ActionKind];
 
 export const RetryMode = { MISSED_TILES: 'missed-tiles' } as const;

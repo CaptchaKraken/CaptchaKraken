@@ -3,6 +3,28 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [Unreleased]
+
+### Added
+
+- **Prompt generation 3 watches an animated captcha as a video.** A model on
+  generation 3 is sent the recorded frames as one video and answers the moment
+  it acts on as `"t"`, in seconds; `CaptchaSolver.solve_animated` picks the
+  video or the keyframe stills by the model's generation. Generation 2 models
+  are unchanged. The local vLLM is started with the video flags it needs.
+- **A `slide` action, steered by what the handle moves.** A generation-3 model
+  answers a slider with the handle, a point on the part it moves, and where that
+  point belongs. Both drivers press the handle, nudge it, track that part on
+  screen — a jigsaw piece, a picture that turns, a piece the pointer carries —
+  and steer until the point is on its target. No selector is read and no
+  handle-to-piece ratio is assumed. The tracker is the new `slide-step` CLI
+  command.
+
+### Removed
+
+- **The `track-piece` CLI command** and the diff-based piece finder behind it.
+  `slide-step` replaces it, for generation-2 answers too.
+
 ## [3.2.2] - 2026-10-18
 
 ### Changed

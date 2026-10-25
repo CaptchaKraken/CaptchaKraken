@@ -28,6 +28,7 @@ class ActionKind(StrEnum):
     DONE = "done"
     HOLD = "hold"
     REFRESH = "refresh"
+    SLIDE = "slide"
 
 
 class PixelAnswerKind(StrEnum):

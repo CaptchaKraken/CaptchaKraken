@@ -12,8 +12,17 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .action_types import (CaptchaAction, ClickAction, DoneAction, DragAction, HoldAction, RefreshAction, TypeAction,
-                           WaitAction)
+from .action_types import (
+    CaptchaAction,
+    ClickAction,
+    DoneAction,
+    DragAction,
+    HoldAction,
+    RefreshAction,
+    SlideAction,
+    TypeAction,
+    WaitAction,
+)
 from .clipvideo import clip_video, time_to_index
 from .keyframes import KeyframeSet, extract_keyframes, number_for_source_index, write_keyframes
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode, Vendor
@@ -217,7 +226,8 @@ class CaptchaSolver:
 
     def _to_actions(self, raw_actions: List[dict],
                     wait_for: Optional[Callable[[dict], dict]] = None) -> List[CaptchaAction]:
-        """Normalised 0-1 points become small boxes; a slide is a drag with no source.
+        """Normalised 0-1 points become small boxes. A slide with a handle is generation 3's; one without is
+        generation 2's sourceless drag.
 
         `wait_for` maps an animated answer to the fields that tell the driver which moment to wait for.
         """
@@ -235,6 +245,9 @@ class CaptchaSolver:
                 # Only generation 3 sends an empty click, and it means nothing on the board matches: submit as is.
                 out.append(ClickAction(action=ActionKind.CLICK, target_bounding_boxes=boxes, **wait_for(a)) if boxes
                            else DoneAction(action=ActionKind.DONE))
+            elif kind == PixelAnswerKind.SLIDE and "handle" in a:
+                out.append(SlideAction(action=ActionKind.SLIDE, handle_bounding_box=box(*a["handle"]),
+                                       source_bounding_box=box(*a["src"]), target_bounding_box=box(*a["dst"])))
             elif kind in (PixelAnswerKind.DRAG, PixelAnswerKind.SLIDE):
                 src = box(*a["src"]) if kind == PixelAnswerKind.DRAG else None
                 out.append(DragAction(action=ActionKind.DRAG, source_bounding_box=src,

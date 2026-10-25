@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, List
 
 import pytest
+from fake_dom import FakeNode, fake_scope
 
 from captchakraken import prompts
 from captchakraken.action_types import ClickAction, DoneAction, DragAction, HoldAction, RefreshAction, TypeAction
@@ -20,7 +21,6 @@ from captchakraken.page_solver import PageSolver
 from captchakraken.planner import ActionPlanner
 from captchakraken.selectors import REFRESH_SELECTORS, SELECTORS
 from captchakraken.solver import CaptchaSolver, UnsupportedCaptchaError
-from fake_dom import FakeNode, fake_scope
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -125,6 +125,12 @@ def test_generation_2_still_asks_its_family_prompts(registry):
     ({"action": "drag", "drags": [{"from": [100, 100], "to": [900, 900], "from_id": 1, "to_id": 2}]},
      [{"kind": PixelAnswerKind.DRAG, "src": (0.1, 0.1), "dst": (0.9, 0.9)}]),
     ({"action": "drag", "drags": [{"to": [600, 400]}]}, [{"kind": PixelAnswerKind.SLIDE, "dst": (0.6, 0.4)}]),
+    ({"action": "slide", "handle": [100, 880], "from": [140, 420], "to": [700, 420]},
+     [{"kind": PixelAnswerKind.SLIDE, "handle": (0.1, 0.88), "src": (0.14, 0.42), "dst": (0.7, 0.42)}]),
+    # Missing any of the three, a slide has no defined stop: nothing, never a guess.
+    ({"action": "slide", "handle": [100, 880], "to": [700, 420]}, []),
+    ({"action": "slide", "from": [140, 420], "to": [700, 420]}, []),
+    ({"action": "slide", "handle": [100, 880], "from": [True, 420], "to": [700, 420]}, []),
     ({"action": "hold", "points": [[500, 520]], "ids": [1]}, [{"kind": PixelAnswerKind.HOLD, "points": [(0.5, 0.52)]}]),
     ({"action": "type", "text": "aB3x"}, [{"kind": PixelAnswerKind.TYPE, "text": "aB3x"}]),
     ({"frame": 3, "action": "click", "points": [[500, 500]]},
@@ -148,6 +154,21 @@ def test_parsed_answers_become_the_driver_actions():
     x1, y1, x2, y2 = out[1].target_bounding_box
     assert abs((x1 + x2) / 2 - 0.07) < 1e-9 and abs((y1 + y2) / 2 - 0.93) < 1e-9
     assert out[2].target_bounding_box is None
+
+
+def test_a_slide_with_a_handle_is_generation_3_and_one_without_is_generation_2():
+    from captchakraken.action_types import SlideAction
+
+    out = CaptchaSolver._to_actions(object(), [
+        {"kind": PixelAnswerKind.SLIDE, "handle": (0.1, 0.88), "src": (0.14, 0.42), "dst": (0.7, 0.42)},
+        {"kind": PixelAnswerKind.SLIDE, "dst": (0.7, 0.42)},
+    ])
+    assert [type(a) for a in out] == [SlideAction, DragAction]
+    centre = lambda b: ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)  # noqa: E731
+    assert centre(out[0].handle_bounding_box) == pytest.approx((0.1, 0.88))
+    assert centre(out[0].source_bounding_box) == pytest.approx((0.14, 0.42))
+    assert centre(out[0].target_bounding_box) == pytest.approx((0.7, 0.42))
+    assert out[1].source_bounding_box is None
 
 
 def test_keyframe_stills_on_generation_3_are_an_unsupported_puzzle_not_a_crash(registry, tmp_path):

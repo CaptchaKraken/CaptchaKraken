@@ -16,7 +16,6 @@ from .errors import CaptchaKrakenAPIError
 from .kinds import Outcome, PromptFamily, RetryMode, Vendor
 from .solver import CaptchaSolver, UnsupportedCaptchaError
 
-
 _SELF_PRINTED = object()
 
 
@@ -77,18 +76,11 @@ def board_painted(image: str, floor=None, box=None) -> dict:
     return board_is_painted(image, floor, box)
 
 
-def track_piece(before: str, after: str, exclude=None, travel: float = 0.0) -> dict:
-    from .tool_calls.track_piece import changed_bbox, locate_piece
-
-    bbox = changed_bbox(before, after, exclude)
-    piece = locate_piece(before, after, travel, exclude) if bbox is not None else None
-    return {"bbox": bbox, "piece": piece, "moved": bbox is not None}
-
-
 def slide_step(req: dict) -> dict:
     """One look of the slide loop (`tool_calls/slide_tracker.py`); a lost or unseen object is `{"error"}`, never a
     position, so the driver releases rather than steering by a guess."""
-    from .tool_calls.slide_tracker import TrackingError, slide_step as step
+    from .tool_calls.slide_tracker import TrackingError
+    from .tool_calls.slide_tracker import slide_step as step
 
     def pt(v):
         return None if v is None else (float(v[0]), float(v[1]))
@@ -181,12 +173,6 @@ def _board_painted(args):
     return board_painted(args[0], float(args[1]) if len(args) > 1 else None)
 
 
-def _track_piece(args):
-    _need(args, 2, "track-piece before.png after.png [exclude_json] [travel]")
-    return track_piece(args[0], args[1], json.loads(args[2]) if len(args) > 2 else None,
-                       float(args[3]) if len(args) > 3 else 0.0)
-
-
 def _slide_step(args):
     _need(args, 1, "slide-step request.json  (or the JSON itself)")
     raw = args[0]
@@ -235,8 +221,6 @@ def _serve(args):
             return board_painted(req["image"], req.get("floor"), req.get("box"))
         if cmd == "find-checkbox":
             return find_checkbox(req["image"])
-        if cmd == "track-piece":
-            return track_piece(req["before"], req["after"], req.get("exclude"), req.get("travel") or 0.0)
         if cmd == "slide-step":
             return slide_step(req)
         raise ValueError(f"unknown cmd: {cmd!r}")
@@ -357,7 +341,6 @@ COMMANDS: Dict[str, Callable[[List[str]], Any]] = {
     "grid-cell-states-fixed": _grid_cell_states_fixed,
     "match-region": _match_region,
     "board-painted": _board_painted,
-    "track-piece": _track_piece,
     "slide-step": _slide_step,
     "report-outcome": _report_outcome,
     "serve": _serve,

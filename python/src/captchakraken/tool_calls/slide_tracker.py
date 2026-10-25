@@ -11,8 +11,8 @@ ratio, no assumption about whether the handle slides the piece or turns it.
 2. The probe also says HOW the handle drives it: a SLIDE (a shift) or a TURN (about a pivot it fits). A handle does
    one or the other, and fitting both from a short probe lets a half-degree of noise grow into a ten-degree turn by
    the far end of the track.
-3. `measure` finds where the object is now, searched coarsely near the prediction and refined with ECC over its own
-   mask, so a busy board or an animated badge elsewhere cannot pull it.
+3. `measure` finds where the object is now: template matching over its own mask near the prediction, then the exact
+   warp scored to a fraction of a pixel, so a busy board or an animated badge elsewhere cannot pull it.
 4. `plan` fits the motion as a straight line in the handle's travel and picks the travel that brings the model's
    point closest to its goal.
 

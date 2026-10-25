@@ -158,7 +158,7 @@ export interface ClickAction extends AnimatedActionFields {
 
 export interface DragAction extends AnimatedActionFields {
   action: typeof ActionKind.DRAG;
-  /** Null on a puzzle-piece slider: the driver finds the handle and closes the loop on the piece. */
+  /** Null on a generation-2 puzzle-piece slider: the driver finds the handle by selector and steers the piece. */
   source_bounding_box: [number, number, number, number] | null;
   target_bounding_box: [number, number, number, number];
 }
@@ -189,7 +189,18 @@ export interface RefreshAction {
   target_bounding_box?: [number, number, number, number] | null;
 }
 
-export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction | HoldAction | RefreshAction;
+/**
+ * Press the handle and move it until the point on the part it moves reaches the target (prompt generation 3). The
+ * driver tracks that part on screen and steers; nothing about the widget is read from its DOM.
+ */
+export interface SlideAction {
+  action: typeof ActionKind.SLIDE;
+  handle_bounding_box: [number, number, number, number];
+  source_bounding_box: [number, number, number, number];
+  target_bounding_box: [number, number, number, number];
+}
+
+export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction | HoldAction | RefreshAction | SlideAction;
 export type SolverResult = CaptchaAction | CaptchaAction[];
 
 export interface TokenUsage {

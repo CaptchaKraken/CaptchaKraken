@@ -69,4 +69,15 @@ class RefreshAction(Action):
     target_bounding_box: Optional[BoundingBox] = None
 
 
-CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction, HoldAction, RefreshAction]
+class SlideAction(Action):
+    """Press the handle and move it until the point on the part it moves reaches the target (prompt generation 3).
+    The driver tracks that part on screen and steers; nothing about the widget is read from its DOM."""
+
+    action: Literal[ActionKind.SLIDE]
+    handle_bounding_box: BoundingBox
+    source_bounding_box: BoundingBox
+    target_bounding_box: BoundingBox
+
+
+CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction, HoldAction, RefreshAction,
+                      SlideAction]

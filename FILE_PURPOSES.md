@@ -142,7 +142,6 @@ answers with a frame number the driver then waits for on screen.
 | `js/src/limits.ts` | The round and billing ceilings that must agree with the hosted gateway, stated once. |
 | `js/src/model-name.ts` | Which served adapter name this client asks for — the same answer the Python port gives, because the name selects the prompt generation. |
 | `js/src/humanize.ts` | How the driver moves: one pluggable object per input device — mouse, mobile touch (over CDP, Appium or a Playwright touchscreen), or none. |
-| `js/src/slide-geometry.ts` | The algebra behind a puzzle-piece slider: where to drag the handle so the piece lands in the gap, at any device pixel ratio. |
 | `js/src/png.ts` | Cutting the widget out of a whole-viewport PNG, with nothing but `node:zlib`: every capture is taken unclipped, because a clipped one makes a headed browser repaint the page. |
 | `js/src/playwright-types.ts` | Minimal structural `Page`, `Frame`, `Locator` and `ElementHandle` types, defined here rather than imported, so the package depends on no browser library and accepts any Playwright-compatible one. |
 | `js/src/puppeteer-adapter.ts` | `fromPuppeteer()`: translates the handful of methods Puppeteer names differently onto that structural surface, and builds a Playwright-shaped `Locator` over Puppeteer's `$$`. |
@@ -172,17 +171,13 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/humanize.test.ts` | Humanisation is an input device, not a realism dial: `mobile` never touches `page.mouse`. |
 | `js/src/vendor-hint-decides-the-expert.test.ts` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds the grid SHAPE GATE: a vendor must be named off the same substring its selectors use, or a click board can be read as a lattice. |
 | `js/src/idle-wander-stops-on-time.test.ts` | The cursor drift during inference stops when the thinking stops. |
-| `js/src/slide-geometry.test.ts` | Cross-port parity for the slider algebra. |
-| `js/src/slide-aims-before-it-corrects.test.ts` | The slider opens with one sweep at the slot and corrects from what the screen shows, instead of spending two nudges calibrating before the drag starts. |
-| `js/src/slide-hidpi.test.ts` | The slider missed every attempt on a phone: device pixel ratio was applied twice. |
+| `js/src/slide-steers-by-what-it-sees.test.ts` | The JS slide loop held to the tracker's contract: it presses where the answer names the handle and reads nothing off the page, converts shot pixels at any device ratio, sends back every look after the probe, lets go when the part is lost, steers a carried piece in two dimensions, and still finds a generation-2 handle by selector. |
 | `js/src/board-paint-gate.test.ts` | A still board is not a loaded board: the driver waits for the widget to paint a puzzle before photographing it for the model. |
 | `js/src/a-hold-is-held-until-the-widget-completes.test.ts` | A press-and-hold is one press kept down until the widget completes, and the button is released even when the completion check fails. |
 | `js/src/one-prompt-answers-every-puzzle.test.ts` | Prompt generation 3's driver half: a `refresh` answer presses the vendor's own control, else the model's point, else ends the round; a second refresh is not a repeated answer; the press-and-hold widget is detected. |
 | `js/src/a-board-that-will-not-film-may-already-be-solved.test.ts` | A recording that caught nothing is a widget that would not screenshot — usually one closing on an accepted answer — so the loop asks before it gives up. |
 | `js/src/a-missing-prompt-is-not-a-reason-to-wait.test.ts` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
 | `js/src/geetest-accept-is-a-signal.test.ts` | GeeTest's accepted state is a banner inside the still-open panel, not a token and not an absence — reading it saves an inference per solve. |
-| `js/src/slide-reads-the-piece-off-the-page.test.ts` | The slider steers by the piece element's own box, not by a pixel diff whose under-measured width releases the drag short of the notch. |
-| `js/src/the-piece-is-the-first-match-that-could-be-one.test.ts` | The size bound is the FILTER on the piece lookup, not a check after it — a generic selector matching the vendor's outer container first must not end the search. |
 | `js/src/hosted-default.test.ts` | Against our own endpoint the client asks for the hosted-only model by its routing alias; against anyone else's it asks for the downloadable default. |
 | `js/src/no-progress.test.ts` | A solve that repeats itself stops instead of running the clock out. |
 | `js/src/repeated-answer.test.ts` | A board that cycles was being solved as a still, forever. |
@@ -293,7 +288,6 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/tool_calls/find_grid.py` | The OpenCV lattice finder. Pure computer vision, no model, and the foundation every grid solve rests on — which is why it is the most heavily tested file here. |
 | `python/src/captchakraken/tool_calls/find_checkbox.py` | Finds the "I'm not a robot" checkbox by contour, before any model is involved. |
 | `python/src/captchakraken/tool_calls/board_painted.py` | Answers whether the widget has PAINTED its puzzle or is showing the blank panel it rebuilds behind, so a hole is never sent to the model. |
-| `python/src/captchakraken/tool_calls/track_piece.py` | Finds a slider's puzzle piece by what moved, telling it apart from the ground it vacated, so the driver can steer by where the piece IS rather than by where the arithmetic says it should be. |
 | `python/src/captchakraken/tool_calls/slide_tracker.py` | The selector-free slide loop: segments what the handle moves (flow, then the pixels its own motion carries), tells a slide from a turn, tracks it to a tenth of a pixel, and says where to put the handle next so the model's point lands on its goal. |
 
 ### `python/tests/`
@@ -314,8 +308,9 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_our_own_gesture_is_not_animation.py` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `python/tests/test_geetest_accept_is_a_signal.py` | GeeTest's accept banner is a solve; its refuse banner, and its closed popup wrapper, are not. |
 | `python/tests/test_a_missing_prompt_is_not_a_reason_to_wait.py` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
-| `python/tests/test_slide_reads_the_piece_off_the_page.py` | The slider prefers the piece element's own box over the pixel diff, and the diff's measured undershoot is pinned as the fallback's known cost. |
 | `python/tests/test_slide_tracker.py` | The slide tracker on drawn boards — a jigsaw on a track at three handle ratios, a disc turning in place, a piece the pointer carries, each with a moving handle and an animated badge — down to the mask, the sub-pixel position, the loop's convergence, HiDPI, and the cases it must refuse rather than guess. |
+| `python/tests/slide_boards.py` | Slide boards drawn in numpy — a jigsaw on a track, a disc turning in place, a piece the pointer carries — that render what the page shows after any handle travel. Shared by the tracker's tests and the driver's. |
+| `python/tests/test_the_slide_driver_steers_by_what_it_sees.py` | The Python slide driver on rendered boards with the real tracker: seats a jigsaw at three handle ratios, turns a disc upright, carries a piece, works at HiDPI, lets go of a part that never moves, never reads a selector for a generation-3 answer, and still lands a generation-2 one by its handle or piece selector. |
 | `python/tests/test_public_contract.py` | The published Python surface, pinned name by name, plus the rule that `__version__`, `pyproject.toml` and `js/package.json` all say one number. Real callers depend on these names; removing one is a major version. |
 | `python/tests/test_version_matches_manifest.py` | `captchakraken.__version__` must equal the version pip installs. It drifted once, and every bug report quoted a release that was not running. |
 | `python/tests/test_api_error_is_exported.py` | The two ports expose the same error surface: what TypeScript exports, Python must too. |

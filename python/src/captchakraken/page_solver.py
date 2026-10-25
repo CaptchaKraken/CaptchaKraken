@@ -394,8 +394,9 @@ def _has_text(handle: Any) -> bool:
         return False
 
 
-SLIDE_PIECE_MIN_PX = 3.0
-SLIDE_PIECE_MAX_FRACTION = 0.6
+# The nudge that shows the tracker what the handle moves: enough to separate the part from still ground, little enough
+# that a piece resting against the board's edge stays on it.
+SLIDE_PROBE_PX = 8.0
 
 # No prompt and no pictures both read as ready: waiting for `.prompt-text` to exist once paid the whole timeout
 # before every board of a challenge that draws none (tower_stack: 18s a round, 2/2 -> 0/2).
@@ -763,21 +764,6 @@ class PageSolver:
         first = next(iter(_visible(scope, selectors)), None)
         return _handle_of(first) if first is not None else None
 
-    def _measure_piece_box(self, scope: Any, widget_width: float) -> Optional[Dict[str, float]]:
-        """The slider piece's box: the first visible match small enough to be a piece.
-
-        Runs during detection, so it must not mark the board acted on: doing so once disabled the
-        speculative burst on every slide solve.
-        """
-        for candidate in _handles(_visible(scope, PIECE_SELECTORS)):
-            try:
-                b = candidate.bounding_box()
-            except Exception:
-                continue
-            if b and SLIDE_PIECE_MIN_PX <= b["width"] <= widget_width * SLIDE_PIECE_MAX_FRACTION:
-                return b
-        return None
-
     def _answer_box(self, scope: Any, at: Any = None) -> Optional[Any]:
         """The text box inside the widget, else a vendor-named one in its enclosing fieldset/form.
 
@@ -806,20 +792,6 @@ class PageSolver:
         _log(f"typed {len(text)} character(s) into the captcha field")
         return True
 
-    def _track_piece(self, element: Any, before: str, after: str, exclude: Sequence[float],
-                     travel: float = 0.0) -> Optional[Dict[str, Any]]:
-        from .tool_calls.track_piece import changed_bbox, locate_piece
-
-        try:
-            self._screenshot(element, after, timeout_ms=self.config.element_screenshot_timeout_ms)
-            bbox = changed_bbox(before, after, exclude)
-            if bbox is None:
-                return None
-            return {"bbox": bbox, "piece": locate_piece(before, after, travel, exclude)}
-        except Exception as exc:
-            _debug(f"track_piece failed: {exc}")
-            return None
-
     @staticmethod
     def _shot_scale(shot: str, css_width: float) -> float:
         dims = _read_png_dimensions(shot)
@@ -827,77 +799,71 @@ class PageSolver:
 
     def _execute_slide(self, page: Any, element: Any, scope: Any, action: Dict[str, Any],
                        element_box: Dict[str, float]) -> bool:
-        """Aim the handle at the slot once, then look and correct until the piece is home."""
-        self._acted_on_board = True
-        tb = action["target_bounding_box"]
-        target_x = (float(tb[0]) + float(tb[2])) / 2 * element_box["width"]
+        """Press the handle, nudge it to see what it moves, then steer that part's point onto its target.
 
-        handle = self._find_control(scope, SLIDER_HANDLE_SELECTORS)
-        if handle is None:
-            piece = self._find_control(scope, PIECE_SELECTORS)
-            box = piece and piece.bounding_box()
+        A generation-3 answer names all three points, so nothing is read from the page but pixels. A generation-2
+        answer names only the target: its handle comes from the selector table and the part it moves is whatever
+        moved most. That path goes when the last generation-2 model does.
+        """
+        from .tool_calls.slide_tracker import TrackingError, slide_step
+
+        self._acted_on_board = True
+        w, h = element_box["width"], element_box["height"]
+
+        def at(bbox: Sequence[float]) -> Tuple[float, float]:
+            return (float(bbox[0]) + float(bbox[2])) / 2 * w, (float(bbox[1]) + float(bbox[3])) / 2 * h
+
+        goal = at(action["target_bounding_box"])
+        if action.get("handle_bounding_box"):
+            handle, seed = at(action["handle_bounding_box"]), at(action["source_bounding_box"])
+        else:
+            slider = self._find_control(scope, SLIDER_HANDLE_SELECTORS)
+            piece = None if slider is not None else self._find_control(scope, PIECE_SELECTORS)
+            box = (slider or piece).bounding_box() if (slider or piece) is not None else None
             if not box:
                 _log("slide action, but the widget has neither a slider nor a draggable piece")
                 return False
-            target_y = (float(tb[1]) + float(tb[3])) / 2 * element_box["height"]
-            with self._gesture():
-                self._human.drag(page, (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2),
-                                 (element_box["x"] + target_x, element_box["y"] + target_y))
-            return True
+            handle = (box["x"] + box["width"] / 2 - element_box["x"], box["y"] + box["height"] / 2 - element_box["y"])
+            # A piece with no track is the handle itself, and what it moves is it.
+            seed = handle if piece is not None else None
 
-        hbox = handle.bounding_box()
-        if not hbox:
-            return False
-        start_x, hold_y = hbox["x"] + hbox["width"] / 2, hbox["y"] + hbox["height"] / 2
-        # Mask from the handle's band to the widget's bottom: the filled track moves too.
-        pad = max(4.0, hbox["height"] * 0.35)
-        band = [0.0, hbox["y"] - element_box["y"] - pad, element_box["width"], element_box["height"]]
-        shots = [_tmp_png("slide") for _ in range(2)]
+        press = (element_box["x"] + handle[0], element_box["y"] + handle[1])
+        probe = SLIDE_PROBE_PX if goal[0] >= (seed or handle)[0] else -SLIDE_PROBE_PX
+        timeout = self.config.element_screenshot_timeout_ms
+        first, probed, current = (_tmp_png("slide") for _ in range(3))
         try:
-            self._move_to_element(page, handle, padding_percentage=30.0)
+            self._smooth_move(page, *press)
             self._human.press(page)
             self._human.pause(PauseKind.GRAB)
-            self._screenshot(element, shots[0], timeout_ms=self.config.element_screenshot_timeout_ms)
-            scale = self._shot_scale(shots[0], element_box["width"])
-            exclude = [v * scale for v in band]
-
-            def live_center():
-                b = self._measure_piece_box(scope, element_box["width"])
-                return None if b is None else b["x"] + b["width"] / 2.0 - element_box["x"]
-
-            rest = live_center()
-            offset = target_x - (start_x - element_box["x"] if rest is None else rest)
-            self._smooth_move(page, start_x + offset, hold_y)
-
-            widths: List[Tuple[float, float]] = []
-            last_box = last_piece = None
-            ratio, steered = 1.0, False
-            for _ in range(self.config.slide_max_corrections):
-                self._human.pause(PauseKind.PROBE)
-                seen = self._track_piece(element, shots[0], shots[1], exclude, travel=offset * ratio * scale)
-                if seen is not None:
-                    box = seen["bbox"]
-                    widths.append((offset, float(box[2] - box[0]) / scale))
-                    last_box, last_piece = box, seen["piece"]
-                piece_w, ratio = self._solve_slide_geometry(widths, element_box["width"])
-                live = live_center()
-                if live is not None:
-                    center = live
-                elif last_piece is not None:
-                    center = last_piece["centre"] / scale
-                elif last_box is not None and piece_w is not None:
-                    center = last_box[2] / scale - piece_w / 2.0
-                else:
-                    continue
-                steered = True
-                error = target_x - center
-                _debug(f"slider: center={center:.1f} target={target_x:.1f} error={error:+.1f} ratio={ratio:.3f}")
-                if abs(error) <= self.config.slide_tolerance_px:
+            self._screenshot(element, first, timeout_ms=timeout)
+            k = self._shot_scale(first, w)
+            self._smooth_move(page, press[0] + probe, press[1])
+            self._human.pause(PauseKind.PROBE)
+            self._screenshot(element, probed, timeout_ms=timeout)
+            ask = dict(probe_s=probe * k, goal=(goal[0] * k, goal[1] * k), seed=seed and (seed[0] * k, seed[1] * k),
+                       handle=(handle[0] * k, handle[1] * k), bounds=(-handle[0] * k, (w - handle[0]) * k),
+                       tol=self.config.slide_tolerance_px * k)
+            look, s, history, moves = probed, probe * k, [], 0
+            while True:
+                try:
+                    reply = slide_step(first, probed, look, s=s, history=history, **ask)
+                except TrackingError as exc:
+                    _log(f"slider: {exc}; released where the handle is")
                     break
-                offset += error / ratio
-                self._smooth_move(page, start_x + offset, hold_y)
-            if not steered:
-                _log("slider: the piece never resolved on screen; released where the opening sweep put it")
+                if look is not probed:
+                    history.append(reply["observation"])
+                _debug(f"slider: point at ({reply['pos'][0] / k:.1f}, {reply['pos'][1] / k:.1f}), "
+                       f"{reply['error'] / k:.1f}px from its target, {reply['kind']}")
+                if reply["done"] or moves >= self.config.slide_max_corrections:
+                    if reply["error"] > ask["tol"]:
+                        _log(f"slider: releasing {reply['error'] / k:.1f}px off target")
+                    break
+                s = reply["next"]
+                dx, dy = (s[0], s[1]) if reply["grabbed"] else (s, 0.0)
+                self._smooth_move(page, press[0] + dx / k, press[1] + dy / k)
+                self._human.pause(PauseKind.PROBE)
+                self._screenshot(element, current, timeout_ms=timeout)
+                look, moves = current, moves + 1
             self._human.pause(PauseKind.SETTLE)
         finally:
             try:
@@ -905,32 +871,9 @@ class PageSolver:
             except Exception:
                 pass
             self._last_input_ms = _now()
-            for shot in shots:
+            for shot in (first, probed, current):
                 _unlink(shot)
         return True
-
-    @staticmethod
-    def _solve_slide_geometry(widths: Sequence[Tuple[float, float]],
-                              widget_width: float) -> Tuple[Optional[float], float]:
-        """Piece width and handle-to-piece ratio from `(offset, changed width)` readings.
-
-        The widest-apart pair over a 16px spread: changed widths are ±1px, so the ratio error is ±0.13 at the
-        floor and ±0.5 at 4px. An implausible ratio falls back to 1:1 (true of every vendor observed) rather
-        than a 0.02 that sends the handle off the track and camoufox into a move that never returns.
-        """
-        if not widths:
-            return None, 1.0
-        piece_w, ratio = None, 1.0
-        (o1, w1), (o2, w2) = min(widths, key=lambda m: m[0]), max(widths, key=lambda m: m[0])
-        if o2 - o1 >= 16.0 and 0.2 <= (w2 - w1) / (o2 - o1) <= 3.0:
-            ratio = (w2 - w1) / (o2 - o1)
-            piece_w = w1 - ratio * o1
-        if piece_w is None:
-            o, w = widths[-1]
-            piece_w = w - ratio * o
-        if not (SLIDE_PIECE_MIN_PX <= piece_w <= widget_width * SLIDE_PIECE_MAX_FRACTION):
-            return None, ratio
-        return piece_w, ratio
 
     # ── detection ────────────────────────────────────────────────────────
 
@@ -2059,7 +2002,7 @@ class PageSolver:
                         if bbox:
                             self._human.pause(PauseKind.BETWEEN)
                     performed = answered = True
-                elif kind == ActionKind.DRAG and not action.get("source_bounding_box"):
+                elif kind == ActionKind.SLIDE or (kind == ActionKind.DRAG and not action.get("source_bounding_box")):
                     if self._execute_slide(page, element, scope, action, element_box):
                         performed = slid = True
                 elif kind == ActionKind.DRAG:
