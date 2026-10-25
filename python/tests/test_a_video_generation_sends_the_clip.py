@@ -161,3 +161,18 @@ def test_the_managed_server_reads_the_clip_as_sent():
     docs = (Path(__file__).resolve().parents[2] / "docs" / "self-hosting.md").read_text()
     assert f"--media-io-kwargs '{json.dumps(clipvideo.media_io_kwargs())}'" in docs, \
         "the documented equivalent command must carry the same flag"
+
+
+def test_the_page_driver_cuts_its_burst_into_a_recording(tmp_path):
+    # The driver's own slicer, not the solver's: a missing import here only surfaced on a live animated board.
+    from captchakraken.page_solver import PageSolver, PageSolverConfig
+
+    solver = PageSolver(config=PageSolverConfig(detection_timeout_ms=0))
+    recording, keyframe_dir = solver._slice(_clip_frames(), 1000.0)
+    try:
+        assert len(recording.frames) == len(_clip_frames())
+        assert recording.keyframe_paths and all(Path(p).exists() for p in recording.keyframe_paths)
+    finally:
+        import shutil
+
+        shutil.rmtree(keyframe_dir, ignore_errors=True)

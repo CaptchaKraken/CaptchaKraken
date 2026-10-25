@@ -28,7 +28,7 @@ from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, Pause
 from .selectors import (ACCEPTED_SELECTORS, ENCLAVE_SELECTORS, PIECE_SELECTORS, REFRESH_SELECTORS, RESPONSE_SELECTORS,
                         SELECTORS, SLIDER_HANDLE_SELECTORS, SUBMIT_SELECTORS, TEXT_INPUT_SELECTORS,
                         TEXT_INPUT_VENDOR_SELECTORS, VENDORS, WIDGET_PROBES, VendorSelectors, WidgetProbe)
-from .solver import CaptchaSolver, UnsupportedCaptchaError
+from .solver import AnimatedRecording, CaptchaSolver, UnsupportedCaptchaError, cut_recording
 from .timing import PhaseBudget, timings_enabled
 from .verdicts import RoundVerdict, VerdictLog
 
