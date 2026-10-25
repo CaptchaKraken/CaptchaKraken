@@ -1,16 +1,21 @@
-"""Image in, actions out: grid detection plus the model, for one still or one keyframe set."""
+"""Image in, actions out: grid detection plus the model, for one still or one recorded animation."""
 
 import math
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
+import cv2
+import numpy as np
 from PIL import Image
 
 from .action_types import (CaptchaAction, ClickAction, DoneAction, DragAction, HoldAction, RefreshAction, TypeAction,
                            WaitAction)
+from .clipvideo import clip_video, time_to_index
+from .keyframes import KeyframeSet, extract_keyframes, number_for_source_index, write_keyframes
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode, Vendor
 from .planner import ActionPlanner
 from .tool_calls.find_checkbox import find_checkbox
@@ -36,6 +41,28 @@ def _debug(message: str) -> None:
 
 class UnsupportedCaptchaError(Exception):
     pass
+
+
+@dataclass
+class AnimatedRecording:
+    """One recorded burst of an animated challenge, cut for the driver and for the model.
+
+    The keyframes belong to the driver whichever way the model is asked: they say how many steady screens the
+    board has, and they are the sibling screens the wait gate compares an answer against. The model is shown
+    either the keyframes (prompt generation 2) or the frames themselves as one video (generation 3 on).
+    """
+
+    frames: List[np.ndarray]
+    fps: float
+    keyframes: KeyframeSet
+    keyframe_paths: List[str]
+
+
+def cut_recording(frames: Sequence[np.ndarray], fps: float, out_dir: str) -> AnimatedRecording:
+    """Slice `frames` into keyframes written to `out_dir`, keeping the frames for a video ask."""
+    kfset = extract_keyframes(frames, fps=float(fps))
+    paths = [str(p) for p in write_keyframes(kfset, out_dir, stem="challenge")]
+    return AnimatedRecording(frames=list(frames), fps=float(fps), keyframes=kfset, keyframe_paths=paths)
 
 
 def _lattice_irregularity(grid_boxes) -> Optional[float]:
@@ -125,32 +152,80 @@ class CaptchaSolver:
             raise UnsupportedCaptchaError("no keyframes to solve from")
         with Image.open(paths[0]) as im:
             self._image_size = im.size
-        try:
-            raw = self.planner.get_keyframe_actions(paths)
-        except ValueError as exc:
-            raise UnsupportedCaptchaError(str(exc)) from exc
-        actions = self._to_actions(raw, keyframe_paths=paths)
+
+        def wait_for(a: dict) -> dict:
+            # An out-of-range frame is dropped, not clamped: clamping a 7 to 6 would invent an intent.
+            frame = a.get("frame")
+            if not isinstance(frame, int) or not 1 <= frame <= len(paths):
+                return {}
+            return {"frame": frame, "await_keyframe": paths[frame - 1]}
+
+        actions = self._to_actions(self._ask_planner(lambda: self.planner.get_keyframe_actions(paths)),
+                                   wait_for=wait_for)
         if actions:
             return actions
         raise UnsupportedCaptchaError("Cannot solve this animated captcha")
+
+    def solve_animated(self, recording: AnimatedRecording) -> List[CaptchaAction]:
+        """Solve a recorded animation the way the model's prompt generation was trained to be asked."""
+        if not self.planner.prompts.sends_video:
+            return self.solve_keyframes(recording.keyframe_paths)
+        if not recording.frames:
+            raise UnsupportedCaptchaError("no frames to solve from")
+        height, width = recording.frames[0].shape[:2]
+        self._image_size = (width, height)
+        clip = clip_video(recording.frames, recording.fps, max_pixels=self.planner.video_max_pixels())
+        written: Dict[int, str] = {}
+
+        def wait_for(a: dict) -> dict:
+            t = a.get("t")
+            if t is None:
+                return {}
+            source = time_to_index(clip, t)
+            if source not in written:
+                written[source] = self._await_frame(recording, source)
+            return {"t": t, "await_keyframe": written[source]}
+
+        actions = self._to_actions(self._ask_planner(lambda: self.planner.get_video_actions(clip)), wait_for=wait_for)
+        if actions:
+            return actions
+        raise UnsupportedCaptchaError("Cannot solve this animated captcha")
+
+    @staticmethod
+    def _ask_planner(ask: Callable[[], List[dict]]) -> List[dict]:
+        """A prompt generation that cannot be asked this way is an unsupported puzzle, not a crash."""
+        try:
+            return ask()
+        except ValueError as exc:
+            raise UnsupportedCaptchaError(str(exc)) from exc
+
+    @staticmethod
+    def _await_frame(recording: AnimatedRecording, source: int) -> str:
+        """The wait gate's reference for a video answer: the recorded frame `t` names, in its screen's file.
+
+        It replaces the keyframe of the screen it belongs to, so the gate's sibling check still compares the
+        answer against the OTHER screens only, while the page is matched against the exact moment chosen.
+        """
+        by_number = {kf.number: path for kf, path in zip(recording.keyframes.keyframes, recording.keyframe_paths)}
+        path = by_number[number_for_source_index(recording.keyframes, source)]
+        if not cv2.imwrite(path, recording.frames[source]):
+            raise OSError(f"could not write the awaited frame to {path}")
+        return path
 
     def _solve_pixel(self, image_path: str, text_mode: bool = False) -> List[CaptchaAction]:
         return self._to_actions(self.planner.get_pixel_actions(image_path, text_mode=text_mode))
 
     def _to_actions(self, raw_actions: List[dict],
-                    keyframe_paths: Optional[Sequence[str]] = None) -> List[CaptchaAction]:
-        """Normalised 0-1 points become small boxes; a slide is a drag with no source."""
+                    wait_for: Optional[Callable[[dict], dict]] = None) -> List[CaptchaAction]:
+        """Normalised 0-1 points become small boxes; a slide is a drag with no source.
+
+        `wait_for` maps an animated answer to the fields that tell the driver which moment to wait for.
+        """
         r = _PIXEL_BOX_HALF
+        wait_for = wait_for or (lambda a: {})
 
         def box(cx: float, cy: float) -> List[float]:
             return [min(max(v, 0.0), 1.0) for v in (cx - r, cy - r, cx + r, cy + r)]
-
-        def wait_for(a: dict) -> dict:
-            # An out-of-range frame is dropped, not clamped: clamping a 7 to 6 would invent an intent.
-            frame = a.get("frame")
-            if not keyframe_paths or not isinstance(frame, int) or not 1 <= frame <= len(keyframe_paths):
-                return {}
-            return {"frame": frame, "await_keyframe": str(keyframe_paths[frame - 1])}
 
         out: List[CaptchaAction] = []
         for a in raw_actions:

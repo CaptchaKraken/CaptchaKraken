@@ -249,7 +249,7 @@ def _run_solve(query: Callable[[], dict]) -> None:
 
 
 def _solve_animated(args):
-    """Slice a recorded burst (zero-padded PNGs in `--frames-dir`) into keyframes and solve them."""
+    """Solve a recorded burst (zero-padded PNGs in `--frames-dir`) as the model's prompt generation asks it."""
     import glob
 
     parser = argparse.ArgumentParser(prog="captchakraken solve-animated")
@@ -266,18 +266,18 @@ def _solve_animated(args):
     def query():
         import cv2
 
-        from .keyframes import extract_keyframes, write_keyframes
+        from .solver import cut_recording
 
         imgs = [im for im in (cv2.imread(p) for p in frames) if im is not None]
         if not imgs:
             _fail("no frame decoded")
-        kfset = extract_keyframes(imgs, fps=float(opts.fps))
-        paths = [os.path.abspath(p) for p in write_keyframes(kfset, os.path.join(opts.frames_dir, "keyframes"), stem="challenge")]
+        recording = cut_recording(imgs, float(opts.fps), os.path.abspath(os.path.join(opts.frames_dir, "keyframes")))
         solver = CaptchaSolver(model=opts.model, api_key=opts.api_key, expert=opts.expert)
-        result = solver.solve_keyframes(paths)
+        result = solver.solve_animated(recording)
+        kfset = recording.keyframes
         return {"actions": [a.model_dump() for a in result], "token_usage": solver.planner.token_usage,
-                "keyframes": paths, "keyframe_mode": kfset.mode, "steady_screens": kfset.steady_screens,
-                "source_frames": len(imgs)}
+                "keyframes": recording.keyframe_paths, "keyframe_mode": kfset.mode,
+                "steady_screens": kfset.steady_screens, "source_frames": len(imgs)}
 
     _run_solve(query)
     return _SELF_PRINTED

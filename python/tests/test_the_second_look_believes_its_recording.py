@@ -9,6 +9,7 @@ sys.path.insert(0, str(SRC))
 
 from captchakraken.kinds import FrameRole, SettleVerdict, Vendor
 from captchakraken.page_solver import PageSolver, PageSolverConfig, Widget
+from captchakraken.solver import AnimatedRecording
 
 
 def _armed(verdict: SettleVerdict) -> PageSolver:
@@ -60,10 +61,11 @@ def _round(tmp_path, monkeypatch, moved: bool, verdict: SettleVerdict = SettleVe
     monkeypatch.setattr(solver, "is_captcha_solved", lambda _page: False)
     monkeypatch.setattr(solver, "_wait_for_board_painted", lambda _element: None)
     monkeypatch.setattr(solver, "_screenshot", lambda _el, path, **_kw: Path(path).write_bytes(b"board"))
-    monkeypatch.setattr(solver, "_record_keyframes", lambda _el: (keyframes, str(tmp_path), moved))
+    recording = AnimatedRecording(frames=[], fps=10.0, keyframes=None, keyframe_paths=keyframes)
+    monkeypatch.setattr(solver, "_record_keyframes", lambda _el: (recording, str(tmp_path), moved))
     monkeypatch.setattr(solver, "_should_speculate", lambda *_a: False)
     monkeypatch.setattr(solver, "_get_verify_button", lambda _scope: None)
-    monkeypatch.setattr(solver, "_get_keyframe_solution", lambda _paths: (asked.append("video"), ([], []))[1])
+    monkeypatch.setattr(solver, "_get_keyframe_solution", lambda _recording: (asked.append("video"), ([], []))[1])
     monkeypatch.setattr(solver, "_get_solution", lambda *_a, **_kw: (asked.append("still"), ([], []))[1])
 
     element = type("El", (), {"content_frame": lambda self: None, "bounding_box": lambda self: None})()

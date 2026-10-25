@@ -57,7 +57,7 @@ def test_generation_3_is_one_prompt_and_the_older_generations_are_untouched():
 
 def test_the_general_prompt_names_every_verb_the_parser_reads():
     general = prompts.builtin("3").general
-    for verb in ("click", "drag", "hold", "type", "refresh"):
+    for verb in ("click", "drag", "slide", "hold", "type", "refresh"):
         assert f'"action": "{verb}"' in general
 
 
@@ -68,9 +68,9 @@ def test_a_family_prompt_asked_of_generation_3_says_why_it_has_none():
             ask()
 
 
-def test_an_animated_board_on_generation_3_is_refused_not_sent_as_keyframes():
-    with pytest.raises(ValueError, match="frame-numbered video"):
-        prompts.builtin("3").video_prompt(4)
+def test_an_animated_board_on_generation_3_is_asked_the_one_prompt_over_a_video():
+    three = prompts.builtin("3")
+    assert three.sends_video and three.video_prompt() == three.general
 
 
 # ── one model, nothing routed ────────────────────────────────────────────
@@ -150,13 +150,13 @@ def test_parsed_answers_become_the_driver_actions():
     assert out[2].target_bounding_box is None
 
 
-def test_an_animated_board_on_generation_3_is_an_unsupported_puzzle_not_a_crash(registry, tmp_path):
+def test_keyframe_stills_on_generation_3_are_an_unsupported_puzzle_not_a_crash(registry, tmp_path):
     from PIL import Image
 
     frame = tmp_path / "f1.png"
     Image.new("RGB", (40, 40)).save(frame)
     solver = CaptchaSolver(model="three", api_key="k")
-    with pytest.raises(UnsupportedCaptchaError, match="frame-numbered video"):
+    with pytest.raises(UnsupportedCaptchaError, match="answers from the clip"):
         solver.solve_keyframes([str(frame)])
 
 

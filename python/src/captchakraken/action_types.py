@@ -22,6 +22,8 @@ class Action(BaseModel):
     action: ActionKind
     await_keyframe: Optional[str] = None
     frame: Optional[int] = None
+    # Seconds into the clip, on prompt generations that watch an animation as video; `frame` on earlier ones.
+    t: Optional[float] = None
 
 
 class ClickAction(Action):

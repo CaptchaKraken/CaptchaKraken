@@ -155,7 +155,9 @@ vllm serve "$CAPTCHA_BASE_MODEL" \
   --max-lora-rank 64 --max-model-len 65536 \
   --gpu-memory-utilization 0.80 --trust-remote-code \
   --port 8000 \
-  --lora-modules "$CAPTCHA_LORA_NAME=$CAPTCHA_LORA_ADAPTER"
+  --lora-modules "$CAPTCHA_LORA_NAME=$CAPTCHA_LORA_ADAPTER" \
+  --limit-mm-per-prompt '{"image": 8, "video": 1}' \
+  --media-io-kwargs '{"video": {"num_frames": -1, "fps": 5.0}}'
 ```
 
 ## Run it with Ollama

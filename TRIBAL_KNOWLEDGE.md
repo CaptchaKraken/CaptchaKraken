@@ -175,10 +175,19 @@ declares `experts`. The driver still decides how the board is SHOWN — a grid
 that `find_grid`, `_grid_dims` and `_is_real_grid` accept is sent with its
 cells numbered, anything else as the plain picture — because the model was
 trained on exactly what those three would number. Its `ids` name cells; when
-they name none, the cells its points land in do. An animated board is refused
-on generation 3 rather than sent as keyframes: that generation reads a video
-with each frame's number drawn into it, which the client does not send yet,
-and keyframes under the general prompt would answer silently worse.
+they name none, the cells its points land in do.
+
+**An animated board on generation 3 is a video, and the answer names WHEN in
+seconds.** `clipvideo.py` sends the recorded frames as one
+`data:video/jpeg` sequence; vLLM labels each frame pair with its time
+(`<1.3 seconds>`) exactly as training did, the model copies one into `"t"`, and
+`time_to_index` maps it back to the recorded frame the wait gate matches. Two
+other designs were dropped: numbered keyframe stills (generation 2) throw away
+the motion the vision tower compares frame to frame, and frame numbers drawn
+into the picture taught the model our overlay. Keyframes still exist on
+generation 3, but only for the driver's wait gate; a generation-3 model is never
+shown them. `VIDEO_GENERATIONS` is per generation and a prompts file cannot
+change it: a template can be overridden, the way it is asked cannot.
 
 **`refresh` is an answer, not a failure.** Some boards a person would not
 solve, and solving them instantly is itself a tell, so generation 3 may ask for

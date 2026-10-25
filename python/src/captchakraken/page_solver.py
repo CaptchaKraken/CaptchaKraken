@@ -433,7 +433,7 @@ class PageSolver:
         self._last_submit_frame_hash: Optional[str] = None
         self._deadline_ms: Optional[float] = None
         self._budget: Optional[PhaseBudget] = None
-        self._animated_plan: Optional[Tuple[List[str], str, Any, Any]] = None
+        self._animated_plan: Optional[Tuple[AnimatedRecording, str, Any, Any]] = None
         self._film_frames: List[Any] = []
         self._film_ms: float = 0.0
         # The digests of every screen the film holds: what a later burst is checked against to answer
@@ -627,8 +627,9 @@ class PageSolver:
         return self._ask(lambda: self._solver.solve(
             image_path, puzzle_source=puzzle_source, retry_mode=retry_mode, text_mode=text_mode))
 
-    def _get_keyframe_solution(self, keyframe_paths: Sequence[str]):
-        return self._ask(lambda: self._solver.solve_keyframes(keyframe_paths))
+    def _get_keyframe_solution(self, recording: AnimatedRecording):
+        """The animated ask: keyframes or video, whichever the model's prompt generation was trained on."""
+        return self._ask(lambda: self._solver.solve_animated(recording))
 
     # ── gestures ─────────────────────────────────────────────────────────
 
@@ -1523,20 +1524,17 @@ class PageSolver:
              f"{'ANIMATED' if cycle_closed or animating else 'still'} ({len(order)} screens; {why})")
         return frames, order, cycle_closed or animating, elapsed_ms, cycle_closed
 
-    def _slice(self, frames: List[Any], burst_ms: float) -> Tuple[List[str], str]:
-        """Cut a burst with the training-side slicer; the model answers with a frame number into it."""
-        from .keyframes import extract_keyframes, write_keyframes
-
-        kfset = extract_keyframes(frames, fps=measured_fps(len(frames), burst_ms, self.config.video_burst_fps))
-        self._keyframe_mode = kfset.mode
-        self._keyframe_steady_screens = kfset.steady_screens
+    def _slice(self, frames: List[Any], burst_ms: float) -> Tuple[AnimatedRecording, str]:
+        """Cut a burst with the training-side slicer; its keyframes steer the wait gate whatever the model sees."""
         temp_dir = tempfile.mkdtemp(prefix="ck_keyframes_")
-        paths = [str(p) for p in write_keyframes(kfset, temp_dir, stem="challenge")]
-        _log(f"[animated] sliced to {len(paths)} keyframe(s) (mode={kfset.mode})")
-        return paths, temp_dir
+        recording = cut_recording(frames, measured_fps(len(frames), burst_ms, self.config.video_burst_fps), temp_dir)
+        self._keyframe_mode = recording.keyframes.mode
+        self._keyframe_steady_screens = recording.keyframes.steady_screens
+        _log(f"[animated] sliced to {len(recording.keyframe_paths)} keyframe(s) (mode={recording.keyframes.mode})")
+        return recording, temp_dir
 
-    def _record_keyframes(self, element: Any) -> Tuple[List[str], str, bool]:
-        """Record the widget and return `(keyframe_paths, temp_dir, moved)`; the caller removes the dir.
+    def _record_keyframes(self, element: Any) -> Tuple[AnimatedRecording, str, bool]:
+        """Record the widget and return `(recording, temp_dir, moved)`; the caller removes the dir.
 
         Frames stay in memory: the intermediate mp4 this used to write was mp4v, which the serving side may not decode.
 
@@ -1603,8 +1601,8 @@ class PageSolver:
         if len(self._film_frames) > len(frames):
             _log(f"[animated] slicing {len(self._film_frames)} frames filmed over "
                  f"{self._film_ms / 1000:.1f}s — every round of this board, not just this one")
-        paths, temp_dir = self._slice(self._film_frames or frames, self._film_ms or burst_ms)
-        return paths, temp_dir, moved
+        recording, temp_dir = self._slice(self._film_frames or frames, self._film_ms or burst_ms)
+        return recording, temp_dir, moved
 
     def _speculate(self, element: Any, shot: str, puzzle_source: Vendor, retry_mode: Optional[RetryMode],
                    text_mode: bool) -> Tuple[List[CaptchaAction], List[Dict[str, Any]], Optional[str]]:
@@ -1633,10 +1631,10 @@ class PageSolver:
             self._known_animated = True
             fut.result()
             self._grant_video_budget()
-            paths, keyframe_dir = self._slice(frames, burst_ms)
+            recording, keyframe_dir = self._slice(frames, burst_ms)
             with self._phase(Phase.INFERENCE):
-                actions, usage = self._get_keyframe_solution(paths)
-            self._animated_plan = (paths, keyframe_dir, actions, usage)
+                actions, usage = self._get_keyframe_solution(recording)
+            self._animated_plan = (recording, keyframe_dir, actions, usage)
             return actions, usage, keyframe_dir
         finally:
             pool.shutdown(wait=True)
@@ -1979,14 +1977,14 @@ class PageSolver:
         try:
             if is_animated:
                 if self._animated_plan is not None:
-                    keyframes, keyframe_dir, actions, all_usage = self._animated_plan
+                    recording, keyframe_dir, actions, all_usage = self._animated_plan
                     reused = actions is not None
                     if not reused:
                         # Drop the ANSWER, keep the FRAMES — and the frames grow. Filming another chunk and
                         # re-slicing the accumulation puts a better question up; re-asking the same frames
                         # puts the same question up and gets the same answer back.
                         with self._phase(Phase.BURST):
-                            keyframes, new_dir, moved = self._record_keyframes(element)
+                            recording, new_dir, moved = self._record_keyframes(element)
                         shutil.rmtree(keyframe_dir, ignore_errors=True)
                         keyframe_dir = new_dir
                         self._known_animated = self._known_animated or moved
@@ -1995,22 +1993,22 @@ class PageSolver:
                 else:
                     reused = False
                     with self._phase(Phase.BURST):
-                        keyframes, keyframe_dir, moved = self._record_keyframes(element)
+                        recording, keyframe_dir, moved = self._record_keyframes(element)
                     self._known_animated = self._known_animated or moved
                 # The clip answers the question the probe asked: a board that never moved is a still, and the
                 # video expert can only answer a still with a frame number the widget will not take.
-                if len(keyframes) < 2 or not self._known_animated:
+                if len(recording.keyframe_paths) < 2 or not self._known_animated:
                     _log("[animated] the recording shows a still board; solving it as a still")
                     is_animated = False
-                    shutil.copyfile(keyframes[-1], shot)
+                    shutil.copyfile(recording.keyframe_paths[-1], shot)
                     have_shot = True
                     self._stop_animated_film()
                     shutil.rmtree(keyframe_dir, ignore_errors=True)
                     keyframe_dir = None
                 elif not reused:
                     with self._phase(Phase.INFERENCE):
-                        actions, all_usage = self._get_keyframe_solution(keyframes)
-                    self._animated_plan = (keyframes, keyframe_dir, actions, all_usage)
+                        actions, all_usage = self._get_keyframe_solution(recording)
+                    self._animated_plan = (recording, keyframe_dir, actions, all_usage)
 
             if not is_animated:
                 if not have_shot:

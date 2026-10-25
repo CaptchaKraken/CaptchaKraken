@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import signal
@@ -10,6 +11,7 @@ from urllib.parse import urlparse
 import requests
 
 from . import config
+from .clipvideo import media_io_kwargs
 
 STATE_DIR = config.state_dir()
 LOCK_FILE = STATE_DIR / "vllm.lock"
@@ -78,6 +80,10 @@ def build_serve_command() -> "list[str]":
         "--trust-remote-code",
         "--port", str(config.port()),
         "--lora-modules", f"{config.lora_name()}={config.lora_adapter()}",
+        # A video-generation model watches an animation as one JPEG frame sequence; without these vLLM refuses the
+        # video or resamples it to its own frame count, and the time the model answers with names the wrong moment.
+        "--limit-mm-per-prompt", json.dumps({"image": 8, "video": 1}),
+        "--media-io-kwargs", json.dumps(media_io_kwargs()),
         *config.extra_serve_args(),
     ]
 

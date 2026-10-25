@@ -15,6 +15,10 @@ _DISABLE_FETCH_ENV = "CAPTCHA_PROMPTS_NO_FETCH"
 
 LATEST_PROMPT_VERSION = "2"
 
+# The generations that show the model an animated captcha as one video (`clipvideo.py`) and read the moment it
+# acts on as `"t"`, in seconds. Every earlier generation sends numbered keyframe stills and reads `"frame"`.
+VIDEO_GENERATIONS = ("3",)
+
 
 # Pure literals only, no f-strings, joins or constant references: the training repo's release parity gate reads
 # this dict by AST without importing the package, and the gate going quiet is how prompt drift shipped once.
@@ -139,8 +143,10 @@ BUILTIN_PROMPTS = {
         "general": (
             "Your task is to solve the captcha. Read its instruction, usually at the top, and decide "
             "what a person would do to solve it.\n\n"
-            "You are given either one screenshot or a video. In a video every frame shows its own "
-            "number in the top-left corner; that number is ours, not part of the puzzle.\n\n"
+            "You are given either one screenshot or a video. Each moment of a video is labelled with "
+            "its time, like <1.3 seconds>. In a video the answer may depend on how things move or "
+            "change: what grows or shrinks, which way something turns, what appears, disappears or "
+            "moves, and in what order.\n\n"
             "Some screenshots have numbered boxes drawn over the things you can interact with — "
             "tiles, buttons, pieces, handles. The boxes and numbers are ours, not part of the "
             "puzzle. When something you act on has a box, also give its number as an id. Not "
@@ -156,9 +162,14 @@ BUILTIN_PROMPTS = {
             "picture fading out or in) does not. If nothing matches, give empty points.\n\n"
             "DRAG pieces, one drag per piece:\n"
             "  {\"action\": \"drag\", \"drags\": [{\"from\": [x, y], \"to\": [x, y], \"from_id\": n, "
-            "\"to_id\": n}, ...]}\n"
-            "  For a puzzle-piece slider, where a jigsaw piece slides into a matching slot cut into "
-            "the picture, leave \"from\" out and give the centre of the slot as \"to\".\n\n"
+            "\"to_id\": n}, ...]}\n\n"
+            "SLIDE a slider: press its handle and move it until the part of the picture it moves "
+            "lines up with where it belongs — a jigsaw piece over its slot, a turned picture upright, "
+            "a shifted strip continuing the rest:\n"
+            "  {\"action\": \"slide\", \"handle\": [x, y], \"from\": [x, y], \"to\": [x, y]}\n"
+            "  \"handle\" is what you press, \"from\" a point on the part that moves, \"to\" where that "
+            "point belongs. When the piece itself is what you press, \"handle\" and \"from\" are the "
+            "same point.\n\n"
             "PRESS AND HOLD a button until the page confirms:\n"
             "  {\"action\": \"hold\", \"points\": [[x, y]], \"ids\": [n]}\n\n"
             "TYPE the characters shown, exactly as printed — keep their case, add no spaces; "
@@ -168,9 +179,9 @@ BUILTIN_PROMPTS = {
             "person more than a minute. Click the control that loads a new puzzle, usually a "
             "circular arrow (empty points if there is none):\n"
             "  {\"action\": \"refresh\", \"points\": [[x, y]]}\n\n"
-            "For a video, put \"frame\" first: the number in the corner of the frame where your "
-            "answer is clearest, so the solver can wait for that moment. Leave it out if the answer "
-            "is the same throughout.\n\n"
+            "For a video, put \"t\" first: the time of the moment where your answer is clearest, in "
+            "seconds exactly as it is labelled, so the solver can wait for that moment. Leave it out "
+            "if the answer is the same throughout.\n\n"
             "Leave out any key you have no value for. Respond ONLY with the JSON."
         ),
     },
@@ -263,6 +274,7 @@ class PromptSet:
     grid_by_type: Dict[str, str]
     source: str
     general: Optional[str] = None
+    sends_video: bool = False
 
     def _family(self, template: Optional[str], family: str) -> str:
         if template is None:
@@ -283,16 +295,17 @@ class PromptSet:
         return self._family(self.grid_template, "grid").format(rows=rows, cols=cols,
                                                                total=rows * cols, grid_hint=grid_hint)
 
-    def video_prompt(self, n_keyframes: int) -> str:
-        n = int(n_keyframes)
+    def video_prompt(self, n_keyframes: Optional[int] = None) -> str:
+        """The animated prompt. A video generation asks its one prompt over the clip; a keyframe generation's
+        text states how many stills it sent."""
+        if self.sends_video:
+            return self.general if self.general is not None else self._family(self.video_template, "animated-puzzle")
+        if self.general is not None:
+            # Never trained on keyframes: sending them under the general prompt would answer silently worse.
+            raise ValueError(f"prompt generation {self.version} was never trained on keyframe stills")
+        n = int(n_keyframes or 0)
         if n < 1:
             raise ValueError(f"a keyframe request needs at least one frame, got {n_keyframes}")
-        if self.general is not None:
-            # Generation 3 reads an animated board as a video with each frame's number drawn into it, and
-            # was never trained on keyframes; sending them under the general prompt would answer silently worse.
-            raise ValueError(
-                f"prompt generation {self.version} reads an animated captcha as a frame-numbered video, "
-                "which this client does not send. Use a model on generation 2 for animated captchas.")
         listing = ", ".join(f"frame {i}" for i in range(1, n + 1))
         return self._family(self.video_template, "animated-puzzle").format(n=n, listing=listing)
 
@@ -313,6 +326,7 @@ def builtin(version: str) -> Optional[PromptSet]:
         grid_by_type={},
         source=f"built-in v{version}",
         general=spec.get("general"),
+        sends_video=str(version) in VIDEO_GENERATIONS,
     )
 
 
@@ -331,6 +345,8 @@ def _from_doc(doc: Dict[str, Any], source: str) -> PromptSet:
         grid_by_type=grid_by_type,
         source=source,
         general=templates.get("general") or base.general,
+        # From the generation, never from the document: a template can be overridden, the way it is asked cannot.
+        sends_video=base.sends_video,
     )
 
 

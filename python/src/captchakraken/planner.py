@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from PIL import Image
 
-from . import config, errors, prompts
+from . import clipvideo, config, errors, prompts
+from .clipvideo import ClipVideo
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode
 from .server_manager import ensure_server
 
@@ -318,7 +319,11 @@ class ActionPlanner:
             mime, b64 = _encode_image(p, self.pixel_budget)
             parts.append({"type": "image_url",
                           "image_url": {"url": f"data:{mime};base64,{b64}"}})
+        return self._chat(prompt, parts, max_tokens=max_tokens, family=family)
 
+    def _chat(self, prompt: str, parts: List[Dict[str, Any]], max_tokens: int,
+              family: Optional[PromptFamily]) -> str:
+        """POST one chat completion: the media parts, then the prompt, in one user message."""
         messages = [
             {
                 "role": "system",
@@ -359,7 +364,7 @@ class ActionPlanner:
 
         url = f"{self.base_url}/chat/completions"
         self._log(f"POST {url} model={model} max_tokens={max_tokens} "
-                  f"images={len(parts)}")
+                  f"parts={[p['type'] for p in parts]}")
 
         resp = self._http.post(url, headers=headers, json=payload,
                                timeout=self.request_timeout_s or DEFAULT_REQUEST_TIMEOUT_S)
@@ -518,6 +523,9 @@ class ActionPlanner:
         return actions
 
     def get_keyframe_actions(self, keyframe_paths: List[str]) -> List[Dict[str, Any]]:
+        if self.prompts.sends_video:
+            raise ValueError(f"prompt generation {self.prompts.version} answers from the clip, not from keyframes; "
+                             "use get_video_actions")
         if not keyframe_paths:
             return []
         prompt = self.prompts.video_prompt(len(keyframe_paths))
@@ -530,6 +538,53 @@ class ActionPlanner:
             a["frame"] = frame
         self._log(f"keyframe actions (frame={frame}) -> {actions}")
         return actions
+
+    def video_max_pixels(self) -> int:
+        """The frame budget a clip is cut to: the model's pixel ceiling, as its training frames were cut."""
+        if not self.pixel_budget.maximum:
+            raise ValueError(
+                f"model {self.model!r} declares no pixel ceiling (pixel_budget in models.json, or "
+                f"{prompts.MAX_PIXELS_ENV}), and a video is cut to exactly that size. Register the model's band.")
+        return int(self.pixel_budget.maximum)
+
+    def get_video_actions(self, clip: ClipVideo) -> List[Dict[str, Any]]:
+        """One request carrying the whole clip as video; each action names the moment `t` it acts on, or None."""
+        if not clip.frames:
+            return []
+        if not self.prompts.sends_video:
+            raise ValueError(f"prompt generation {self.prompts.version} answers from keyframes, not from a clip; "
+                             "use get_keyframe_actions")
+        parts = [{"type": "video_url", "video_url": {"url": clipvideo.data_url(clip)}}]
+        general = self.prompts.general is not None
+        raw = self._chat(self.prompts.video_prompt(), parts, max_tokens=512,
+                         family=None if general else PromptFamily.VIDEO)
+        data = self._parse_json(raw)
+        actions = self._normalize_general(data) if general else self._normalize_pixel(data)
+        t = self._normalize_time(data, clip)
+        for a in actions:
+            a["t"] = t
+        self._log(f"video actions (t={t}) -> {actions}")
+        return actions
+
+    @staticmethod
+    def _normalize_time(data: Any, clip: ClipVideo) -> Optional[float]:
+        """A time outside the clip is None, not clamped: clamping would invent an intent."""
+        if not isinstance(data, dict):
+            return None
+        raw = data.get("t")
+        if raw is None and isinstance(data.get("action"), dict):
+            raw = data["action"].get("t")
+        if isinstance(raw, bool):
+            return None
+        try:
+            t = float(raw)
+        except (TypeError, ValueError):
+            return None
+        # Half a pair's width either side of the first and last label: anything further names no moment shown.
+        slack = 1.0 / clip.fps
+        if not clip.timestamps or not clip.timestamps[0] - slack <= t <= clip.timestamps[-1] + slack:
+            return None
+        return t
 
     @staticmethod
     def _normalize_frame(data: Any, n_keyframes: int) -> Optional[int]:

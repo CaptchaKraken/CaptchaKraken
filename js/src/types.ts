@@ -136,10 +136,15 @@ export interface BoundingBox {
   3: number;
 }
 
-/** Present only on actions from an animated challenge: the keyframe the answer was read off. */
+/**
+ * Present only on actions from an animated challenge: the moment the answer was read off, and the picture the
+ * driver waits for before acting. `frame` (a keyframe number) on prompt generation 2, `t` (seconds into the
+ * clip) on generations that watch the animation as video.
+ */
 export interface AnimatedActionFields {
   await_keyframe?: string | null;
   frame?: number | null;
+  t?: number | null;
 }
 
 export interface ClickAction extends AnimatedActionFields {
