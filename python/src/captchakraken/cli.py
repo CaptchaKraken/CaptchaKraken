@@ -85,6 +85,23 @@ def track_piece(before: str, after: str, exclude=None, travel: float = 0.0) -> d
     return {"bbox": bbox, "piece": piece, "moved": bbox is not None}
 
 
+def slide_step(req: dict) -> dict:
+    """One look of the slide loop (`tool_calls/slide_tracker.py`); a lost or unseen object is `{"error"}`, never a
+    position, so the driver releases rather than steering by a guess."""
+    from .tool_calls.slide_tracker import TrackingError, slide_step as step
+
+    def pt(v):
+        return None if v is None else (float(v[0]), float(v[1]))
+
+    try:
+        return step(req["first"], req["probe"], req["current"], probe_s=req["probe_s"], s=req["s"],
+                    goal=pt(req["goal"]), seed=pt(req.get("seed")), handle=pt(req.get("handle")),
+                    bounds=tuple(req["bounds"]) if req.get("bounds") else None,
+                    history=req.get("history") or (), tol=float(req.get("tol") or 2.0))
+    except TrackingError as e:
+        return {"error": str(e)}
+
+
 def _find_grid(args):
     from .tool_calls.find_grid import find_grid
 
@@ -170,6 +187,12 @@ def _track_piece(args):
                        float(args[3]) if len(args) > 3 else 0.0)
 
 
+def _slide_step(args):
+    _need(args, 1, "slide-step request.json  (or the JSON itself)")
+    raw = args[0]
+    return slide_step(json.loads(open(raw).read() if os.path.exists(raw) else raw))
+
+
 def _report_outcome(args):
     """Tell the hosted API whether the widget accepted. Always exits 0: this runs after the solve is over."""
     if len(args) < 2 or args[1] not in list(Outcome):
@@ -214,6 +237,8 @@ def _serve(args):
             return find_checkbox(req["image"])
         if cmd == "track-piece":
             return track_piece(req["before"], req["after"], req.get("exclude"), req.get("travel") or 0.0)
+        if cmd == "slide-step":
+            return slide_step(req)
         raise ValueError(f"unknown cmd: {cmd!r}")
 
     sys.stdout.write(json.dumps({"ready": True}) + "\n")
@@ -333,6 +358,7 @@ COMMANDS: Dict[str, Callable[[List[str]], Any]] = {
     "match-region": _match_region,
     "board-painted": _board_painted,
     "track-piece": _track_piece,
+    "slide-step": _slide_step,
     "report-outcome": _report_outcome,
     "serve": _serve,
     "solve-animated": _solve_animated,

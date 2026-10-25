@@ -294,6 +294,7 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/tool_calls/find_checkbox.py` | Finds the "I'm not a robot" checkbox by contour, before any model is involved. |
 | `python/src/captchakraken/tool_calls/board_painted.py` | Answers whether the widget has PAINTED its puzzle or is showing the blank panel it rebuilds behind, so a hole is never sent to the model. |
 | `python/src/captchakraken/tool_calls/track_piece.py` | Finds a slider's puzzle piece by what moved, telling it apart from the ground it vacated, so the driver can steer by where the piece IS rather than by where the arithmetic says it should be. |
+| `python/src/captchakraken/tool_calls/slide_tracker.py` | The selector-free slide loop: segments what the handle moves (flow, then the pixels its own motion carries), tells a slide from a turn, tracks it to a tenth of a pixel, and says where to put the handle next so the model's point lands on its goal. |
 
 ### `python/tests/`
 
@@ -314,6 +315,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_geetest_accept_is_a_signal.py` | GeeTest's accept banner is a solve; its refuse banner, and its closed popup wrapper, are not. |
 | `python/tests/test_a_missing_prompt_is_not_a_reason_to_wait.py` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
 | `python/tests/test_slide_reads_the_piece_off_the_page.py` | The slider prefers the piece element's own box over the pixel diff, and the diff's measured undershoot is pinned as the fallback's known cost. |
+| `python/tests/test_slide_tracker.py` | The slide tracker on drawn boards — a jigsaw on a track at three handle ratios, a disc turning in place, a piece the pointer carries, each with a moving handle and an animated badge — down to the mask, the sub-pixel position, the loop's convergence, HiDPI, and the cases it must refuse rather than guess. |
 | `python/tests/test_public_contract.py` | The published Python surface, pinned name by name, plus the rule that `__version__`, `pyproject.toml` and `js/package.json` all say one number. Real callers depend on these names; removing one is a major version. |
 | `python/tests/test_version_matches_manifest.py` | `captchakraken.__version__` must equal the version pip installs. It drifted once, and every bug report quoted a release that was not running. |
 | `python/tests/test_api_error_is_exported.py` | The two ports expose the same error surface: what TypeScript exports, Python must too. |
