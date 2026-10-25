@@ -7,6 +7,18 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Added
 
+- **Prompt generation 3: one prompt for every puzzle.** `BUILTIN_PROMPTS["3"]`
+  is a single `general` prompt; the puzzle's type is never named and a
+  generation-3 model's `experts` are never routed to. A grid the driver finds is
+  sent with its cells numbered and read by the ids the model names. Generations
+  1 and 2 are unchanged and `LATEST_PROMPT_VERSION` stays `"2"`.
+- **A `hold` action.** Both drivers press and hold until the widget reports
+  success, closes, or finishes drawing its progress (12s cap), and always
+  release. Press-and-hold widgets are detected by their host-page container.
+- **A `refresh` action.** A generation-3 model can ask for a new puzzle instead
+  of solving one a person would not; the driver presses the vendor's reload
+  control (new `refresh` selector table) or the model's point on it, and does
+  nothing more on the replaced board.
 - **Prompt generation 3 watches an animated captcha as a video.** A model on
   generation 3 is sent the recorded frames as one video and answers the moment
   it acts on as `"t"`, in seconds; `CaptchaSolver.solve_animated` picks the
