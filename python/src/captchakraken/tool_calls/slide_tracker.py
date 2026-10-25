@@ -88,6 +88,7 @@ class Segment:
     kind: str                   # SLIDE or TURN: how the handle drives it
     pivot: Point                # the centre a TURN goes round; the centroid for a SLIDE
     probe: Params               # first -> probe, refined
+    proven: np.ndarray          # uint8 0/1, the part of `mask` the probe proved is the object's: what is matched
 
 
 @dataclass
@@ -191,7 +192,14 @@ def _carried(a: np.ndarray, b: np.ndarray, part: np.ndarray, params: Params, c0:
     keep = cv2.morphologyEx(np.isin(labels, ours).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
     # The opening also shaves the object's rim, its sharpest edge; take back the rim pixels the motion explains.
     keep = keep | (cv2.dilate(keep, np.ones((3, 3), np.uint8)).astype(bool) & explained).astype(np.uint8)
-    keep = _fill(keep)
+    # Ground the shot shows unchanged is explained by standing still as well as by the motion: it is the object's
+    # only where it lies within reach of what changed, or inside its outline.
+    still = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
+                   - cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH))
+    core = cv2.morphologyEx((keep.astype(bool) & (still >= _CARRY_GREY)).astype(np.uint8), cv2.MORPH_CLOSE,
+                            np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
+    reach = cv2.distanceTransform((core == 0).astype(np.uint8), cv2.DIST_L2, 3) <= _CORE_REACH
+    keep = _fill((keep.astype(bool) & reach | core.astype(bool)).astype(np.uint8))
     if keep.sum() < min_area:
         raise TrackingError("the moving part has no texture or edge that its own motion explains")
     return keep
@@ -242,8 +250,8 @@ def _split(a: np.ndarray, b: np.ndarray, cut: np.ndarray, min_area: float) -> Li
                             np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
     n, labels, stats, _ = cv2.connectedComponentsWithStats(_fill(core), connectivity=8)
     cores = [labels == i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
-    if len(cores) <= 1:
-        return [cut] if cores else []
+    if not cores:
+        return []
     dist = np.stack([cv2.distanceTransform((~c).astype(np.uint8), cv2.DIST_L2, 3) for c in cores])
     owner = dist.argmin(axis=0)
     near = dist.min(axis=0) <= _CORE_REACH
@@ -390,9 +398,28 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
 
     grabbed = handle is not None and bool(cv2.dilate(mask, np.ones((5, 5), np.uint8))[
         min(max(int(round(handle[1])), 0), h - 1), min(max(int(round(handle[0])), 0), w - 1)])
-    seg = Segment(mask=mask, centroid=c0, grabbed=grabbed, kind=kind, pivot=pivot, probe=exact)
-    seg.probe, _ = _locate(a, b, mask, c0, exact, 3.0, _angles(exact[0], 2.0) if seg.kind == TURN else None)
-    return seg
+    probe, _ = _locate(a, b, mask, c0, exact, 3.0, _angles(exact[0], 2.0) if kind == TURN else None)
+    return Segment(mask=mask, centroid=c0, grabbed=grabbed, kind=kind, pivot=pivot, probe=probe,
+                   proven=_proven(a, b, mask, probe, c0, min_area))
+
+
+def _proven(a: np.ndarray, b: np.ndarray, mask: np.ndarray, params: Params, c0: Point, min_area: float) -> np.ndarray:
+    """The pixels of `mask` the probe can tell from the ground: those unlike the pixel one motion along.
+
+    Where the picture is the same one motion along, the object moving and the ground staying put draw the same probe,
+    so the mask's flat rim and any flat ground it swallowed are unproven. They are the object's extent (the fill
+    needs them) but not its appearance: matched against a later shot, after the object has left that ground, a
+    swallowed patch of dark cow is a template the object no longer carries.
+    """
+    h, w = a.shape
+    smooth = cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH)
+    along = cv2.warpAffine(smooth, _rigid(params, c0), (w, h), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+                           borderMode=cv2.BORDER_REPLICATE)
+    changed = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH) - smooth) >= _CARRY_GREY
+    proven = (mask.astype(bool) & changed & (np.abs(along - smooth) >= _CARRY_GREY)).astype(np.uint8)
+    if proven.sum() < min_area:
+        raise TrackingError("the probe moved the object too little to show which pixels are its own")
+    return proven
 
 
 # ── where it is now ──────────────────────────────────────────────────────────
@@ -561,7 +588,7 @@ def measure(first: Image, current: Image, seg: Segment, guess: Optional[Params] 
     g = _constrain(seg, guess or (0.0, 0.0, 0.0))
     rp = reach_px if reach_px is not None else max(15.0, 0.3 * math.hypot(g[1], g[2]))
     rd = reach_deg if reach_deg is not None else max(4.0, 0.3 * abs(g[0]))
-    params, corr = _locate(a, b, seg.mask, seg.centroid, g, rp, _angles(g[0], rd) if _turns(seg) else None,
+    params, corr = _locate(a, b, seg.proven, seg.centroid, g, rp, _angles(g[0], rd) if _turns(seg) else None,
                            seg.pivot if _turns(seg) else None)
     if corr < _MIN_CORRELATION:
         raise TrackingError(f"lost the object: its best match correlates {corr:.2f}")

@@ -69,9 +69,11 @@ class _Board:
 
 class JigsawBoard(_Board):
     """`picture_ends` (shot px): below it the ground is flat white down to the track, the way a widget frames its
-    picture, and the piece rests `y0` from the top, so it can sit just above that flat strip."""
+    picture, and the piece rests `y0` from the top, so it can sit just above that flat strip. `flat_rest`: the
+    piece rests on flat sky with a flat dark block just ahead of it, as on a Yidun photo, while the slot keeps its
+    texture."""
 
-    def __init__(self, ratio=1.0, scale=1.0, badge=True, seed=3, y0=70, picture_ends=None):
+    def __init__(self, ratio=1.0, scale=1.0, badge=True, seed=3, y0=70, picture_ends=None, flat_rest=False):
         super().__init__(scale, badge)
         k = scale
         self.ratio = ratio
@@ -81,6 +83,11 @@ class JigsawBoard(_Board):
         self.size = int(44 * k)
         self.mask, self.knob = _jigsaw_mask(self.size, k)
         self.x0, self.y0 = 12 * k, y0 * k                   # the piece's top-left (mask box) at rest
+        if flat_rest:
+            mh, mw = self.mask.shape
+            top, right = int(self.y0 - 12 * k), int(self.x0 + mw)
+            self.bg[top:int(self.y0 + mh + 12 * k), :right + int(30 * k)] = 205
+            self.bg[top:int(self.y0 + mh + 12 * k), right - int(4 * k):right + int(30 * k)] = 35
         self.slot = (200 * k, 70 * k)
         sx, sy = int(self.slot[0]), int(self.slot[1])
         mh, mw = self.mask.shape

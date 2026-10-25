@@ -91,6 +91,28 @@ def test_the_loop_seats_a_piece_framed_above_flat_ground(ratio):
     assert abs(b.centre(s)[0] - b.goal[0]) <= 2.0 and reply["done"]
 
 
+@pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
+def test_flat_ground_the_probe_cannot_tell_from_the_piece_is_not_matched_as_the_piece(ratio):
+    """At rest the piece sits on flat sky with flat dark ground ahead of it. Moved 8 px, the piece and that ground
+    draw the same probe whether the ground moved or not, so the mask may hold some; matched against a shot of the
+    piece over the slot's texture, that ground is a template the piece no longer carries, and on Yidun it lost the
+    piece (correlation 0.51 at its true place)."""
+    b = JigsawBoard(ratio=ratio, flat_rest=True)
+    seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
+    s = (b.slot[0] - b.x0) / ratio - 6
+    params, corr = st.measure(b.render(0), b.render(s), seg, guess=(0.0, ratio * s, 0.0))
+    assert params[1] == pytest.approx(ratio * s, abs=0.5) and abs(params[2]) < 0.5
+    # Not 1: the soft shadow travels with the piece but darkens whatever ground it is over.
+    assert corr > 0.75
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.27])
+def test_the_loop_seats_a_piece_resting_on_flat_ground(ratio):
+    b = JigsawBoard(ratio=ratio, flat_rest=True)
+    s, _, reply = _drive(b, b.centre(), (b.goal[0], b.centre()[1]))
+    assert abs(b.centre(s)[0] - b.goal[0]) <= 2.0 and reply["done"]
+
+
 # ── how it moved ─────────────────────────────────────────────────────────────
 
 
