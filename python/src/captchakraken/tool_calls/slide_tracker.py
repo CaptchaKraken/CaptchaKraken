@@ -5,9 +5,10 @@ module turns them into a closed loop without knowing anything about the vendor: 
 ratio, no assumption about whether the handle slides the piece or turns it.
 
 1. `segment` finds WHAT moves: optical flow from the shot at the press to the shot after a small probe, kept only
-   where it agrees with the flow back, split into connected parts. The part under the model's point is the object;
-   the handle and the filled track are parts of their own and fall away without a mask. The part's edge is then
-   cut to the pixels the object's own motion carries exactly onto the probe.
+   where it agrees with the flow back, split into connected parts. Flow spreads across flat ground, so one part can
+   hold the piece AND the knob below it: each part is cut, under each distinct motion in it, to the pixels that
+   motion carries exactly onto the probe, and split into bodies cored on pixels that actually changed. The body
+   under the model's point is the object; without one, the largest body that is not the handle.
 2. The probe also says HOW the handle drives it: a SLIDE (a shift) or a TURN (about a pivot it fits). A handle does
    one or the other, and fitting both from a short probe lets a half-degree of noise grow into a ten-degree turn by
    the far end of the track.
@@ -64,6 +65,15 @@ _SEED_REACH_MIN_PX = 8.0
 _MIN_CORRELATION = 0.6
 # The angle grid a turn is searched on, in degrees; the score's peak is interpolated between its points.
 _TURN_STEP = 1.0
+# The distinct shifts tried within one moving part: histogram bin (px), the share of the strongest peak another must
+# reach to count, and how many are tried.
+_MODE_BIN = 0.5
+_MODE_SHARE = 0.15
+_MODE_MAX = 3
+# A body's core is the pixels that changed AND its motion explains, closed across gaps this wide (px); it keeps the
+# explained ground within this reach of the core (px), the antialiased rim and the featureless ground hugging it.
+_CORE_CLOSE = 5
+_CORE_REACH = 2.0
 
 
 class TrackingError(ValueError):
@@ -190,11 +200,119 @@ def _carried(a: np.ndarray, b: np.ndarray, part: np.ndarray, params: Params, c0:
 # ── what moves ───────────────────────────────────────────────────────────────
 
 
+def _near_handle(handle: Optional[Point], h: int, w: int) -> Optional[np.ndarray]:
+    """The few pixels around the press point, or None without one."""
+    if handle is None:
+        return None
+    out = np.zeros((h, w), bool)
+    x, y = min(max(int(round(handle[0])), 0), w - 1), min(max(int(round(handle[1])), 0), h - 1)
+    out[max(y - 2, 0):y + 3, max(x - 2, 0):x + 3] = True
+    return out
+
+
+def _flow_modes(flow: np.ndarray, weight: np.ndarray) -> List[Tuple[float, float]]:
+    """The distinct shifts in a part's flow, strongest first, counted where the picture has an edge to show them.
+
+    Flat ground carries no evidence of motion, only flow smoothed across it, so it is weighted by its gradient: zero.
+    A piece and the knob under it move by different amounts unless the handle drives the piece 1:1, and each shows
+    as its own peak.
+    """
+    lo = np.floor(flow.min(axis=0)) - _MODE_BIN
+    hi = np.ceil(flow.max(axis=0)) + _MODE_BIN
+    bins = [max(1, int((hi[i] - lo[i]) / _MODE_BIN)) for i in (0, 1)]
+    hist, ex, ey = np.histogram2d(flow[:, 0], flow[:, 1], bins=bins, range=[[lo[0], hi[0]], [lo[1], hi[1]]],
+                                  weights=weight)
+    hist = cv2.GaussianBlur(hist.astype(np.float32), (3, 3), 0)
+    peaks = (hist == cv2.dilate(hist, np.ones((5, 5), np.uint8))) & (hist >= _MODE_SHARE * hist.max())
+    ix, iy = np.nonzero(peaks)
+    order = np.argsort(-hist[ix, iy])[:_MODE_MAX]
+    return [(float((ex[i] + ex[i + 1]) / 2), float((ey[j] + ey[j + 1]) / 2)) for i, j in zip(ix[order], iy[order])]
+
+
+def _split(a: np.ndarray, b: np.ndarray, cut: np.ndarray, min_area: float) -> List[np.ndarray]:
+    """The separate bodies in a cut, which flat ground may join.
+
+    Featureless ground is explained by ANY motion, the object's included, so it passes the pixel test and can bridge
+    a piece to the knob under it. Only pixels that changed between the shots are evidence of a body: each body is
+    cored on those, and keeps the explained ground within reach of its own core and nearer to it than to any other.
+    """
+    changed = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
+                     - cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH)) >= _CARRY_GREY
+    core = cv2.morphologyEx((cut.astype(bool) & changed).astype(np.uint8), cv2.MORPH_CLOSE,
+                            np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(_fill(core), connectivity=8)
+    cores = [labels == i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
+    if len(cores) <= 1:
+        return [cut] if cores else []
+    dist = np.stack([cv2.distanceTransform((~c).astype(np.uint8), cv2.DIST_L2, 3) for c in cores])
+    owner = dist.argmin(axis=0)
+    near = dist.min(axis=0) <= _CORE_REACH
+    out = []
+    for i in range(len(cores)):
+        body = _fill(((cut.astype(bool) & near & (owner == i)) | cores[i]).astype(np.uint8))
+        if body.sum() >= min_area:
+            out.append(body)
+    return out
+
+
+def _bodies(a: np.ndarray, b: np.ndarray, fwd: np.ndarray, moving: np.ndarray, part: np.ndarray, xs: np.ndarray,
+            ys: np.ndarray, min_area: float) -> List[Tuple[np.ndarray, Params, str, Point]]:
+    """Every rigid body in one moving part: `(mask, params about its centroid, SLIDE or TURN, centroid)`.
+
+    A part is what the FLOW joined, and flow spreads across flat ground: a piece resting just above its track comes
+    out joined to the knob below it, though the pixels between them never changed. So each distinct motion in the
+    part is tried, the part is cut to the pixels that motion carries exactly onto the probe, and what is left is
+    split into the bodies it holds, each then measured on its own.
+    """
+    # The flow's own part has leaked onto still ground, and the flow is smoothed toward zero at its edge: the
+    # interior alone says how it moved, to a tenth of a pixel.
+    inner = cv2.erode(_fill(part), np.ones((9, 9), np.uint8)).astype(bool) & (moving > 0)
+    if inner.sum() < min_area:
+        inner = part & (moving > 0)
+    src = np.stack([xs[inner], ys[inner]], axis=1)
+    c_part = _centroid(part)
+    rough = _kabsch(src, src + fwd[inner], c_part)
+
+    # How far the turn moves the object's pixels against how far it shifts them: a handle does one or the other,
+    # and the probe is the only evidence of which.
+    radius = float(np.sqrt(((src - np.array(c_part)) ** 2).sum(axis=1).mean()))
+    if radius * abs(math.radians(rough[0])) > math.hypot(rough[1], rough[2]):
+        kind, angles, guesses = TURN, _angles(rough[0], 3.0), [rough]
+    else:
+        g = cv2.GaussianBlur(a.astype(np.float32), (0, 0), 1.0)
+        edge = cv2.Sobel(g, cv2.CV_32F, 1, 0) ** 2 + cv2.Sobel(g, cv2.CV_32F, 0, 1) ** 2
+        kind, angles = SLIDE, None
+        guesses = [(0.0, tx, ty) for tx, ty in _flow_modes(fwd[inner], edge[inner])]
+
+    out: List[Tuple[np.ndarray, Params, str, Point]] = []
+    for guess in guesses:
+        # The pixel test needs the motion to a fraction of a pixel or every sharp edge fails it; the mask and the
+        # motion then sharpen each other.
+        try:
+            exact, _ = _locate(a, b, inner.astype(np.uint8), c_part, guess, 3.0, angles)
+            cut = _carried(a, b, part, exact, c_part, min_area)
+        except TrackingError:
+            continue
+        for mask in _split(a, b, cut, min_area):
+            c = _centroid(mask)
+            params = _params_of(_rigid(exact, c_part), c)
+            try:
+                for _ in range(2):
+                    params, _ = _locate(a, b, mask, c, params, 3.0, angles and _angles(params[0], 2.0))
+                    mask = _carried(a, b, mask, params, c, min_area)
+            except TrackingError:
+                continue
+            out.append((mask, params, kind, c))
+    if not out:
+        raise TrackingError("the moving part has no texture or edge that its own motion explains")
+    return out
+
+
 def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Optional[Point] = None) -> Segment:
     """The object the probe moved, in `first` coordinates, and how the handle drives it.
 
-    With `seed`, the moving part under it (or nearest to it, within reach). Without one, the largest moving part
-    that is not the handle: what a generation-2 answer, which names only the goal, has to settle for.
+    With `seed`, the body under it (or nearest to it, within reach). Without one, the largest body that is not the
+    handle: what a generation-2 answer, which names only the goal, has to settle for.
     """
     a, b = _pair(first, probe)
     h, w = a.shape
@@ -233,39 +351,32 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
                                     f"({seed[0]:.0f}, {seed[1]:.0f}); the nearest moving part is "
                                     f"{-inside[near]:.0f}px away")
             pick = near
+        candidates = [pick]
     else:
-        held = label_at(handle)
-        others = [i for i in parts if i != held]
-        if not others:
+        # Every part, the handle's own included: see `_bodies` for why the piece can share it.
+        candidates = sorted(parts, key=lambda i: -stats[i, cv2.CC_STAT_AREA])
+
+    found: List[Tuple[np.ndarray, Params, str, Point]] = []
+    why: Optional[TrackingError] = None
+    for pick in candidates:
+        try:
+            found += _bodies(a, b, fwd, moving, labels == pick, xs, ys, min_area)
+        except TrackingError as exc:
+            why = why or exc
+    held = _near_handle(handle, h, w)
+    if seed is not None:
+        if not found:
+            raise why or TrackingError("the moving part has no texture or edge that its own motion explains")
+        # The body under the model's point, else the nearest: it read the piece off a shot before the press.
+        sx, sy = float(seed[0]), float(seed[1])
+        mask, exact, kind, c_part = max(found, key=lambda f: cv2.pointPolygonTest(_outline(f[0]), (sx, sy), True))
+    else:
+        carried = [f for f in found if not (held is not None and (f[0].astype(bool) & held).any())]
+        if not carried:
+            if why is not None and not found:
+                raise why
             raise TrackingError("only the handle moved; nothing it carries was seen")
-        pick = max(others, key=lambda i: stats[i, cv2.CC_STAT_AREA])
-
-    part = labels == pick
-    # The flow's own part has leaked onto still ground, and the flow is smoothed toward zero at its edge: the
-    # interior alone says how it moved, to a tenth of a pixel.
-    inner = cv2.erode(_fill(part), np.ones((9, 9), np.uint8)).astype(bool) & (moving > 0)
-    if inner.sum() < min_area:
-        inner = part & (moving > 0)
-    src = np.stack([xs[inner], ys[inner]], axis=1)
-    c_part = _centroid(part)
-    rough = _kabsch(src, src + fwd[inner], c_part)
-
-    # How far the turn moves the object's pixels against how far it shifts them: a handle does one or the other,
-    # and the probe is the only evidence of which.
-    radius = float(np.sqrt(((src - np.array(c_part)) ** 2).sum(axis=1).mean()))
-    if radius * abs(math.radians(rough[0])) > math.hypot(rough[1], rough[2]):
-        kind, exact = TURN, rough
-        angles = _angles(rough[0], 3.0)
-    else:
-        flow = fwd[inner]
-        kind, exact = SLIDE, (0.0, float(np.median(flow[:, 0])), float(np.median(flow[:, 1])))
-        angles = None
-    # The pixel test needs the motion to a fraction of a pixel or every sharp edge fails it; the mask and the
-    # motion then sharpen each other.
-    mask = inner.astype(np.uint8)
-    for _ in range(2):
-        exact, _ = _locate(a, b, mask, c_part, exact, 3.0, angles)
-        mask = _carried(a, b, part, exact, c_part, min_area)
+        mask, exact, kind, c_part = max(carried, key=lambda f: int(f[0].sum()))
     c0 = _centroid(mask)
     exact = _params_of(_rigid(exact, c_part), c0)
     if kind == TURN:

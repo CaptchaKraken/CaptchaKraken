@@ -56,6 +56,41 @@ def test_without_a_seed_the_largest_moving_part_that_is_not_the_handle_is_taken(
     assert abs(cx - px) < 6 and abs(cy - py) < 6
 
 
+def _framed(ratio):
+    """The piece resting just above the track with only flat white between, as on GeeTest: dense flow smears across
+    the strip and joins the piece to the knob below it, though no pixel there changed."""
+    return JigsawBoard(ratio=ratio, y0=110, picture_ends=130)
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
+def test_a_piece_joined_to_the_knob_by_flat_ground_is_still_its_own_body(ratio):
+    b = _framed(ratio)
+    seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
+    hx, hy = b.handle()
+    assert not seg.grabbed, "the knob came with the piece, so the driver would steer the piece as if it held it"
+    assert not seg.mask[int(hy) - 14:int(hy) + 14].any(), "the mask reaches into the track"
+    assert seg.probe[1] == pytest.approx(8 * ratio, abs=0.3)
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
+def test_without_a_seed_a_piece_joined_to_the_knob_is_still_found(ratio):
+    b = _framed(ratio)
+    seg = st.segment(b.render(0), b.render(8), seed=None, handle=b.handle())
+    cx, cy = seg.centroid
+    px, py = b.centre()
+    hy = b.handle()[1]
+    # The shadow travels with the piece, so it is part of the body and pulls its centroid toward the shadow's side.
+    assert abs(cx - px) < 8 and abs(cy - py) < 8 and not seg.grabbed
+    assert not seg.mask[int(hy) - 14:int(hy) + 14].any(), "the mask reaches into the track"
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.27])
+def test_the_loop_seats_a_piece_framed_above_flat_ground(ratio):
+    b = _framed(ratio)
+    s, _, reply = _drive(b, b.centre(), (b.goal[0], b.centre()[1]))
+    assert abs(b.centre(s)[0] - b.goal[0]) <= 2.0 and reply["done"]
+
+
 # ── how it moved ─────────────────────────────────────────────────────────────
 
 

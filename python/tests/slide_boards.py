@@ -68,14 +68,19 @@ class _Board:
 
 
 class JigsawBoard(_Board):
-    def __init__(self, ratio=1.0, scale=1.0, badge=True, seed=3):
+    """`picture_ends` (shot px): below it the ground is flat white down to the track, the way a widget frames its
+    picture, and the piece rests `y0` from the top, so it can sit just above that flat strip."""
+
+    def __init__(self, ratio=1.0, scale=1.0, badge=True, seed=3, y0=70, picture_ends=None):
         super().__init__(scale, badge)
         k = scale
         self.ratio = ratio
         self.bg = _texture(self.h, self.w, seed)
+        if picture_ends is not None:
+            self.bg[int(picture_ends):] = 250
         self.size = int(44 * k)
         self.mask, self.knob = _jigsaw_mask(self.size, k)
-        self.x0, self.y0 = 12 * k, 70 * k                   # the piece's top-left (mask box) at rest
+        self.x0, self.y0 = 12 * k, y0 * k                   # the piece's top-left (mask box) at rest
         self.slot = (200 * k, 70 * k)
         sx, sy = int(self.slot[0]), int(self.slot[1])
         mh, mw = self.mask.shape
