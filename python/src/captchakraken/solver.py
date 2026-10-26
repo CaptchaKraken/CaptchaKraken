@@ -134,8 +134,10 @@ class CaptchaSolver:
                 return actions
             raise UnsupportedCaptchaError("Could not read the text captcha")
 
+        # Generation 4 never runs find_grid: the pointer server's element detector numbers a grid's cells along with
+        # everything else on the board, and its answer is points (and element numbers) like any other board's.
         # The animated path never runs find_grid: it false-positives on the header and footer bands of hCaptcha's click puzzles.
-        grid_boxes = find_grid(image_path)
+        grid_boxes = [] if self.planner.prompts.pointer else find_grid(image_path)
         dims = _grid_dims(len(grid_boxes), puzzle_source) if grid_boxes else None
         if grid_boxes and dims and self._is_real_grid(image_path, grid_boxes):
             return self._solve_grid(image_path, grid_boxes, dims[0], dims[1], retry_mode=retry_mode)

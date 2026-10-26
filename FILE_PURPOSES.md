@@ -289,6 +289,15 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/tool_calls/find_checkbox.py` | Finds the "I'm not a robot" checkbox by contour, before any model is involved. |
 | `python/src/captchakraken/tool_calls/board_painted.py` | Answers whether the widget has PAINTED its puzzle or is showing the blank panel it rebuilds behind, so a hole is never sent to the model. |
 | `python/src/captchakraken/tool_calls/slide_tracker.py` | The selector-free slide loop: segments what the handle moves (flow, then the pixels its own motion carries), tells a slide from a turn, tracks it to a tenth of a pixel, and says where to put the handle next so the model's point lands on its goal. |
+| `python/src/captchakraken/pointer/__init__.py` | The pointer (prompt generation 4): a model that reads its whole answer from one prefill, numbering the elements the detector found instead of using find_grid. |
+| `python/src/captchakraken/pointer/layout.py` | The pointer's one source of truth shared by training and serving: the prompt (board, element list, 46 question markers), the packed decision vector, and how it becomes a generation-3 answer with element ids. |
+| `python/src/captchakraken/pointer/detector.py` | Inference for the element detector (Mask R-CNN, ResNet-18): a board in, classed elements with boxes and masks out. |
+| `python/src/captchakraken/pointer/elements.py` | Numbers detected elements in reading order and says which element's mask a point lands on. |
+| `python/src/captchakraken/pointer/marks.py` | Draws the numbered overlay the model sees: a 1 px trace of each element's mask, not its box, and a small tag drawn in a built-in pixel font. |
+| `python/src/captchakraken/pointer/heads.py` | The heads that read the answer off the prefill's hidden states: action, count, a point per slot, the element under it, the video moment, and typed text. |
+| `python/src/captchakraken/pointer/vllm_plugin.py` | The vLLM plugin that serves the pointer as a pooling model: one prefill per board, and the heads' packed decision is the output. |
+| `python/src/captchakraken/pointer/service.py` | Board in, answer out: detector, marks, one vLLM prefill, decode. |
+| `python/src/captchakraken/pointer/server.py` | The `/v1/pointer` HTTP endpoint in front of `PointerService`. |
 
 ### `python/tests/`
 
@@ -299,6 +308,10 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 
 | File | Purpose |
 |---|---|
+| `python/tests/test_a_pointer_answer_always_carries_points.py` | Every pointer answer carries points, and an element id is added only when a detected element is under the point. |
+| `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer` and never runs find_grid; its answer is performed like generation 3's. |
+| `python/tests/test_an_element_is_outlined_by_its_mask.py` | The overlay traces each element's mask, keeps its tags small and off one another, and its look is frozen by a hash. |
+| `python/tests/test_the_pointer_reads_its_answer_from_one_prefill.py` | The heads find their 46 questions and the video moments in one prompt, and the packed decision round-trips. |
 | `python/tests/test_a_blank_board_is_not_photographed.py` | The load gate in front of every inference screenshot, and the fences that stop it stalling a legitimately sparse puzzle. |
 | `python/tests/test_a_board_that_will_not_film_may_already_be_solved.py` | A burst that caught no frame is not a verdict about the board; it must not discard a board the vendor already took. |
 | `python/tests/test_a_video_generation_sends_the_clip.py` | A model on a video prompt generation is sent the clip as one video and answers with a time; an older model still gets numbered keyframes. |

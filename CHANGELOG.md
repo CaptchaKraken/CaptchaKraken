@@ -7,6 +7,16 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Added
 
+- **Prompt generation 4: the pointer.** A generation-4 model is a pointer, not a
+  chat model. The client POSTs the bare board (or the `clipvideo`-cut frames) to
+  `{base_url}/pointer` and never runs `find_grid`. The server numbers every
+  element its detector finds, outlining each by its mask, and reads the answer
+  from one prefill: no token is generated. The answer is generation 3's shape,
+  always with points, plus the number of the element under each point when one
+  was found (`ids`, `from_id`/`to_id`, `handle_id`). It is served by a vLLM
+  plugin (`captchakraken.pointer.vllm_plugin`, registered via the
+  `vllm.general_plugins` entry point) behind `python -m
+  captchakraken.pointer.server`. `LATEST_PROMPT_VERSION` is unchanged.
 - **Prompt generation 3: one prompt for every puzzle.** `BUILTIN_PROMPTS["3"]`
   is a single `general` prompt; the puzzle's type is never named and a
   generation-3 model's `experts` are never routed to. A grid the driver finds is

@@ -504,14 +504,53 @@ class ActionPlanner:
                 out.append(iv)
         return out
 
+    #: Generation 4's endpoint, beside /chat/completions: the board in, generation 3's answer shape out.
+    _POINTER_PATH = "/pointer"
+
+    def _ask_pointer(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST one board to the pointer server. It numbers the board's elements, builds the prompt and reads the
+        answer from one prefill, so nothing here is a prompt."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **routing_headers(hosted=config.is_hosted_endpoint(self.base_url)),
+        }
+        url = f"{self.base_url}{self._POINTER_PATH}"
+        self._log(f"POST {url} model={self.model} media={sorted(k for k in body if k != 'model')}")
+        resp = self._http.post(url, headers=headers, json={"model": self.model, **body},
+                               timeout=self.request_timeout_s or DEFAULT_REQUEST_TIMEOUT_S)
+        if not resp.ok:
+            raise errors.from_response(resp, url)
+        try:
+            data = resp.json()
+        except ValueError:
+            raise RuntimeError(f"the pointer server returned a non-JSON body from {url}: {(resp.text or '')[:300]}")
+        answer = data.get("answer") if isinstance(data, dict) else None
+        if not isinstance(answer, dict):
+            raise RuntimeError(f"the pointer server's reply from {url} has no answer: {str(data)[:300]}")
+        self._log(f"pointer answer: {answer}")
+        return answer
+
+    def get_pointer_actions(self, image_path: str) -> List[Dict[str, Any]]:
+        """Generation 4 on a still: the screenshot as it is, PNG; the server sizes it and marks it."""
+        with open(image_path, "rb") as f:
+            raw = f.read()
+        actions = self._normalize_general(self._ask_pointer({"image": base64.b64encode(raw).decode()}))
+        self._log(f"pointer actions -> {actions}")
+        return actions
+
     def get_general_actions(self, image_path: str) -> List[Dict[str, Any]]:
         """Generation 3: the one prompt, whatever the puzzle, and no family to route by."""
+        if self.prompts.pointer:
+            return self.get_pointer_actions(image_path)
         raw = self._chat_with_image(self.prompts.general or "", image_path, max_tokens=512)
         actions = self._normalize_general(self._parse_json(raw))
         self._log(f"general actions -> {actions}")
         return actions
 
     def get_pixel_actions(self, image_path: str, text_mode: bool = False) -> List[Dict[str, Any]]:
+        if self.prompts.pointer:
+            return self.get_pointer_actions(image_path)
         if self.prompts.general is not None:
             return self.get_general_actions(image_path)
         prompt = self.prompts.text_prompt() if text_mode else self.prompts.pixel_prompt()
@@ -554,11 +593,16 @@ class ActionPlanner:
         if not self.prompts.sends_video:
             raise ValueError(f"prompt generation {self.prompts.version} answers from keyframes, not from a clip; "
                              "use get_keyframe_actions")
-        parts = [{"type": "video_url", "video_url": {"url": clipvideo.data_url(clip)}}]
-        general = self.prompts.general is not None
-        raw = self._chat(self.prompts.video_prompt(), parts, max_tokens=512,
-                         family=None if general else PromptFamily.VIDEO)
-        data = self._parse_json(raw)
+        if self.prompts.pointer:
+            data: Any = self._ask_pointer({"frames": [base64.b64encode(clipvideo.encode_jpeg(f)).decode()
+                                                      for f in clip.frames], "fps": clip.fps})
+            general = True
+        else:
+            parts = [{"type": "video_url", "video_url": {"url": clipvideo.data_url(clip)}}]
+            general = self.prompts.general is not None
+            raw = self._chat(self.prompts.video_prompt(), parts, max_tokens=512,
+                             family=None if general else PromptFamily.VIDEO)
+            data = self._parse_json(raw)
         actions = self._normalize_general(data) if general else self._normalize_pixel(data)
         t = self._normalize_time(data, clip)
         for a in actions:

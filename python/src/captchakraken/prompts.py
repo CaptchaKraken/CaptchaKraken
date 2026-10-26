@@ -17,7 +17,7 @@ LATEST_PROMPT_VERSION = "2"
 
 # The generations that show the model an animated captcha as one video (`clipvideo.py`) and read the moment it
 # acts on as `"t"`, in seconds. Every earlier generation sends numbered keyframe stills and reads `"frame"`.
-VIDEO_GENERATIONS = ("3",)
+VIDEO_GENERATIONS = ("3", "4")
 
 
 # Pure literals only, no f-strings, joins or constant references: the training repo's release parity gate reads
@@ -185,6 +185,12 @@ BUILTIN_PROMPTS = {
             "Leave out any key you have no value for. Respond ONLY with the JSON."
         ),
     },
+    # Generation 4 is the pointer (`captchakraken.pointer`): the board goes to the server's /pointer endpoint,
+    # which numbers its elements with the element detector, builds the prompt itself and reads the answer from one
+    # prefill. The client sends no prompt text, so there is none to drift.
+    "4": {
+        "pointer": True,
+    },
 }
 
 
@@ -275,6 +281,8 @@ class PromptSet:
     source: str
     general: Optional[str] = None
     sends_video: bool = False
+    #: Asked at /pointer with the bare board; the server owns the prompt (generation 4).
+    pointer: bool = False
 
     def _family(self, template: Optional[str], family: str) -> str:
         if template is None:
@@ -327,6 +335,7 @@ def builtin(version: str) -> Optional[PromptSet]:
         source=f"built-in v{version}",
         general=spec.get("general"),
         sends_video=str(version) in VIDEO_GENERATIONS,
+        pointer=bool(spec.get("pointer")),
     )
 
 
@@ -347,6 +356,7 @@ def _from_doc(doc: Dict[str, Any], source: str) -> PromptSet:
         general=templates.get("general") or base.general,
         # From the generation, never from the document: a template can be overridden, the way it is asked cannot.
         sends_video=base.sends_video,
+        pointer=base.pointer,
     )
 
 
