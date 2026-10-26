@@ -174,6 +174,26 @@ def test_where_the_picture_cannot_place_a_piece_the_motion_does():
         assert params[1] == pytest.approx(s, abs=3.0), s
 
 
+class _BlindFlow:
+    """Dense flow that sees nothing move: what DIS returned over a piece cut from the photo it rests on (Tencent) and a
+    pale piece on pale ground (GeeTest), where its forward-backward check failed almost everywhere."""
+
+    def calc(self, a, b, _):
+        return np.zeros(a.shape + (2,), np.float32)
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
+def test_a_seeded_piece_is_found_by_its_motion_where_flow_sees_none(ratio, monkeypatch):
+    b = JigsawBoard(ratio=ratio)
+    monkeypatch.setattr(st.cv2, "DISOpticalFlow_create", lambda *_: _BlindFlow())
+    seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
+    px, py = b.centre()
+    assert abs(seg.centroid[0] - px) < 6 and abs(seg.centroid[1] - py) < 6 and not seg.grabbed
+    assert seg.probe[1] == pytest.approx(8 * ratio, abs=0.3) and abs(seg.probe[2]) < 0.3
+    s, _, reply = _drive(b, b.centre(), (b.goal[0], b.centre()[1]))
+    assert abs(b.centre(s)[0] - b.goal[0]) <= 2.0 and reply["done"]
+
+
 # ── how it moved ─────────────────────────────────────────────────────────────
 
 

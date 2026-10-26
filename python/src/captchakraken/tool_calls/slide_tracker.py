@@ -8,12 +8,16 @@ ratio, no assumption about whether the handle slides the piece or turns it.
    where it agrees with the flow back, split into connected parts. Flow spreads across flat ground, so one part can
    hold the piece AND the knob below it: each part is cut, under each distinct motion in it, to the pixels that
    motion carries exactly onto the probe, and split into bodies cored on pixels that actually changed. The body
-   under the model's point is the object; without one, the largest body that is not the handle.
+   under the model's point is the object; without one, the largest body that is not the handle. Flow cannot follow a
+   piece that looks like the ground it moves over, so around the model's point every small shift is also tested
+   directly, and the body the best one explains is a candidate too.
 2. The probe also says HOW the handle drives it: a SLIDE (a shift) or a TURN (about a pivot it fits). A handle does
    one or the other, and fitting both from a short probe lets a half-degree of noise grow into a ten-degree turn by
    the far end of the track.
-3. `measure` finds where the object is now: template matching over its own mask near the prediction, then the exact
-   warp scored to a fraction of a pixel, so a busy board or an animated badge elsewhere cannot pull it.
+3. `measure` finds where the object is now. A piece on a rail is looked for only along the line the probe showed,
+   by the share of its face that lands on its own value, ties broken by the prediction; anything else by template
+   matching over its own mask near the prediction. Either way the exact warp is then scored to a fraction of a
+   pixel, so a busy board or an animated badge elsewhere cannot pull it.
 4. `plan` fits the motion as a straight line in the handle's travel and picks the travel that brings the model's
    point closest to its goal.
 
@@ -86,6 +90,10 @@ _CORE_CLOSE = 5
 _CORE_REACH = 2.0
 # Passes of mask <-> motion refinement at most; each grows the mask by at most the pixel test's 3 px reach.
 _REFINE_MAX = 8
+# A seeded slide's motion searched directly (`_slid_at`): over this share of the shot's short side around the point,
+# for shifts up to this share of it (at least 16 px) - a probe of 8 px at a handle ratio of up to 1.8 is 15.
+_SLID_WINDOW = 0.15
+_SLID_SHIFT = 0.08
 # How far off its rail (px) a slid object may be read: the line through rest and the probe, which is all a handle on
 # a track can do to it. Room for the sub-pixel jitter of a real page, not for a second motion.
 _RAIL_SLACK = 2.0
@@ -339,7 +347,13 @@ def _bodies(a: np.ndarray, b: np.ndarray, fwd: np.ndarray, moving: np.ndarray, p
         edge = cv2.Sobel(g, cv2.CV_32F, 1, 0) ** 2 + cv2.Sobel(g, cv2.CV_32F, 0, 1) ** 2
         kind, angles = SLIDE, None
         guesses = [(0.0, tx, ty) for tx, ty in _flow_modes(fwd[inner], edge[inner])]
+    return _refined(a, b, part, inner, c_part, guesses, kind, angles, min_area)
 
+
+def _refined(a: np.ndarray, b: np.ndarray, part: np.ndarray, inner: np.ndarray, c_part: Point,
+             guesses: Sequence[Params], kind: str, angles: Optional[List[float]],
+             min_area: float) -> List[Tuple[np.ndarray, Params, str, Point]]:
+    """The bodies `part` holds under each guessed motion, each mask and motion refined against the other."""
     out: List[Tuple[np.ndarray, Params, str, Point]] = []
     for guess in guesses:
         # The pixel test needs the motion to a fraction of a pixel or every sharp edge fails it; the mask and the
@@ -370,11 +384,59 @@ def _bodies(a: np.ndarray, b: np.ndarray, fwd: np.ndarray, moving: np.ndarray, p
     return out
 
 
+def _slid_at(a: np.ndarray, b: np.ndarray, seed: Point, min_area: float) -> List[Tuple[np.ndarray, Params, str, Point]]:
+    """The body under `seed` found by its motion alone: every whole-pixel shift within reach tried around the point,
+    the one that explains the most pixels the probe changed taken, and the part it explains refined like a flow part.
+
+    Dense flow needs the object to look unlike the ground it moves over. A piece cut from the photo it rests on, or
+    a pale piece on pale ground, does not: the flow there failed its own forward-backward check almost everywhere
+    (Tencent and GeeTest, seed 6), and no part was left at the point. Testing the rigid motion itself asks only that
+    the pixels the probe changed be explained, which a piece's edges always are.
+    """
+    h, w = a.shape
+    reach, reach_t = int(_SLID_WINDOW * min(h, w)), max(16, int(_SLID_SHIFT * min(h, w)))
+    x, y = int(round(seed[0])), int(round(seed[1]))
+    x0, x1 = max(reach_t, x - reach), min(w - reach_t, x + reach)
+    y0, y1 = max(reach_t, y - reach), min(h - reach_t, y + reach)
+    if x1 - x0 < 3 or y1 - y0 < 3:
+        return []
+    sa = cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH)
+    sb = cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
+    here = sa[y0:y1, x0:x1]
+    changed = np.abs(sb[y0:y1, x0:x1] - here) >= _CARRY_GREY
+    best, shift = 0, (0, 0)
+    for ty in range(-reach_t, reach_t + 1):
+        for tx in range(-reach_t, reach_t + 1):
+            if tx or ty:
+                n = int((changed & (np.abs(sb[y0 + ty:y1 + ty, x0 + tx:x1 + tx] - here) < _CARRY_GREY)).sum())
+                if n > best:
+                    best, shift = n, (tx, ty)
+    if best < min_area:
+        return []
+    tx, ty = shift
+    explained = np.zeros((h, w), np.uint8)
+    explained[y0:y1, x0:x1] = changed & (np.abs(sb[y0 + ty:y1 + ty, x0 + tx:x1 + tx] - here) < _CARRY_GREY)
+    explained = cv2.morphologyEx(explained, cv2.MORPH_CLOSE, np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(explained, connectivity=8)
+    if n < 2:
+        return []
+    dist = {i: cv2.pointPolygonTest(_outline(labels == i), (float(seed[0]), float(seed[1])), True)
+            for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area}
+    if not dist:
+        return []
+    part = _fill((labels == max(dist, key=dist.get)).astype(np.uint8)).astype(bool)
+    try:
+        return _refined(a, b, part, part, _centroid(part), [(0.0, float(tx), float(ty))], SLIDE, None, min_area)
+    except TrackingError:
+        return []
+
+
 def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Optional[Point] = None) -> Segment:
     """The object the probe moved, in `first` coordinates, and how the handle drives it.
 
-    With `seed`, the body under it (or nearest to it, within reach). Without one, the largest body that is not the
-    handle: what a generation-2 answer, which names only the goal, has to settle for.
+    With `seed`, the body under it (or nearest to it, within reach), from the flow's parts or found by its motion
+    alone (`_slid_at`). Without one, the largest body that is not the handle: what a generation-2 answer, which
+    names only the goal, has to settle for.
     """
     a, b = _pair(first, probe)
     h, w = a.shape
@@ -392,7 +454,7 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
     n, labels, stats, _ = cv2.connectedComponentsWithStats(moving, connectivity=8)
     min_area = max(_MIN_PART_PX, _MIN_PART_FRACTION * h * w)
     parts = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
-    if not parts:
+    if not parts and seed is None:
         raise TrackingError("nothing moved between the press and the probe")
 
     def label_at(p: Optional[Point]) -> int:
@@ -401,19 +463,15 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
         x, y = int(round(p[0])), int(round(p[1]))
         return int(labels[y, x]) if 0 <= x < w and 0 <= y < h else 0
 
+    reach = max(_SEED_REACH_MIN_PX, _SEED_REACH_FRACTION * min(h, w))
     if seed is not None:
         pick = label_at(seed) if label_at(seed) in parts else 0
-        if not pick:
-            reach = max(_SEED_REACH_MIN_PX, _SEED_REACH_FRACTION * min(h, w))
+        if not pick and parts:
             inside = {i: cv2.pointPolygonTest(_outline(labels == i), (float(seed[0]), float(seed[1])), True)
                       for i in parts}
             near = max(inside, key=inside.get)
-            if -inside[near] > reach:
-                raise TrackingError(f"nothing moved within {reach:.0f}px of the point on the object "
-                                    f"({seed[0]:.0f}, {seed[1]:.0f}); the nearest moving part is "
-                                    f"{-inside[near]:.0f}px away")
-            pick = near
-        candidates = [pick]
+            pick = near if -inside[near] <= reach else 0
+        candidates = [pick] if pick else []
     else:
         # Every part, the handle's own included: see `_bodies` for why the piece can share it.
         candidates = sorted(parts, key=lambda i: -stats[i, cv2.CC_STAT_AREA])
@@ -427,11 +485,18 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
             why = why or exc
     held = _near_handle(handle, h, w)
     if seed is not None:
+        # Flow cannot follow a piece that looks like the ground it moves over; its motion, tested directly, can.
+        found += _slid_at(a, b, seed, min_area)
         if not found:
-            raise why or TrackingError("the moving part has no texture or edge that its own motion explains")
+            raise why or TrackingError(f"nothing moved within {reach:.0f}px of the point on the object "
+                                       f"({seed[0]:.0f}, {seed[1]:.0f})")
         # The body under the model's point, else the nearest: it read the piece off a shot before the press.
         sx, sy = float(seed[0]), float(seed[1])
         mask, exact, kind, c_part = max(found, key=lambda f: cv2.pointPolygonTest(_outline(f[0]), (sx, sy), True))
+        off = -cv2.pointPolygonTest(_outline(mask), (sx, sy), True)
+        if off > reach:
+            raise TrackingError(f"nothing moved within {reach:.0f}px of the point on the object "
+                                f"({sx:.0f}, {sy:.0f}); the nearest moving body is {off:.0f}px away")
     else:
         carried = [f for f in found if not (held is not None and (f[0].astype(bool) & held).any())]
         if not carried:
