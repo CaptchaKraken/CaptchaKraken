@@ -70,6 +70,9 @@ _MIN_SHARE = 0.4
 # The smoothing that share is read through (sigma, px): enough to forgive a page's sub-pixel resampling, not so much
 # that a flat piece's one-pixel rim, its only mark over ground of its own tone, is averaged into that ground.
 _SHARE_SMOOTH = 0.5
+# Peaks along a rail whose share is within this of the best are a tie the picture cannot break - a white piece over
+# a white screen peaks at 0.73-0.76 all along 36 px of it (GeeTest) - and the motion's prediction breaks it instead.
+_SHARE_TIE = 0.05
 # The angle grid a turn is searched on, in degrees; the score's peak is interpolated between its points.
 _TURN_STEP = 1.0
 # The distinct shifts tried within one moving part: histogram bin (px), the share of the strongest peak another must
@@ -673,8 +676,9 @@ def _along_rail(a: np.ndarray, b: np.ndarray, seg: Segment, guess: Params, reach
     no ground. Correlation is the wrong question at range for a piece whose face is flat: with nothing inside to
     vary, the rim decides it, and correlation normalizes away the one thing that tells a flat face from any other
     flat ground, its grey. On GeeTest the seat scored 0.26-0.5 against a plateau of decoys at 0.49 along a white
-    phone screen; the share is 0.88 there. Within a pixel of the seat the edges' correlation is the sharper of the
-    two.
+    phone screen; the share is 0.88 there. Where its peaks tie along a stretch of ground the shade of the face, the
+    peak nearest `guess` is taken (`_SHARE_TIE`). Within a pixel of the seat the edges' correlation is the sharper
+    of the two.
     """
     sa = cv2.GaussianBlur(a.astype(np.float32), (0, 0), _SHARE_SMOOTH)
     sb = cv2.GaussianBlur(b.astype(np.float32), (0, 0), _SHARE_SMOOTH)
@@ -684,10 +688,13 @@ def _along_rail(a: np.ndarray, b: np.ndarray, seg: Segment, guess: Params, reach
     sil = face[box[1]:box[3], box[0]:box[2]]
     n = int(math.ceil(reach))
     along = [(guess[1] + k * rail[0], guess[2] + k * rail[1]) for k in range(-n, n + 1)]
-    scores = [_share(sa, sb, sil, box, dx, dy) for dx, dy in along]
-    i = int(np.argmax(scores))
-    if scores[i] < 0:
+    scores = np.array([_share(sa, sb, sil, box, dx, dy) for dx, dy in along])
+    if scores.max() < 0:
         raise TrackingError("the object left the shot")
+    # A peak is the best place within two pixels of itself; a slope beside the true peak never is.
+    peaks = np.nonzero(scores >= np.array([scores[max(0, k - 2):k + 3].max() for k in range(len(scores))]))[0]
+    tied = peaks[scores[peaks] >= scores.max() - _SHARE_TIE]
+    i = int(tied[np.argmin(np.abs(tied - n))])
     params, _ = _locate(a, b, seg.proven, seg.centroid, (0.0, *along[i]), 1.0, None, None, rail)
     if math.hypot(params[1] - along[i][0], params[2] - along[i][1]) > 1.5:
         params = (0.0, *along[i])

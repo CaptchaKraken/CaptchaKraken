@@ -161,6 +161,19 @@ def test_a_flat_piece_crossing_ground_its_own_shade_is_read_where_it_is(ratio):
         assert conf >= st._MIN_SHARE
 
 
+def test_where_the_picture_cannot_place_a_piece_the_motion_does():
+    """A piece whose face and rim are the white of the ground it crosses, and that casts no shadow, is invisible all
+    along that ground: every place on it scores alike, and the best by a hair is anywhere. The motion's prediction
+    is the only evidence left, and is taken; on GeeTest the far end of such a stretch read a seated piece 31 px past
+    its slot and the loop ran out of corrections walking back."""
+    white = (250, 250, 250)
+    b = JigsawBoard(flat_face=white, blank_rim=True, pale_band=(60, 330), shadow=False)
+    seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
+    for s in (90.0, 150.0):
+        params, _ = st.measure(b.render(0), b.render(s), seg, guess=(0.0, s, 0.0))
+        assert params[1] == pytest.approx(s, abs=3.0), s
+
+
 # ── how it moved ─────────────────────────────────────────────────────────────
 
 
