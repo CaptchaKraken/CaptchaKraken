@@ -5,11 +5,10 @@ hidden states) and serving (`vllm_plugin`, inside vLLM's pooler), so the two
 read the same positions with the same arithmetic.
 
 Option vectors, all from the last hidden layer:
-    element  the state at its `<|box_end|>`
     token    each vision token: where a point can land
     moment   each `<|vision_end|>`: one per frame pair of a video (one for a still)
-    none     a learned vector: "this point lands on no element"
-and one query vector per question, at its `<|quad_end|>`.
+and one query vector per question, at its `<|quad_end|>`. The element a point
+names is not decided here: it is the one under the point (`elements.ids_for`).
 
 A point is a softmax over the chosen moment's tokens plus an offset inside the
 winning token, so a coordinate is never decoded digit by digit. A typed answer
@@ -33,7 +32,6 @@ class Positions:
 
     def __init__(self, ids: torch.Tensor, token_ids: Dict[str, int]):
         ids = ids.flatten()
-        self.el = (ids == token_ids[L.EL_END]).nonzero().flatten()
         self.q = (ids == token_ids[L.Q_END]).nonzero().flatten()
         vis = (ids == token_ids[L.IMAGE_PAD]) | (ids == token_ids[L.VIDEO_PAD])
         self.vis = vis.nonzero().flatten()
@@ -54,7 +52,7 @@ class Positions:
 
 def token_ids(tokenizer) -> Dict[str, int]:
     return {t: tokenizer.convert_tokens_to_ids(t)
-            for t in (L.EL_END, L.Q_END, L.IMAGE_PAD, L.VIDEO_PAD, L.VISION_END)}
+            for t in (L.Q_END, L.IMAGE_PAD, L.VIDEO_PAD, L.VISION_END)}
 
 
 class Heads(nn.Module):
@@ -65,9 +63,6 @@ class Heads(nn.Module):
         self.drag_count = nn.Linear(d, L.N_DRAG_COUNTS)
         self.pq = nn.ModuleDict({k: nn.Linear(d, dp) for k in L.KINDS})
         self.pk = nn.Linear(d, dp)
-        self.iq = nn.ModuleDict({k: nn.Linear(d, dp) for k in L.KINDS})
-        self.ik = nn.Linear(d, dp)
-        self.none = nn.Parameter(torch.zeros(d))
         self.mq, self.mk = nn.Linear(d, dp), nn.Linear(d, dp)
         self.offset = nn.Sequential(nn.Linear(2 * d, 512), nn.GELU(), nn.Linear(512, 2))
         # A low-rank nudge before the language model's head, zero at the start, so
@@ -80,10 +75,6 @@ class Heads(nn.Module):
     # ── scores (training reads these; `decide` takes their argmax) ───────────
     def point(self, kind: str, hq, htok):                 # [d], [P,d] -> [P]
         return (self.pk(htok) @ self.pq[kind](hq)) * self.scale
-
-    def ident(self, kind: str, hq, hel):                  # [d], [K,d] -> [K+1], last = none
-        keys = torch.cat([hel, self.none[None].to(hel.dtype)], 0)
-        return (self.ik(keys) @ self.iq[kind](hq)) * self.scale
 
     def moment(self, hq, hm):                             # [d], [M,d] -> [M]
         return (self.mk(hm) @ self.mq(hq)) * self.scale
@@ -99,7 +90,7 @@ class Heads(nn.Module):
     def views(self, h: torch.Tensor, pos: Positions) -> Dict:
         """h [N,d] (float32) -> the option and query vectors of one prompt."""
         hm = h[pos.moments] if pos.moments.numel() else h[pos.vis].mean(0, keepdim=True)
-        return {"q": dict(zip(L.QUESTIONS, h[pos.q])), "el": h[pos.el],
+        return {"q": dict(zip(L.QUESTIONS, h[pos.q])),
                 "tok": h[pos.vis].reshape(pos.n_moments, pos.per_moment, -1), "moment": hm}
 
     @torch.no_grad()
@@ -120,11 +111,7 @@ class Heads(nn.Module):
             pp = F.softmax(self.point(kind, q[name], tok), -1)
             t = int(pp.argmax())
             dx, dy = self.off(q[name], tok[t])
-            pe = F.softmax(self.ident(kind, q[name], v["el"]), -1)
-            e = int(pe.argmax())
-            el = e if e < v["el"].shape[0] else -1
-            parts.append(torch.stack([torch.tensor(float(t), device=h.device), dx, dy, pp[t],
-                                      torch.tensor(float(el), device=h.device), pe[e]]))
+            parts.append(torch.stack([torch.tensor(float(t), device=h.device), dx, dy, pp[t]]))
         if lm_weight is not None:
             hq = torch.stack([q[n] for n in L.TEXT])
             ids = self.text(hq, lm_weight).float().argmax(-1).float()

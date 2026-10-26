@@ -1,18 +1,25 @@
 """What the pointer model is asked, and how its answer comes back.
 
-The prompt is the board (an image, or a video's frame pairs), then each numbered
-element in Qwen's own grounding format, then one marker per question:
+The prompt is the SAME text for every captcha, with the board between its two
+halves:
 
-    Solve the captcha. ...
-    <|object_ref_start|>1 item<|object_ref_end|><|box_start|>(120,340),(260,480)<|box_end|>
-    ...
+    <|im_start|>user
+    Solve the captcha. ...                      PREFIX: identical on every request
+    <|vision_start|>[image | video]<|vision_end|>
     action<|quad_end|> count<|quad_end|> click1<|quad_end|> ... moment<|quad_end|>
 
-The heads read the hidden state at every `<|box_end|>` (one per element), at
-every `<|quad_end|>` (one per question), at every vision token (the places a
-point can land) and at every `<|vision_end|>` (one per moment of a video). All
-of those are found from the token ids alone, so the same code reads them in
-training (transformers) and in serving (vLLM's pooler).
+Everything up to the board is one cached prefix. The question markers have to
+come AFTER the board: a causal model's state at a marker can only see what is
+before it. They are fixed text too, so the board is the only thing a request
+changes. Nothing about a board's elements is written in the prompt; a marked
+board carries them as drawn outlines and numbers (`marks`), and the element a
+point names is the one under it (`elements.ids_for`).
+
+The heads read the hidden state at every `<|quad_end|>` (one per question), at
+every vision token (the places a point can land) and at every `<|vision_end|>`
+(one per moment of a video). All of those are found from the token ids alone, so
+the same code reads them in training (transformers) and in serving (vLLM's
+pooler).
 
 The heads' decisions travel as one flat float vector (`pack` / `unpack`): a
 pooling endpoint returns a tensor, not JSON. A point comes back as a vision
@@ -37,7 +44,6 @@ MAX_PIXELS = 720 * 720
 #: Pixels per vision token: Qwen3.5's 16 px patch, merged 2x2.
 TOKEN_PX = 32
 
-EL_END = "<|box_end|>"
 Q_END = "<|quad_end|>"
 IMAGE_PAD = "<|image_pad|>"
 VIDEO_PAD = "<|video_pad|>"
@@ -60,11 +66,13 @@ INSTRUCTION = (
     "Solve the captcha. Read its instruction and decide what a person would do. "
     "Thin numbered outlines, where drawn, are ours and not part of the puzzle."
 )
+#: The fixed text after the board: one marker per question.
+QUESTION_TEXT = " ".join(f"{q}{Q_END}" for q in QUESTIONS)
 
 # ── the packed decision vector ──────────────────────────────────────────────
 #: Per slot: vision token index (within the chosen moment), dx, dy (offset from
-#: the token's centre, in tokens), p(token), element index or -1, p(element).
-SLOT_WIDTH = 6
+#: the token's centre, in tokens), p(token).
+SLOT_WIDTH = 4
 N_COUNTS = MAX_CLICKS + 1          # clicks 0..16
 N_DRAG_COUNTS = MAX_DRAGS          # drags 1..4
 PACKED = (len(ACTIONS) + N_COUNTS + N_DRAG_COUNTS + SLOT_WIDTH * len(SLOTS)
@@ -86,29 +94,16 @@ def to_norm(x: float, y: float, size: Tuple[int, int]) -> List[int]:
     return [int(round(x * 1000.0 / size[0])), int(round(y * 1000.0 / size[1]))]
 
 
-def prompt_text(elements: Sequence[Dict], size: Tuple[int, int]) -> str:
-    """The text after the board. `elements` are `elements.number(...)`'s, in pixels
-    of a board of `size`; an empty list is a board shown with nothing marked."""
-    lines = [INSTRUCTION]
-    if elements:
-        lines.append("Elements:")
-    for n, e in enumerate(elements, 1):
-        x0, y0 = to_norm(e["box"][0], e["box"][1], size)
-        x1, y1 = to_norm(e["box"][2], e["box"][3], size)
-        lines.append(f"<|object_ref_start|>{n} {e['class']}<|object_ref_end|>"
-                     f"<|box_start|>({x0},{y0}),({x1},{y1}){EL_END}")
-    lines.append(" ".join(f"{q}{Q_END}" for q in QUESTIONS))
-    return "\n".join(lines)
-
-
-def chat(processor, elements: Sequence[Dict], size: Tuple[int, int], video: bool) -> str:
-    """The whole prompt string, as training builds it and serving sends it.
+def chat(processor, video: bool) -> str:
+    """The whole prompt string, as training builds it and serving sends it: the
+    same for every board (see the module docstring).
 
     vLLM replaces the chat template's whole `<|vision_start|><|video_pad|><|vision_end|>`
     with its per-pair placeholder, where transformers keeps the outer pair around it;
     the bare pad goes in so both expand a video alike (an image they already agree on)."""
     media = {"type": "video"} if video else {"type": "image"}
-    msgs = [{"role": "user", "content": [media, {"type": "text", "text": prompt_text(elements, size)}]}]
+    msgs = [{"role": "user", "content": [{"type": "text", "text": INSTRUCTION}, media,
+                                         {"type": "text", "text": QUESTION_TEXT}]}]
     text = processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False)
     return text.replace("<|vision_start|><|video_pad|><|vision_end|>", VIDEO_PAD)
 
@@ -129,9 +124,8 @@ def unpack(v: Sequence[float]) -> Dict:
     out = {"action_p": take(len(ACTIONS)), "count_p": take(N_COUNTS),
            "drag_count_p": take(N_DRAG_COUNTS), "slots": {}}
     for name, _ in SLOTS:
-        tok, dx, dy, pt, el, pe = take(SLOT_WIDTH)
-        out["slots"][name] = {"token": int(tok), "dx": dx, "dy": dy, "p_point": pt,
-                              "element": None if el < 0 else int(el), "p_element": pe}
+        tok, dx, dy, pt = take(SLOT_WIDTH)
+        out["slots"][name] = {"token": int(tok), "dx": dx, "dy": dy, "p_point": pt}
     out["text_ids"] = [int(t) for t in take(MAX_TEXT)]
     out["moment"], out["moment_p"] = int(v[i]), v[i + 1]
     return out
@@ -148,15 +142,11 @@ def to_point(slot: Dict, grid: Tuple[int, int]) -> List[int]:
 
 def answer(decision: Dict, grid: Tuple[int, int], *, text: Optional[str] = None,
            timestamps: Optional[Sequence[float]] = None) -> Dict:
-    """Unpacked decisions -> the generation-3 answer shape, with 1-based element
-    numbers beside each point that landed on one. `text` is the decoded typed
+    """Unpacked decisions -> the generation-3 answer shape, points only
+    (`elements.ids_for` adds the element numbers). `text` is the decoded typed
     string (the caller owns the tokenizer); `timestamps` are a video's pair times."""
     def p(name):
         return to_point(decision["slots"][name], grid)
-
-    def el(name):
-        e = decision["slots"][name]["element"]
-        return None if e is None else e + 1
     act = ACTIONS[max(range(len(ACTIONS)), key=lambda k: decision["action_p"][k])]
     out: Dict = {}
     if timestamps:
@@ -170,24 +160,14 @@ def answer(decision: Dict, grid: Tuple[int, int], *, text: Optional[str] = None,
             n = min(n, 1)
         names = [f"click{k}" for k in range(1, n + 1)]
         out["points"] = [p(s) for s in names]
-        ids = [el(s) for s in names]
-        if any(i is not None for i in ids):
-            out["ids"] = ids
     elif act == "drag":
         n = 1 + max(range(N_DRAG_COUNTS), key=lambda k: decision["drag_count_p"][k])
         drags = []
         for k in range(1, n + 1):
-            d = {"from": p(f"drag{k} from"), "to": p(f"drag{k} to")}
-            if el(f"drag{k} from") is not None:
-                d["from_id"] = el(f"drag{k} from")
-            if el(f"drag{k} to") is not None:
-                d["to_id"] = el(f"drag{k} to")
-            drags.append(d)
+            drags.append({"from": p(f"drag{k} from"), "to": p(f"drag{k} to")})
         out["drags"] = drags
     elif act == "slide":
         out.update({"handle": p("slide handle"), "from": p("slide from"), "to": p("slide to")})
-        if el("slide handle") is not None:
-            out["handle_id"] = el("slide handle")
     else:
         out["text"] = text or ""
     return out

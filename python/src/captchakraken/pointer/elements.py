@@ -40,6 +40,77 @@ def number(dets: Sequence[Dict], min_score: float = MIN_SCORE) -> List[Dict]:
     return els[:MAX_ELEMENTS]
 
 
+#: Two detections on neighbouring frames are one element when their boxes overlap
+#: this much (IoU) and their class agrees. A sprite moving under ~1/3 of its width
+#: a frame stays linked; a clip's frames are 0.1-0.5 s apart.
+TRACK_IOU = 0.3
+
+
+def _iou(a: Sequence[float], b: Sequence[float]) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def track(per_frame: Sequence[Sequence[Dict]]) -> List[Dict]:
+    """A video's per-frame numbered elements -> its elements across the clip.
+
+    Each track is {"class", "frames": [element | None, ...]} (one entry per frame),
+    linked greedily frame to frame by box IoU >= TRACK_IOU within a class; a track
+    that misses a frame can be picked up again on the next (a fading sprite dips
+    under the score cut for a frame). Tracks are numbered in reading order of
+    where each first appears, then by that frame, so an element keeps ONE number
+    for the whole clip and the static parts of a board number as a still would."""
+    n = len(per_frame)
+    tracks: List[Dict] = []
+    for f, els in enumerate(per_frame):
+        free = list(range(len(els)))
+        pairs = []
+        for t, tr in enumerate(tracks):
+            last = next((tr["frames"][g] for g in range(f - 1, max(-1, f - 3), -1)
+                         if tr["frames"][g] is not None), None)
+            if last is None:
+                continue
+            for i in free:
+                if els[i]["class"] == tr["class"]:
+                    v = _iou(last["box"], els[i]["box"])
+                    if v >= TRACK_IOU:
+                        pairs.append((v, t, i))
+        used_t, used_i = set(), set()
+        for v, t, i in sorted(pairs, reverse=True):
+            if t in used_t or i in used_i:
+                continue
+            tracks[t]["frames"][f] = els[i]
+            used_t.add(t)
+            used_i.add(i)
+        for i in free:
+            if i not in used_i:
+                tr = {"class": els[i]["class"], "frames": [None] * n}
+                tr["frames"][f] = els[i]
+                tracks.append(tr)
+
+    def first(tr):
+        f = next(g for g, e in enumerate(tr["frames"]) if e is not None)
+        b = tr["frames"][f]["box"]
+        return (round(((b[1] + b[3]) / 2) / 12), (b[0] + b[2]) / 2, f)
+
+    return sorted(tracks, key=first)[:MAX_ELEMENTS]
+
+
+def moment_frame(moment: int, n_frames: int) -> int:
+    """The frame a video moment's elements are read on: the first of its pair
+    (the processor merges frames 2m and 2m+1 into moment m)."""
+    return min(2 * moment, n_frames - 1)
+
+
+def on_frame(tracks: Sequence[Dict], f: int) -> List[Optional[Dict]]:
+    """Frame `f`'s elements, indexed by track (None where a track is absent), so
+    `element_at` over it answers with the TRACK's index."""
+    return [tr["frames"][f] for tr in tracks]
+
+
 def scale(els: Sequence[Dict], fx: float, fy: float) -> List[Dict]:
     """Elements detected on one size of a board, moved onto another (fx, fy = new/old)."""
     import cv2
@@ -72,12 +143,13 @@ def _solid(mask) -> Tuple[Tuple[int, int], np.ndarray]:
 
 def element_at(pt: Sequence[float], size: Tuple[int, int], els: Sequence[Dict]) -> Optional[int]:
     """0-based index of the smallest element (by mask area) whose mask holds the
-    0-1000 point `pt` on a board of `size`, or None."""
+    0-1000 point `pt` on a board of `size`, or None. A None in `els` (a track
+    absent from this frame, `on_frame`) holds nothing but keeps its index."""
     x = int(round(pt[0] * size[0] / 1000.0))
     y = int(round(pt[1] * size[1] / 1000.0))
     best, area = None, None
     for i, e in enumerate(els):
-        if not e["mask"][1].size:
+        if e is None or not e["mask"][1].size:
             continue
         (mx, my), m = _solid(e["mask"])
         if 0 <= y - my < m.shape[0] and 0 <= x - mx < m.shape[1] and m[y - my, x - mx]:
@@ -85,3 +157,24 @@ def element_at(pt: Sequence[float], size: Tuple[int, int], els: Sequence[Dict]) 
             if area is None or a < area:
                 best, area = i, a
     return best
+
+
+def ids_for(answer: Dict, size: Tuple[int, int], els: Sequence[Optional[Dict]]) -> Dict:
+    """`answer` (generation 3's shape, 0-1000 points) with the 1-based number of
+    the element under each point beside it: `ids` for clicks, `from_id`/`to_id`
+    for drags, `handle_id` for a slide. A point on no element gets None, and a
+    board with no elements gets no ids at all. `els` is what the board was shown
+    with (a video's: `on_frame` of the answer's moment)."""
+    if not any(e is not None for e in els):
+        return answer
+    def n(p):
+        i = element_at(p, size, els)
+        return None if i is None else i + 1
+    out = dict(answer)
+    if out.get("points") is not None:
+        out["ids"] = [n(p) for p in out["points"]]
+    if out.get("drags") is not None:
+        out["drags"] = [{**d, "from_id": n(d["from"]), "to_id": n(d["to"])} for d in out["drags"]]
+    if out.get("handle") is not None:
+        out["handle_id"] = n(out["handle"])
+    return out

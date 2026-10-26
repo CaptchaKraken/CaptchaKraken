@@ -88,11 +88,15 @@ def _overlap(a, b) -> int:
 
 
 def draw(image: Image.Image, elements: Sequence[Dict]) -> Image.Image:
-    """The board with every element outlined and numbered (1-based, in list order)."""
+    """The board with every element outlined and numbered (1-based, in list order).
+    A None keeps its number but draws nothing: a video frame is drawn with
+    `elements.on_frame`, so an element carries its track's number on every frame."""
     out = np.array(image.convert("RGB"))
     H, W = out.shape[:2]
     plans = []
     for n, e in enumerate(elements, 1):
+        if e is None:                 # a video track absent from this frame
+            continue
         cs = outline(e["mask"])
         if not cs:
             x0, y0, x1, y1 = (int(round(v)) for v in e["box"])

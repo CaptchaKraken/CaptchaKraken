@@ -5,10 +5,12 @@
     svc.solve(frames=[rgb arrays])                  # a video, `clipvideo`-cut
 
 A still is resized to `layout.board_size`; the detector runs on that, and the
-elements it finds are drawn (`marks`) and listed (`layout.prompt_text`). With no
-detector, or `marked=False`, the board goes plain and every answer carries points
-only. A video always goes plain. The answer is generation 3's shape, plus the
-1-based number of each element a point landed on.
+elements it finds are drawn on it (`marks`). A video's frames are detected one
+by one, linked across the clip (`elements.track`, so an element keeps one number)
+and drawn on every frame. With no detector, or `marked=False`, the board goes
+plain. The prompt text is the same for every board (`layout.chat`). The answer is
+generation 3's shape, plus the 1-based number of the element under each point
+(`elements.ids_for`) when the board was marked.
 
 Needs the `serve` extra (vLLM, torch, torchvision).
 """
@@ -58,15 +60,22 @@ class PointerService:
                 raise ValueError(f"frames are {w}x{h}; cut them with clipvideo.clip_video first")
             meta = {"fps": CV.FPS, "frames_indices": list(range(n)), "total_num_frames": n,
                     "duration": n / CV.FPS, "video_backend": "opencv", "do_sample_frames": False}
-            return {"request": {"prompt": L.chat(self.processor, [], (w, h), True),
+            tracks = []
+            if marked and self.detector is not None:
+                ims = [Image.fromarray(f) for f in fr]
+                tracks = E.track([E.number(self.detector.detect(im)) for im in ims])
+                if tracks:
+                    fr = np.stack([np.asarray(M.draw(im, E.on_frame(tracks, k)))
+                                   for k, im in enumerate(ims)])
+            return {"request": {"prompt": L.chat(self.processor, True),
                                 "multi_modal_data": {"video": (fr, meta)},
                                 "mm_processor_kwargs": {"do_sample_frames": False}},
-                    "size": (w, h), "elements": [], "shown": None,
+                    "size": (w, h), "elements": tracks, "shown": None,
                     "timestamps": CV.pair_timestamps(n)}
         board = image.convert("RGB").resize(L.board_size(*image.size), Image.LANCZOS)
         els = E.number(self.detector.detect(board)) if (marked and self.detector is not None) else []
         shown = M.draw(board, els) if els else board
-        return {"request": {"prompt": L.chat(self.processor, els, board.size, False),
+        return {"request": {"prompt": L.chat(self.processor, False),
                             "multi_modal_data": {"image": shown}},
                 "size": board.size, "elements": els, "shown": shown, "timestamps": None}
 
@@ -82,11 +91,16 @@ class PointerService:
         if self.stop_id in ids:
             ids = ids[:ids.index(self.stop_id)]
         text = self.processor.tokenizer.decode(ids)
-        return L.answer(d, grid, text=text, timestamps=prep["timestamps"])
+        ans = L.answer(d, grid, text=text, timestamps=prep["timestamps"])
+        els = prep["elements"]
+        if prep["timestamps"] is not None and els:
+            els = E.on_frame(els, E.moment_frame(d["moment"], len(els[0]["frames"])))
+        return E.ids_for(ans, prep["size"], els)
 
     def solve(self, image: Optional[Image.Image] = None, frames: Optional[Sequence[np.ndarray]] = None,
               marked: bool = True) -> Dict:
-        """-> {"answer": generation-3 dict, "elements": numbered elements (board px),
+        """-> {"answer": generation-3 dict, "elements": numbered elements (board px;
+        a video's are `elements.track` tracks),
         "shown": the image the model saw (None for a video), "size": board (W, H)}."""
         return self.solve_many([{"image": image, "frames": frames, "marked": marked}])[0]
 
