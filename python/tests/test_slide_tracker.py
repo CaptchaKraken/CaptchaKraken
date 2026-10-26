@@ -125,8 +125,9 @@ def test_flat_ground_the_probe_cannot_tell_from_the_piece_is_not_matched_as_the_
     s = (b.slot[0] - b.x0) / ratio - 6
     params, corr = st.measure(b.render(0), b.render(s), seg, guess=(0.0, ratio * s, 0.0))
     assert params[1] == pytest.approx(ratio * s, abs=0.5) and abs(params[2]) < 0.5
-    # Not 1: the soft shadow travels with the piece but darkens whatever ground it is over.
-    assert corr > 0.75
+    # Not 1: the soft shadow travels with the piece but darkens whatever ground it is over. A piece that left
+    # measures 0.07-0.12 here.
+    assert corr > st._MIN_SHARE + 0.2
 
 
 @pytest.mark.parametrize("ratio", [0.8, 1.27])
@@ -134,6 +135,30 @@ def test_the_loop_seats_a_piece_resting_on_flat_ground(ratio):
     b = JigsawBoard(ratio=ratio, flat_rest=True)
     s, _, reply = _drive(b, b.centre(), (b.goal[0], b.centre()[1]))
     assert abs(b.centre(s)[0] - b.goal[0]) <= 2.0 and reply["done"]
+
+
+def test_a_piece_on_a_rail_is_never_read_off_it():
+    """A still copy of the piece sits above the slot. The handle can only move the piece along the line the probe
+    showed, so a match off that line is the copy, however well it scores; on GeeTest such a match read the seated
+    piece 26 px high, and the loop steered a solved board away from its slot."""
+    b = JigsawBoard(flat_face=True, decoy=26)
+    seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
+    s = b.slot[0] - b.x0
+    params, _ = st.measure(b.render(0), b.render(s), seg, guess=(0.0, s, 0.0))
+    assert abs(params[2]) < 1.0 and params[1] == pytest.approx(s, abs=1.0)
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
+def test_a_flat_piece_crossing_ground_its_own_shade_is_read_where_it_is(ratio):
+    """Along a band of ground the tone of the piece's face, every shift lays the face on its own grey and only its
+    one-pixel rim tells where it is: the share a rail slide is read by must not smooth that rim into the ground
+    (at a sigma of 1 px it read the piece 10 px short here). GeeTest's white piece over a white phone screen."""
+    b = JigsawBoard(ratio=ratio, flat_face=True, pale_band=(110, 200))
+    seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
+    for s in (100 / ratio, 140 / ratio):
+        params, conf = st.measure(b.render(0), b.render(s), seg, guess=(0.0, ratio * s + 9, 0.0))
+        assert params[1] == pytest.approx(ratio * s, abs=1.0) and abs(params[2]) < 1.0, s
+        assert conf >= st._MIN_SHARE
 
 
 # ── how it moved ─────────────────────────────────────────────────────────────

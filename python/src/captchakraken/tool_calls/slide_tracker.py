@@ -63,6 +63,13 @@ _SEED_REACH_FRACTION = 0.06
 _SEED_REACH_MIN_PX = 8.0
 # Below this correlation the transform does not describe the object any more: report it lost, never a position.
 _MIN_CORRELATION = 0.6
+# The same for a piece on a rail, read by the share of its face (`_along_rail`) that lands within `_CARRY_GREY` of its
+# own value: measured 0.07-0.12 where a piece left, 0.54-0.97 on it. It says lost, not which of two places: the best
+# point along the rail is the reading, and on a flat face its neighbours a few pixels off score up to 0.85.
+_MIN_SHARE = 0.4
+# The smoothing that share is read through (sigma, px): enough to forgive a page's sub-pixel resampling, not so much
+# that a flat piece's one-pixel rim, its only mark over ground of its own tone, is averaged into that ground.
+_SHARE_SMOOTH = 0.5
 # The angle grid a turn is searched on, in degrees; the score's peak is interpolated between its points.
 _TURN_STEP = 1.0
 # The distinct shifts tried within one moving part: histogram bin (px), the share of the strongest peak another must
@@ -76,6 +83,9 @@ _CORE_CLOSE = 5
 _CORE_REACH = 2.0
 # Passes of mask <-> motion refinement at most; each grows the mask by at most the pixel test's 3 px reach.
 _REFINE_MAX = 8
+# How far off its rail (px) a slid object may be read: the line through rest and the probe, which is all a handle on
+# a track can do to it. Room for the sub-pixel jitter of a real page, not for a second motion.
+_RAIL_SLACK = 2.0
 
 
 class TrackingError(ValueError):
@@ -457,7 +467,10 @@ def _proven(a: np.ndarray, b: np.ndarray, mask: np.ndarray, params: Params, c0: 
     along = cv2.warpAffine(smooth, _rigid(params, c0), (w, h), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                            borderMode=cv2.BORDER_REPLICATE)
     changed = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH) - smooth) >= _CARRY_GREY
-    proven = (mask.astype(bool) & changed & (np.abs(along - smooth) >= _CARRY_GREY)).astype(np.uint8)
+    # The mask's outermost pixel is ground the fill and the reach keep for the object's extent, nearly always; one
+    # deeper is the object's own rim, which on a flat face is the only detail it has.
+    body = cv2.erode(mask.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+    proven = (body & changed & (np.abs(along - smooth) >= _CARRY_GREY)).astype(np.uint8)
     if proven.sum() < min_area:
         raise TrackingError("the probe moved the object too little to show which pixels are its own")
     return proven
@@ -475,6 +488,18 @@ def _constrain(seg: Segment, p: Params) -> Params:
     if _turns(seg):
         return _turn_about(p[0], seg.pivot, seg.centroid)
     return 0.0, p[1], p[2]
+
+
+def _rail(seg: Segment) -> Optional[Tuple[float, float]]:
+    """The direction a SLIDE the handle drives along its track can move, as the probe showed it; None otherwise.
+
+    A carried piece goes wherever the pointer does, and a turn has no line; a piece on a rail has only this one, so
+    a match off it is something else in the picture that resembles it.
+    """
+    if seg.kind != SLIDE or seg.grabbed:
+        return None
+    n = math.hypot(seg.probe[1], seg.probe[2])
+    return (seg.probe[1] / n, seg.probe[2] / n) if n > 0 else None
 
 
 def _angles(centre: float, reach: float) -> List[float]:
@@ -496,8 +521,11 @@ def _peak(res: np.ndarray) -> Tuple[float, float, float]:
 
 
 def _match(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params,
-           reach: int) -> Optional[Tuple[Params, float]]:
-    """The object carried by `p`, matched against `b` within `reach` pixels: the shift that best seats it."""
+           reach: int, rail: Optional[Tuple[float, float]] = None) -> Optional[Tuple[Params, float]]:
+    """The object carried by `p`, matched against `b` within `reach` pixels: the shift that best seats it.
+
+    `rail`, a unit direction: only shifts within `_RAIL_SLACK` of the line through no shift along it are read.
+    """
     h, w = a.shape
     m = _rigid(p, c0)
     warped = cv2.warpAffine(a, m, (w, h), flags=cv2.INTER_LINEAR)
@@ -512,6 +540,10 @@ def _match(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params,
     res = cv2.matchTemplate(b[sy1:sy2, sx1:sx2], warped[y1:y2, x1:x2], cv2.TM_CCOEFF_NORMED,
                             mask=wmask[y1:y2, x1:x2])
     res = np.nan_to_num(res, nan=-1.0, posinf=-1.0, neginf=-1.0)
+    if rail is not None:
+        ry, rx = np.mgrid[0:res.shape[0], 0:res.shape[1]].astype(np.float32)
+        off = np.abs((p[1] + sx1 + rx - x1) * rail[1] - (p[2] + sy1 + ry - y1) * rail[0])
+        res[off > _RAIL_SLACK] = -1.0
     px, py, score = _peak(res)
     return (float(p[0]), float(p[1] + sx1 + px - x1), float(p[2] + sy1 + py - y1)), float(score)
 
@@ -584,7 +616,8 @@ def _polish(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params
 
 
 def _locate(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, guess: Params, reach_px: float,
-            angles: Optional[Sequence[float]], pivot: Optional[Point] = None) -> Tuple[Params, float]:
+            angles: Optional[Sequence[float]], pivot: Optional[Point] = None,
+            rail: Optional[Tuple[float, float]] = None) -> Tuple[Params, float]:
     """Where the object is in `b`: masked template matching near `guess`, to a tenth of a pixel.
 
     Matching, not a gradient method: it searches the whole window, so it cannot drift along an edge the way masked
@@ -598,7 +631,7 @@ def _locate(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, guess: Pa
         cands = [(float(th), guess[1], guess[2]) for th in angles]
     else:
         cands = [_turn_about(float(th), pivot, c0) for th in angles]
-    found = [(c, _match(a, b, mask, c0, c, int(math.ceil(reach_px if angles is None or pivot is None else 2))))
+    found = [(c, _match(a, b, mask, c0, c, int(math.ceil(reach_px if angles is None or pivot is None else 2)), rail))
              for c in cands]
     scored = [(c, f) for c, f in found if f is not None]
     if not scored:
@@ -612,23 +645,73 @@ def _locate(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, guess: Pa
             th = best[0] + _TURN_STEP * max(-0.5, min(0.5, 0.5 * (lo - hi) / den))
             best = _turn_about(th, pivot, c0) if pivot is not None else (th, best[1], best[2])
             best, score = _match(a, b, mask, c0, best, 2) or (best, score)
-    again = _match(a, b, mask, c0, best, 2)
+    again = _match(a, b, mask, c0, best, 2, rail)
     if again is not None:
         best, score = again
     return _polish(a, b, mask, c0, best, pivot)
 
 
+def _share(sa: np.ndarray, sb: np.ndarray, sil: np.ndarray, box: Tuple[int, int, int, int], dx: float,
+           dy: float) -> float:
+    """The share of the pixels `sil` (in `box`) that land within `_CARRY_GREY` of `sb` shifted by (dx, dy), in
+    smoothed grey; -1 when the shift takes them out of the shot."""
+    x1, y1, x2, y2 = box
+    h, w = sb.shape
+    m = np.float32([[1, 0, x1 + dx], [0, 1, y1 + dy]])
+    if x1 + dx < 0 or y1 + dy < 0 or x2 + dx > w or y2 + dy > h:
+        return -1.0
+    there = cv2.warpAffine(sb, m, (x2 - x1, y2 - y1), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)
+    return float((np.abs(there - sa[y1:y2, x1:x2])[sil] < _CARRY_GREY).mean())
+
+
+def _along_rail(a: np.ndarray, b: np.ndarray, seg: Segment, guess: Params, reach: float,
+                rail: Tuple[float, float]) -> Tuple[Params, float]:
+    """Where a piece on a rail is: its face slid along the line, scored by the share of it that lands on its own
+    value, then the sub-pixel read off the proven pixels' correlation.
+
+    The face is the proven pixels and the mask's interior, two pixels clear of its rim, where the smoothing reaches
+    no ground. Correlation is the wrong question at range for a piece whose face is flat: with nothing inside to
+    vary, the rim decides it, and correlation normalizes away the one thing that tells a flat face from any other
+    flat ground, its grey. On GeeTest the seat scored 0.26-0.5 against a plateau of decoys at 0.49 along a white
+    phone screen; the share is 0.88 there. Within a pixel of the seat the edges' correlation is the sharper of the
+    two.
+    """
+    sa = cv2.GaussianBlur(a.astype(np.float32), (0, 0), _SHARE_SMOOTH)
+    sb = cv2.GaussianBlur(b.astype(np.float32), (0, 0), _SHARE_SMOOTH)
+    face = seg.proven.astype(bool) | cv2.erode(seg.mask.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    ys, xs = np.nonzero(face)
+    box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    sil = face[box[1]:box[3], box[0]:box[2]]
+    n = int(math.ceil(reach))
+    along = [(guess[1] + k * rail[0], guess[2] + k * rail[1]) for k in range(-n, n + 1)]
+    scores = [_share(sa, sb, sil, box, dx, dy) for dx, dy in along]
+    i = int(np.argmax(scores))
+    if scores[i] < 0:
+        raise TrackingError("the object left the shot")
+    params, _ = _locate(a, b, seg.proven, seg.centroid, (0.0, *along[i]), 1.0, None, None, rail)
+    if math.hypot(params[1] - along[i][0], params[2] - along[i][1]) > 1.5:
+        params = (0.0, *along[i])
+    return params, max(scores[i], _share(sa, sb, sil, box, params[1], params[2]))
+
+
 def measure(first: Image, current: Image, seg: Segment, guess: Optional[Params] = None,
             reach_px: Optional[float] = None, reach_deg: Optional[float] = None) -> Tuple[Params, float]:
-    """The transform `first` -> `current` of the segmented object, and the match's correlation.
+    """The transform `first` -> `current` of the segmented object, and the match's confidence: the correlation, or
+    for a piece on a rail the share of it that lands where it was (`_along_rail`).
 
-    Raises TrackingError below `_MIN_CORRELATION`: the object is gone, covered, or redrawn, and a position read off
-    a poor match would steer the handle by a guess.
+    Raises TrackingError below `_MIN_CORRELATION` (`_MIN_SHARE`): the object is gone, covered, or redrawn, and a
+    position read off a poor match would steer the handle by a guess.
     """
     a, b = _pair(first, current)
     g = _constrain(seg, guess or (0.0, 0.0, 0.0))
     rp = reach_px if reach_px is not None else max(15.0, 0.3 * math.hypot(g[1], g[2]))
     rd = reach_deg if reach_deg is not None else max(4.0, 0.3 * abs(g[0]))
+    rail = _rail(seg)
+    if rail is not None:
+        params, share = _along_rail(a, b, seg, g, rp, rail)
+        if share < _MIN_SHARE:
+            raise TrackingError(f"lost the object: at best {share:.0%} of it lands where it was")
+        return params, share
     params, corr = _locate(a, b, seg.proven, seg.centroid, g, rp, _angles(g[0], rd) if _turns(seg) else None,
                            seg.pivot if _turns(seg) else None)
     if corr < _MIN_CORRELATION:
