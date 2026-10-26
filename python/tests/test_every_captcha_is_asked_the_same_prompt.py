@@ -69,3 +69,16 @@ def test_an_answer_names_the_element_under_its_point():
     drag = E.ids_for({"action": "drag", "drags": [{"from": [250, 500], "to": [990, 990]}]}, (100, 50), els)
     assert (drag["drags"][0]["from_id"], drag["drags"][0]["to_id"]) == (1, 3)
     assert "ids" not in E.ids_for({"action": "click", "points": [[1, 1]]}, (100, 50), [])
+
+
+def test_a_cell_filled_by_a_piece_is_numbered_once_as_the_piece():
+    """A drag grid labels each position twice, as its cell and as the piece or
+    slot in it. Numbered twice, a 5x5 board needed 53 numbers and every
+    position read as two choices; the piece is the one that says what it is."""
+    sq = lambda x, y: ((x, y), np.ones((40, 40), bool))  # noqa: E731
+    dets = [{"class": "cell", "box": [0, 0, 40, 40], "score": 1.0, "mask": sq(0, 0)},
+            {"class": "draggable", "box": [2, 2, 38, 38], "score": 1.0, "mask": sq(2, 2)},
+            {"class": "cell", "box": [50, 0, 90, 40], "score": 1.0, "mask": sq(50, 0)},
+            {"class": "drop_target", "box": [50, 0, 90, 40], "score": 1.0, "mask": sq(50, 0)},
+            {"class": "cell", "box": [100, 0, 140, 40], "score": 1.0, "mask": sq(100, 0)}]
+    assert [e["class"] for e in E.number(dets)] == ["draggable", "drop_target", "cell"]

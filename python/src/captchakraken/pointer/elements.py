@@ -28,16 +28,27 @@ EDGE_PX = 3
 MIN_SCORE = 0.5
 
 
-def number(dets: Sequence[Dict], min_score: float = MIN_SCORE) -> List[Dict]:
-    """Detector output -> the numbered elements, in reading order."""
+#: A cell whose box overlaps a piece's or slot's this much (IoU) IS that piece or
+#: slot: a drag grid labels every position as both.
+SAME_PLACE_IOU = 0.6
+
+
+def number(dets: Sequence[Dict], min_score: float = MIN_SCORE,
+           limit: Optional[int] = MAX_ELEMENTS) -> List[Dict]:
+    """Detector output -> the numbered elements, in reading order, at most `limit`
+    (None: all, to count a board that has too many). A cell that a piece, slot
+    or item fills is numbered once, as that element: it is one place to act
+    on, and the specific class says what is there."""
     els = []
     for d in dets:
         cls = RENAME.get(d["class"], d["class"])
         if cls in NUMBERED and d["score"] >= min_score:
             els.append({**d, "class": cls})
+    filled = [e["box"] for e in els if e["class"] in ("item", "draggable", "drop_target")]
+    els = [e for e in els if e["class"] != "cell" or all(_iou(e["box"], b) < SAME_PLACE_IOU for b in filled)]
     els.sort(key=lambda d: (round(((d["box"][1] + d["box"][3]) / 2) / 12),
                             (d["box"][0] + d["box"][2]) / 2))
-    return els[:MAX_ELEMENTS]
+    return els[:limit]
 
 
 #: Two detections on neighbouring frames are one element when their boxes overlap
