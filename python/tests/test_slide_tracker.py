@@ -148,6 +148,20 @@ def test_a_piece_on_a_rail_is_never_read_off_it():
     assert abs(params[2]) < 1.0 and params[1] == pytest.approx(s, abs=1.0)
 
 
+
+@pytest.mark.parametrize("rise", [-0.21, 0.3])
+def test_a_probe_that_barely_rose_reads_the_piece_on_its_level_rail(rise):
+    """A short probe reads a sub-pixel rise off a level rail; carried down the track, that rise put the predicted
+    piece 4.5 px above the seat on GeeTest, and the line searched through the prediction missed the seat and took
+    the still copy above it. The rail is level and runs through rest, wherever the prediction says."""
+    b = JigsawBoard(flat_face=True, decoy=26)
+    seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
+    seg.probe = (0.0, seg.probe[1], rise)
+    assert st._rail(seg) == (1.0, 0.0)
+    s = b.slot[0] - b.x0
+    params, _ = st.measure(b.render(0), b.render(s), seg, guess=(0.0, s, rise / 8 * s))
+    assert abs(params[2]) < 1.0 and params[1] == pytest.approx(s, abs=1.0)
+
 @pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
 def test_a_flat_piece_crossing_ground_its_own_shade_is_read_where_it_is(ratio):
     """Along a band of ground the tone of the piece's face, every shift lays the face on its own grey and only its

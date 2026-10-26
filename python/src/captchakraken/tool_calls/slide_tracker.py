@@ -14,10 +14,11 @@ ratio, no assumption about whether the handle slides the piece or turns it.
 2. The probe also says HOW the handle drives it: a SLIDE (a shift) or a TURN (about a pivot it fits). A handle does
    one or the other, and fitting both from a short probe lets a half-degree of noise grow into a ten-degree turn by
    the far end of the track.
-3. `measure` finds where the object is now. A piece on a rail is looked for only along the line the probe showed,
-   by the share of its face that lands on its own value, ties broken by the prediction; anything else by template
-   matching over its own mask near the prediction. Either way the exact warp is then scored to a fraction of a
-   pixel, so a busy board or an animated badge elsewhere cannot pull it.
+3. `measure` finds where the object is now. A piece on a rail is looked for only along its rail through rest, level
+   unless the probe rose by more than it can be read to, by the share of its face that lands on its own value, ties
+   broken by the prediction; anything else by template matching over its own mask near the prediction. Either way
+   the exact warp is then scored to a fraction of a pixel, so a busy board or an animated badge elsewhere cannot
+   pull it.
 4. `plan` fits the motion as a straight line in the handle's travel and picks the travel that brings the model's
    point closest to its goal.
 
@@ -94,9 +95,10 @@ _REFINE_MAX = 8
 # for shifts up to this share of it (at least 16 px) - a probe of 8 px at a handle ratio of up to 1.8 is 15.
 _SLID_WINDOW = 0.15
 _SLID_SHIFT = 0.08
-# How far off its rail (px) a slid object may be read: the line through rest and the probe, which is all a handle on
-# a track can do to it. Room for the sub-pixel jitter of a real page, not for a second motion.
-_RAIL_SLACK = 2.0
+# How well a probe's shift is read (px). A probe that rose or fell by less moved along x as the handle did: GeeTest's
+# 8 px probe read 0.21 px of rise on a level rail, which carried along a probe-angled line put the seat 4.6 px off it
+# by 170 px of travel, where a decoy was taken.
+_PROBE_PRECISION = 0.5
 
 
 class TrackingError(ValueError):
@@ -573,12 +575,18 @@ def _rail(seg: Segment) -> Optional[Tuple[float, float]]:
     """The direction a SLIDE the handle drives along its track can move, as the probe showed it; None otherwise.
 
     A carried piece goes wherever the pointer does, and a turn has no line; a piece on a rail has only this one, so
-    a match off it is something else in the picture that resembles it.
+    a match off it is something else in the picture that resembles it. The driver moves the handle along x, so the
+    rail is x unless the probe rose or fell by more than it can be read to: a short probe's own noise, carried down
+    the whole track, would put the far end of the rail pixels off the piece.
     """
     if seg.kind != SLIDE or seg.grabbed:
         return None
     n = math.hypot(seg.probe[1], seg.probe[2])
-    return (seg.probe[1] / n, seg.probe[2] / n) if n > 0 else None
+    if n == 0:
+        return None
+    if abs(seg.probe[2]) <= _PROBE_PRECISION:
+        return (math.copysign(1.0, seg.probe[1]), 0.0)
+    return (seg.probe[1] / n, seg.probe[2] / n)
 
 
 def _angles(centre: float, reach: float) -> List[float]:
@@ -600,11 +608,8 @@ def _peak(res: np.ndarray) -> Tuple[float, float, float]:
 
 
 def _match(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params,
-           reach: int, rail: Optional[Tuple[float, float]] = None) -> Optional[Tuple[Params, float]]:
-    """The object carried by `p`, matched against `b` within `reach` pixels: the shift that best seats it.
-
-    `rail`, a unit direction: only shifts within `_RAIL_SLACK` of the line through no shift along it are read.
-    """
+           reach: int) -> Optional[Tuple[Params, float]]:
+    """The object carried by `p`, matched against `b` within `reach` pixels: the shift that best seats it."""
     h, w = a.shape
     m = _rigid(p, c0)
     warped = cv2.warpAffine(a, m, (w, h), flags=cv2.INTER_LINEAR)
@@ -619,10 +624,6 @@ def _match(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params,
     res = cv2.matchTemplate(b[sy1:sy2, sx1:sx2], warped[y1:y2, x1:x2], cv2.TM_CCOEFF_NORMED,
                             mask=wmask[y1:y2, x1:x2])
     res = np.nan_to_num(res, nan=-1.0, posinf=-1.0, neginf=-1.0)
-    if rail is not None:
-        ry, rx = np.mgrid[0:res.shape[0], 0:res.shape[1]].astype(np.float32)
-        off = np.abs((p[1] + sx1 + rx - x1) * rail[1] - (p[2] + sy1 + ry - y1) * rail[0])
-        res[off > _RAIL_SLACK] = -1.0
     px, py, score = _peak(res)
     return (float(p[0]), float(p[1] + sx1 + px - x1), float(p[2] + sy1 + py - y1)), float(score)
 
@@ -695,8 +696,7 @@ def _polish(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params
 
 
 def _locate(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, guess: Params, reach_px: float,
-            angles: Optional[Sequence[float]], pivot: Optional[Point] = None,
-            rail: Optional[Tuple[float, float]] = None) -> Tuple[Params, float]:
+            angles: Optional[Sequence[float]], pivot: Optional[Point] = None) -> Tuple[Params, float]:
     """Where the object is in `b`: masked template matching near `guess`, to a tenth of a pixel.
 
     Matching, not a gradient method: it searches the whole window, so it cannot drift along an edge the way masked
@@ -710,7 +710,7 @@ def _locate(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, guess: Pa
         cands = [(float(th), guess[1], guess[2]) for th in angles]
     else:
         cands = [_turn_about(float(th), pivot, c0) for th in angles]
-    found = [(c, _match(a, b, mask, c0, c, int(math.ceil(reach_px if angles is None or pivot is None else 2)), rail))
+    found = [(c, _match(a, b, mask, c0, c, int(math.ceil(reach_px if angles is None or pivot is None else 2))))
              for c in cands]
     scored = [(c, f) for c, f in found if f is not None]
     if not scored:
@@ -724,7 +724,7 @@ def _locate(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, guess: Pa
             th = best[0] + _TURN_STEP * max(-0.5, min(0.5, 0.5 * (lo - hi) / den))
             best = _turn_about(th, pivot, c0) if pivot is not None else (th, best[1], best[2])
             best, score = _match(a, b, mask, c0, best, 2) or (best, score)
-    again = _match(a, b, mask, c0, best, 2, rail)
+    again = _match(a, b, mask, c0, best, 2)
     if again is not None:
         best, score = again
     return _polish(a, b, mask, c0, best, pivot)
@@ -763,7 +763,10 @@ def _along_rail(a: np.ndarray, b: np.ndarray, seg: Segment, guess: Params, reach
     box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
     sil = face[box[1]:box[3], box[0]:box[2]]
     n = int(math.ceil(reach))
-    along = [(guess[1] + k * rail[0], guess[2] + k * rail[1]) for k in range(-n, n + 1)]
+    # The rail runs through rest, not through the guess: a guess extrapolated from the probe carries the probe's
+    # own error, which on GeeTest's long track put the line 4.5 px above the seat.
+    t = guess[1] * rail[0] + guess[2] * rail[1]
+    along = [((t + k) * rail[0], (t + k) * rail[1]) for k in range(-n, n + 1)]
     scores = np.array([_share(sa, sb, sil, box, dx, dy) for dx, dy in along])
     if scores.max() < 0:
         raise TrackingError("the object left the shot")
@@ -771,7 +774,7 @@ def _along_rail(a: np.ndarray, b: np.ndarray, seg: Segment, guess: Params, reach
     peaks = np.nonzero(scores >= np.array([scores[max(0, k - 2):k + 3].max() for k in range(len(scores))]))[0]
     tied = peaks[scores[peaks] >= scores.max() - _SHARE_TIE]
     i = int(tied[np.argmin(np.abs(tied - n))])
-    params, _ = _locate(a, b, seg.proven, seg.centroid, (0.0, *along[i]), 1.0, None, None, rail)
+    params, _ = _locate(a, b, seg.proven, seg.centroid, (0.0, *along[i]), 1.0, None)
     if math.hypot(params[1] - along[i][0], params[2] - along[i][1]) > 1.5:
         params = (0.0, *along[i])
     return params, max(scores[i], _share(sa, sb, sil, box, params[1], params[2]))
