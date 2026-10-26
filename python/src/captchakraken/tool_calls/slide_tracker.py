@@ -74,6 +74,8 @@ _MODE_MAX = 3
 # explained ground within this reach of the core (px), the antialiased rim and the featureless ground hugging it.
 _CORE_CLOSE = 5
 _CORE_REACH = 2.0
+# Passes of mask <-> motion refinement at most; each grows the mask by at most the pixel test's 3 px reach.
+_REFINE_MAX = 8
 
 
 class TrackingError(ValueError):
@@ -176,8 +178,11 @@ def _outline(part: np.ndarray) -> np.ndarray:
 
 
 def _carried(a: np.ndarray, b: np.ndarray, part: np.ndarray, params: Params, c0: Point,
-             min_area: float) -> np.ndarray:
-    """The pixels around `part` that the object's own motion (`params` about `c0`) carries onto the probe."""
+             min_area: float, along: Optional[Tuple[float, float]] = None) -> np.ndarray:
+    """The pixels around `part` that the object's own motion (`params` about `c0`) carries onto the probe.
+
+    `along`, a slide's shift: what changed is joined along it (`_spans`) before the unchanged ground is trimmed.
+    """
     h, w = a.shape
     grow = cv2.dilate(part.astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
     landed = cv2.warpAffine(b.astype(np.float32), _rigid(params, c0), (w, h),
@@ -196,8 +201,10 @@ def _carried(a: np.ndarray, b: np.ndarray, part: np.ndarray, params: Params, c0:
     # only where it lies within reach of what changed, or inside its outline.
     still = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
                    - cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH))
-    core = cv2.morphologyEx((keep.astype(bool) & (still >= _CARRY_GREY)).astype(np.uint8), cv2.MORPH_CLOSE,
-                            np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
+    core = keep.astype(bool) & (still >= _CARRY_GREY)
+    if along is not None:
+        core = _spans(core, keep, along)
+    core = cv2.morphologyEx(core.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
     reach = cv2.distanceTransform((core == 0).astype(np.uint8), cv2.DIST_L2, 3) <= _CORE_REACH
     keep = _fill((keep.astype(bool) & reach | core.astype(bool)).astype(np.uint8))
     if keep.sum() < min_area:
@@ -237,17 +244,45 @@ def _flow_modes(flow: np.ndarray, weight: np.ndarray) -> List[Tuple[float, float
     return [(float((ex[i] + ex[i + 1]) / 2), float((ey[j] + ey[j + 1]) / 2)) for i, j in zip(ix[order], iy[order])]
 
 
-def _split(a: np.ndarray, b: np.ndarray, cut: np.ndarray, min_area: float) -> List[np.ndarray]:
+def _spans(core: np.ndarray, cut: np.ndarray, shift: Tuple[float, float]) -> np.ndarray:
+    """`core` joined across the cut along the motion: each run of the cut in the motion's direction filled from its
+    first core pixel to its last.
+
+    Moved along its length, a flat body changes only at its leading and trailing edges, which face each other along
+    the motion across its own unchanged middle. Ground bridging two bodies lies across the motion from them instead,
+    so this joins the halves of one body and never two bodies.
+    """
+    h, w = core.shape
+    turn = cv2.getRotationMatrix2D((w / 2, h / 2), math.degrees(math.atan2(shift[1], shift[0])), 1.0)
+    side = int(math.ceil(math.hypot(h, w)))
+    turn[:, 2] += (side - w) / 2, (side - h) / 2
+    flat = [cv2.warpAffine(m.astype(np.uint8), turn, (side, side), flags=cv2.INTER_NEAREST) > 0 for m in (core, cut)]
+    c, k = flat
+    run = np.cumsum(np.diff(np.pad(k, ((0, 0), (1, 0))).astype(np.int8), axis=1) == 1, axis=1) * k
+    out = np.zeros_like(c)
+    for y in np.nonzero(c.any(axis=1))[0]:
+        for r in np.unique(run[y][c[y]]):
+            xs = np.nonzero(c[y] & (run[y] == r))[0]
+            out[y, xs[0]:xs[-1] + 1] = True
+    back = cv2.warpAffine(out.astype(np.uint8), turn, (w, h), flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP)
+    return core.astype(bool) | ((back > 0) & cut.astype(bool))
+
+
+def _split(a: np.ndarray, b: np.ndarray, cut: np.ndarray, min_area: float,
+           shift: Optional[Tuple[float, float]] = None) -> List[np.ndarray]:
     """The separate bodies in a cut, which flat ground may join.
 
     Featureless ground is explained by ANY motion, the object's included, so it passes the pixel test and can bridge
     a piece to the knob under it. Only pixels that changed between the shots are evidence of a body: each body is
-    cored on those, and keeps the explained ground within reach of its own core and nearer to it than to any other.
+    cored on those, joined along a slide's motion (`_spans`), and keeps the explained ground within reach of its own
+    core and nearer to it than to any other.
     """
     changed = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
                      - cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH)) >= _CARRY_GREY
-    core = cv2.morphologyEx((cut.astype(bool) & changed).astype(np.uint8), cv2.MORPH_CLOSE,
-                            np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
+    core = cut.astype(bool) & changed
+    if shift is not None:
+        core = _spans(core, cut, shift)
+    core = cv2.morphologyEx(core.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
     n, labels, stats, _ = cv2.connectedComponentsWithStats(_fill(core), connectivity=8)
     cores = [labels == i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
     if not cores:
@@ -298,16 +333,22 @@ def _bodies(a: np.ndarray, b: np.ndarray, fwd: np.ndarray, moving: np.ndarray, p
         # motion then sharpen each other.
         try:
             exact, _ = _locate(a, b, inner.astype(np.uint8), c_part, guess, 3.0, angles)
-            cut = _carried(a, b, part, exact, c_part, min_area)
+            cut = _carried(a, b, part, exact, c_part, min_area, exact[1:] if kind == SLIDE else None)
         except TrackingError:
             continue
-        for mask in _split(a, b, cut, min_area):
+        for mask in _split(a, b, cut, min_area, exact[1:] if kind == SLIDE else None):
             c = _centroid(mask)
             params = _params_of(_rigid(exact, c_part), c)
             try:
-                for _ in range(2):
+                # Each pass reaches a few pixels past the last mask, so a body the flow covered only in part
+                # takes several to come out whole; it stops when a pass adds nothing.
+                for _ in range(_REFINE_MAX):
                     params, _ = _locate(a, b, mask, c, params, 3.0, angles and _angles(params[0], 2.0))
-                    mask = _carried(a, b, mask, params, c, min_area)
+                    grown = _carried(a, b, mask, params, c, min_area, params[1:] if kind == SLIDE else None)
+                    settled = bool((grown == mask).all())
+                    mask = grown
+                    if settled:
+                        break
             except TrackingError:
                 continue
             out.append((mask, params, kind, c))

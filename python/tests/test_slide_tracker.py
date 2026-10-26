@@ -92,6 +92,29 @@ def test_the_loop_seats_a_piece_framed_above_flat_ground(ratio):
 
 
 @pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
+def test_a_flat_faced_piece_is_one_body_not_its_two_edges(ratio):
+    """Slid sideways, a flat-faced piece changes only at its leading and trailing edges; its middle is the same in
+    both shots. Cored on what changed, it came out as two halves, the knob as three, and with no seed the largest
+    of those fragments, a slice of the knob, was steered onto the goal (GeeTest, generation 2)."""
+    b = JigsawBoard(ratio=ratio, flat_face=True)
+    piece, _ = b.footprint()
+    # Inside the rim: a flat face leaves its one-pixel rim stroke as the only detail at the edge, and a shift of a
+    # fraction of a pixel smears that stroke past the pixel test, as it does not a textured face's.
+    core = cv2.erode(piece.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    for seed in (b.centre(), None):
+        seg = st.segment(b.render(0), b.render(8), seed=seed, handle=b.handle())
+        assert (seg.mask.astype(bool) & core).sum() >= 0.95 * core.sum(), seed
+        assert abs(seg.centroid[0] - b.centre()[0]) < 6 and abs(seg.centroid[1] - b.centre()[1]) < 6, seed
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.27])
+def test_the_loop_seats_a_flat_faced_piece_without_a_seed(ratio):
+    b = JigsawBoard(ratio=ratio, flat_face=True)
+    s, _, reply = _drive(b, None, b.goal)
+    assert abs(b.centre(s)[0] - b.goal[0]) <= 2.0 and reply["done"]
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
 def test_flat_ground_the_probe_cannot_tell_from_the_piece_is_not_matched_as_the_piece(ratio):
     """At rest the piece sits on flat sky with flat dark ground ahead of it. Moved 8 px, the piece and that ground
     draw the same probe whether the ground moved or not, so the mask may hold some; matched against a shot of the

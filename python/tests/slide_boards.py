@@ -71,9 +71,10 @@ class JigsawBoard(_Board):
     """`picture_ends` (shot px): below it the ground is flat white down to the track, the way a widget frames its
     picture, and the piece rests `y0` from the top, so it can sit just above that flat strip. `flat_rest`: the
     piece rests on flat sky with a flat dark block just ahead of it, as on a Yidun photo, while the slot keeps its
-    texture."""
+    texture. `flat_face`: the piece is one flat tone inside its rim, as GeeTest draws a piece cut from a banner."""
 
-    def __init__(self, ratio=1.0, scale=1.0, badge=True, seed=3, y0=70, picture_ends=None, flat_rest=False):
+    def __init__(self, ratio=1.0, scale=1.0, badge=True, seed=3, y0=70, picture_ends=None, flat_rest=False,
+                 flat_face=False):
         super().__init__(scale, badge)
         k = scale
         self.ratio = ratio
@@ -92,6 +93,8 @@ class JigsawBoard(_Board):
         sx, sy = int(self.slot[0]), int(self.slot[1])
         mh, mw = self.mask.shape
         self.piece = self.bg[sy:sy + mh, sx:sx + mw].copy()
+        if flat_face:
+            self.piece[:] = (232, 230, 226)
         edge = cv2.dilate(self.mask, np.ones((3, 3), np.uint8)) - cv2.erode(self.mask, np.ones((3, 3), np.uint8))
         self.piece[edge > 0] = (250, 250, 250)
         hole = self.bg.copy()
