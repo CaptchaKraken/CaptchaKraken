@@ -431,12 +431,15 @@ def _slid_at(a: np.ndarray, b: np.ndarray, seed: Point, min_area: float) -> List
         return []
 
 
-def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Optional[Point] = None) -> Segment:
+def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Optional[Point] = None,
+            goal: Optional[Point] = None) -> Segment:
     """The object the probe moved, in `first` coordinates, and how the handle drives it.
 
     With `seed`, the body under it (or nearest to it, within reach), from the flow's parts or found by its motion
     alone (`_slid_at`). Without one, the largest body that is not the handle: what a generation-2 answer, which
-    names only the goal, has to settle for.
+    names only the goal, has to settle for. That answer still says where the piece rests: the driver slides the
+    handle along x, so a piece it moves onto `goal` starts on the goal's row, and with `goal` the bodies are looked
+    for along that row too and only one on it is taken.
     """
     a, b = _pair(first, probe)
     h, w = a.shape
@@ -454,7 +457,7 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
     n, labels, stats, _ = cv2.connectedComponentsWithStats(moving, connectivity=8)
     min_area = max(_MIN_PART_PX, _MIN_PART_FRACTION * h * w)
     parts = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
-    if not parts and seed is None:
+    if not parts and seed is None and goal is None:
         raise TrackingError("nothing moved between the press and the probe")
 
     def label_at(p: Optional[Point]) -> int:
@@ -498,11 +501,19 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
             raise TrackingError(f"nothing moved within {reach:.0f}px of the point on the object "
                                 f"({sx:.0f}, {sy:.0f}); the nearest moving body is {off:.0f}px away")
     else:
+        if goal is not None:
+            # Flow misses a piece that looks like the ground it moves over (see `_slid_at`); its row is known.
+            step = max(1, int(_SLID_WINDOW * min(h, w)))
+            for x in range(step, w - step + 1, step):
+                found += _slid_at(a, b, (float(x), float(goal[1])), min_area)
         carried = [f for f in found if not (held is not None and (f[0].astype(bool) & held).any())]
+        if goal is not None:
+            carried = [f for f in carried if np.abs(np.nonzero(f[0])[0] - goal[1]).min() <= reach]
         if not carried:
             if why is not None and not found:
                 raise why
-            raise TrackingError("only the handle moved; nothing it carries was seen")
+            raise TrackingError("only the handle moved; nothing it carries was seen" if goal is None else
+                                f"nothing that moved, but the handle, rests on the goal's row (y {goal[1]:.0f})")
         mask, exact, kind, c_part = max(carried, key=lambda f: int(f[0].sum()))
     c0 = _centroid(mask)
     exact = _params_of(_rigid(exact, c_part), c0)
@@ -845,7 +856,7 @@ def slide_step(first: Image, probe: Image, current: Image, *, probe_s: Offset, s
     no travel inside `bounds` brings it closer; `error` says which. Raises TrackingError when the object cannot be
     found or followed.
     """
-    seg = segment(first, probe, seed, handle)
+    seg = segment(first, probe, seed, handle, goal)
     point = seed if seed is not None else seg.centroid
     a = _gray(first)
 

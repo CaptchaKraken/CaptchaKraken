@@ -194,6 +194,20 @@ def test_a_seeded_piece_is_found_by_its_motion_where_flow_sees_none(ratio, monke
     assert abs(b.centre(s)[0] - b.goal[0]) <= 2.0 and reply["done"]
 
 
+@pytest.mark.parametrize("ratio", [0.8, 1.27])
+def test_without_a_seed_the_piece_on_the_goals_row_is_found_where_flow_sees_none(ratio, monkeypatch):
+    """A generation-2 answer names only the goal, but a piece slid onto it rests on its row. With the flow blind,
+    only that row says where to look; before, nothing was found and the handle was released where it was."""
+    b = JigsawBoard(ratio=ratio)
+    monkeypatch.setattr(st.cv2, "DISOpticalFlow_create", lambda *_: _BlindFlow())
+    goal = (b.goal[0], b.centre()[1])
+    seg = st.segment(b.render(0), b.render(8), seed=None, handle=b.handle(), goal=goal)
+    px, py = b.centre()
+    assert abs(seg.centroid[0] - px) < 8 and abs(seg.centroid[1] - py) < 8 and not seg.grabbed
+    s, _, reply = _drive(b, None, goal)
+    assert abs(b.centre(s)[0] - b.goal[0]) <= 3.0 and reply["done"]
+
+
 # ── how it moved ─────────────────────────────────────────────────────────────
 
 
