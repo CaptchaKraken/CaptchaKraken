@@ -3,7 +3,7 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [Unreleased]
+## [3.3.0] - 2026-10-27
 
 ### Added
 
@@ -60,6 +60,13 @@ semantic versioning; v2 is a major, **breaking** release.
   `funcaptcha` and `proton` instead of `unknown`.
 - **A button labelled Confirm submits a round**, after Verify, Next, Submit and
   Skip. AWS WAF's card has no other submit control.
+- **Each JS solver can have its own endpoint.** `new CaptchaKrakenSolver({ baseUrl })`
+  sets the OpenAI-compatible base for that solver; it defaults to
+  `VLLM_BASE_URL`. It decides the model name sent (`--model`), and the engine
+  each solve and outcome report starts is given it as `VLLM_BASE_URL`, together
+  with the solver's own `apiKey`. One process can now drive solvers that talk to
+  different servers with different keys without one environment variable
+  routing them all. Nothing changes when the option is absent.
 
 ### Fixed
 
@@ -79,18 +86,6 @@ semantic versioning; v2 is a major, **breaking** release.
 
 - **The `track-piece` CLI command** and the diff-based piece finder behind it.
   `slide-step` replaces it, for generation-2 answers too.
-
-## [3.3.0] - 2026-10-24
-
-### Added
-
-- **Each JS solver can have its own endpoint.** `new CaptchaKrakenSolver({ baseUrl })`
-  sets the OpenAI-compatible base for that solver; it defaults to
-  `VLLM_BASE_URL`. It decides the model name sent (`--model`), and the engine
-  each solve and outcome report starts is given it as `VLLM_BASE_URL`, together
-  with the solver's own `apiKey`. One process can now drive solvers that talk to
-  different servers with different keys without one environment variable
-  routing them all. Nothing changes when the option is absent.
 
 ### Security
 
