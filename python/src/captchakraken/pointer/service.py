@@ -40,7 +40,7 @@ class PointerService:
         self.stop_id = tok.convert_tokens_to_ids("<|im_end|>")
         self.llm = LLM(model=str(checkpoint), runner="pooling", max_model_len=max_model_len,
                        gpu_memory_utilization=gpu_memory_utilization,
-                       limit_mm_per_prompt={"image": 1, "video": 1},
+                       limit_mm_per_prompt={"image": 1 + L.MAX_HISTORY, "video": 1},
                        mm_processor_kwargs={"min_pixels": 64 * 64, "max_pixels": L.MAX_PIXELS}, **llm_kwargs)
         self.detector = None
         if detector is not None:
@@ -48,11 +48,22 @@ class PointerService:
             self.detector = Detector(detector)
 
     # ── one board ────────────────────────────────────────────────────────────
+    def _shown(self, image: Image.Image, marked: bool):
+        """(the board at the size the model sees, its numbered elements, the
+        picture sent): the same for a screen sent now or again as history."""
+        board = image.convert("RGB").resize(L.board_size(*image.size), Image.LANCZOS)
+        els = E.number(self.detector.detect(board)) if (marked and self.detector is not None) else []
+        return board, els, (M.draw(board, els) if els else board)
+
     def prepare(self, image: Optional[Image.Image] = None, frames: Optional[Sequence[np.ndarray]] = None,
-                marked: bool = True) -> Dict:
-        """The request vLLM gets, and what decoding its answer needs."""
+                marked: bool = True, history: Sequence[Image.Image] = ()) -> Dict:
+        """The request vLLM gets, and what decoding its answer needs. `history`:
+        the puzzle's earlier screens, oldest first, as they were sent (marked the
+        same way), so the prompt up to them is the one already cached."""
         if (image is None) == (frames is None):
             raise ValueError("give exactly one of image or frames")
+        if frames is not None and history:
+            raise ValueError("a video board carries no earlier screens")
         if frames is not None:
             fr = np.stack([np.asarray(f) for f in frames])
             n, h, w = fr.shape[:3]
@@ -72,11 +83,10 @@ class PointerService:
                                 "mm_processor_kwargs": {"do_sample_frames": False}},
                     "size": (w, h), "elements": tracks, "shown": None,
                     "timestamps": CV.pair_timestamps(n)}
-        board = image.convert("RGB").resize(L.board_size(*image.size), Image.LANCZOS)
-        els = E.number(self.detector.detect(board)) if (marked and self.detector is not None) else []
-        shown = M.draw(board, els) if els else board
-        return {"request": {"prompt": L.chat(self.processor, False),
-                            "multi_modal_data": {"image": shown}},
+        board, els, shown = self._shown(image, marked)
+        earlier = [self._shown(h, marked)[2] for h in history]
+        return {"request": {"prompt": L.chat(self.processor, False, history=len(earlier)),
+                            "multi_modal_data": {"image": [*earlier, shown] if earlier else shown}},
                 "size": board.size, "elements": els, "shown": shown, "timestamps": None}
 
     def decode(self, prep: Dict, vector: Sequence[float]) -> Dict:
@@ -98,14 +108,15 @@ class PointerService:
         return E.ids_for(ans, prep["size"], els)
 
     def solve(self, image: Optional[Image.Image] = None, frames: Optional[Sequence[np.ndarray]] = None,
-              marked: bool = True) -> Dict:
+              marked: bool = True, history: Sequence[Image.Image] = ()) -> Dict:
         """-> {"answer": generation-3 dict, "elements": numbered elements (board px;
         a video's are `elements.track` tracks),
         "shown": the image the model saw (None for a video), "size": board (W, H)}."""
-        return self.solve_many([{"image": image, "frames": frames, "marked": marked}])[0]
+        return self.solve_many([{"image": image, "frames": frames, "marked": marked, "history": history}])[0]
 
     def solve_many(self, boards: List[Dict]) -> List[Dict]:
-        preps = [self.prepare(b.get("image"), b.get("frames"), b.get("marked", True)) for b in boards]
+        preps = [self.prepare(b.get("image"), b.get("frames"), b.get("marked", True), b.get("history", ()))
+                 for b in boards]
         outs = self.llm.embed([p["request"] for p in preps], use_tqdm=False)
         return [{"answer": self.decode(p, o.outputs.embedding), "elements": p["elements"],
                  "shown": p["shown"], "size": p["size"]} for p, o in zip(preps, outs)]

@@ -25,7 +25,13 @@ from typing import Dict
 import numpy as np
 from PIL import Image
 
+from . import layout as L
+
 PATH = "/v1/pointer"
+
+
+def _image(b64: str) -> Image.Image:
+    return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
 
 
 def parse(body: Dict) -> Dict:
@@ -33,8 +39,14 @@ def parse(body: Dict) -> Dict:
     if ("image" in body) == ("frames" in body):
         raise ValueError("send exactly one of image or frames")
     marked = bool(body.get("marked", True))
+    history = body.get("history") or []
     if "image" in body:
-        return {"image": Image.open(io.BytesIO(base64.b64decode(body["image"]))).convert("RGB"), "marked": marked}
+        if len(history) > L.MAX_HISTORY:
+            raise ValueError(f"{len(history)} earlier screens; at most {L.MAX_HISTORY}")
+        return {"image": _image(body["image"]), "marked": marked,
+                "history": [_image(h) for h in history]}
+    if history:
+        raise ValueError("a video board carries no earlier screens")
     from .. import clipvideo as CV
     if abs(float(body.get("fps", CV.FPS)) - CV.FPS) > 1e-6:
         raise ValueError(f"frames must be cut at {CV.FPS} fps by clipvideo, got {body.get('fps')}")

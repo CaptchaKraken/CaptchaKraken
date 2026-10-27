@@ -37,6 +37,10 @@ MAX_CLICKS = 16
 MAX_DRAGS = 4
 MAX_TEXT = 16
 MAX_ELEMENTS = 48
+#: Earlier screens of the same puzzle a request may carry before the board
+#: (`chat`'s `history`): FunCaptcha's pager shows 7 options and a solve may page
+#: back, so this covers a solve that looks at each option once and returns.
+MAX_HISTORY = 8
 #: A still is resized to this many pixels at most, on the same 64 px lattice a
 #: video frame is (`clipvideo.frame_size`), so neither processor resizes it again
 #: and a token is always the same 32 px square of the board.
@@ -94,15 +98,27 @@ def to_norm(x: float, y: float, size: Tuple[int, int]) -> List[int]:
     return [int(round(x * 1000.0 / size[0])), int(round(y * 1000.0 / size[1]))]
 
 
-def chat(processor, video: bool) -> str:
+def chat(processor, video: bool, history: int = 0) -> str:
     """The whole prompt string, as training builds it and serving sends it: the
     same for every board (see the module docstring).
+
+    `history`: how many earlier screens of the same puzzle come before the board,
+    oldest first, each an image exactly as it was sent then. A solve's next
+    request is then this one up to its board plus one more screen, so the cached
+    prefix covers every screen already seen; the questions after the last image
+    see them all, and points land on the last only (`heads.Positions`). A video
+    is one look and has none.
 
     vLLM replaces the chat template's whole `<|vision_start|><|video_pad|><|vision_end|>`
     with its per-pair placeholder, where transformers keeps the outer pair around it;
     the bare pad goes in so both expand a video alike (an image they already agree on)."""
+    if video and history:
+        raise ValueError("a video board carries no earlier screens")
+    if not 0 <= history <= MAX_HISTORY:
+        raise ValueError(f"{history} earlier screens; at most {MAX_HISTORY}")
     media = {"type": "video"} if video else {"type": "image"}
-    msgs = [{"role": "user", "content": [{"type": "text", "text": INSTRUCTION}, media,
+    msgs = [{"role": "user", "content": [{"type": "text", "text": INSTRUCTION},
+                                         *({"type": "image"} for _ in range(history)), media,
                                          {"type": "text", "text": QUESTION_TEXT}]}]
     text = processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False)
     return text.replace("<|vision_start|><|video_pad|><|vision_end|>", VIDEO_PAD)

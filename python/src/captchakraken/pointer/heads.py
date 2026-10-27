@@ -41,6 +41,16 @@ class Positions:
         after_vis = torch.zeros_like(vis)
         after_vis[1:] = vis[:-1]
         self.moments = ((ids == token_ids[L.VISION_END]) & after_vis).nonzero().flatten()
+        # Earlier screens (`layout.chat`'s history) are images before the board:
+        # context the questions see, never a place a point lands. Only the last
+        # image is the board.
+        self.history = 0
+        if (ids == token_ids[L.IMAGE_PAD]).any() and self.moments.numel() > 1:
+            if (ids == token_ids[L.VIDEO_PAD]).any():
+                raise ValueError("a video board carries no earlier screens")
+            self.history = int(self.moments.numel()) - 1
+            self.vis = self.vis[self.vis > self.moments[-2]]
+            self.moments = self.moments[-1:]
         if self.q.numel() != len(L.QUESTIONS):
             raise ValueError(f"{self.q.numel()} question markers, expected {len(L.QUESTIONS)}")
         n_m = max(int(self.moments.numel()), 1)
