@@ -29,6 +29,10 @@ semantic versioning; v2 is a major, **breaking** release.
   `{"action": "hold", "press": [x, y], "from": [x, y], "to": [x, y]}` — and
   then the driver follows the fill from `from` and releases when it reaches
   `to` (new `fill-step` CLI command), timing the release between looks.
+- **The generation-3 prompt says what order several clicks or drags go in**: the
+  order they must be done, else increasing — by number when the things are
+  numbered, otherwise top to bottom and left to right within a row. It is the
+  order a generation-3 model is trained to answer in.
 - **A `refresh` action.** A generation-3 model can ask for a new puzzle instead
   of solving one a person would not; the driver presses the vendor's reload
   control (new `refresh` selector table) or the model's point on it, and does
