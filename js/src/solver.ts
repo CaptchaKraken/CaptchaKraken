@@ -422,7 +422,7 @@ export class CaptchaKrakenSolver {
       try {
         const { cliRoot, py } = this.resolveCli();
         const child = spawn(py, ['-m', 'captchakraken.cli', 'report-outcome', sessionId, solved ? Outcome.SOLVED : Outcome.FAILED],
-          { cwd: cliRoot, env: cliEnv(cliRoot, this.routingEnv()), stdio: ['ignore', 'pipe', 'pipe'] });
+          { cwd: cliRoot, env: solveEnv(cliEnv(cliRoot, this.routingEnv()), this.apiKey), stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '';
         child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
         // The engine words its own warnings; a hosted refusal must be as visible here as it is from Python.
@@ -672,8 +672,18 @@ export class CaptchaKrakenSolver {
   }
 
   /** The env the engine reads its routing headers from: session, and the vendor and site once they are known. */
+  /** This solver's endpoint and key: two solvers in one process may talk to different servers. */
+  private get baseUrl(): string | undefined {
+    return this.config.baseUrl ?? process.env.VLLM_BASE_URL;
+  }
+
+  private get apiKey(): string | undefined {
+    return this.config.apiKey ?? process.env.CAPTCHA_KRAKEN_API_KEY ?? process.env.VLLM_API_KEY;
+  }
+
   private routingEnv(): NodeJS.ProcessEnv {
     return {
+      ...(this.config.baseUrl ? { VLLM_BASE_URL: this.config.baseUrl } : {}),
       ...(this.solveSessionId ? { CAPTCHA_KRAKEN_SESSION: this.solveSessionId } : {}),
       ...(this.solveVendor ? { CAPTCHA_KRAKEN_VENDOR: this.solveVendor } : {}),
       ...(this.solveSite ? { CAPTCHA_KRAKEN_SITE: this.solveSite } : {}),
@@ -1236,15 +1246,15 @@ export class CaptchaKrakenSolver {
   }
 
   private loraName(cliRoot: string): string {
-    if (this.loraNameCache === null) this.loraNameCache = resolveLoraName({ cliRoot, baseUrl: process.env.VLLM_BASE_URL });
+    if (this.loraNameCache === null) this.loraNameCache = resolveLoraName({ cliRoot, baseUrl: this.baseUrl });
     return this.loraNameCache;
   }
 
-  /** The `--model` argv, or nothing: without VLLM_BASE_URL the CLI can see a credentials file this process cannot. */
+  /** The `--model` argv, or nothing: without a base URL the CLI can see a credentials file this process cannot. */
   private modelName(cliRoot: string): string | undefined {
     const explicit = this.config.model ?? process.env.CAPTCHA_LORA_NAME;
-    const name = explicit || (process.env.VLLM_BASE_URL ? this.loraName(cliRoot) : undefined);
-    if (name && !this.legacyModelWarned && isHostedEndpoint(process.env.VLLM_BASE_URL)
+    const name = explicit || (this.baseUrl ? this.loraName(cliRoot) : undefined);
+    if (name && !this.legacyModelWarned && isHostedEndpoint(this.baseUrl)
         && isLegacyHostedName(name, cliRoot)) {
       this.legacyModelWarned = true;
       console.error(`[captchakraken] ${LEGACY_MODEL_WARNING.replace('{model}', name)}`);
@@ -1944,7 +1954,7 @@ export class CaptchaKrakenSolver {
   /** Slice a burst into keyframes and solve them in one model request. The frame number is the guard. */
   private async getAnimatedSolution(framesDir: string): Promise<CliResponse> {
     const { cliRoot, py } = this.resolveCli();
-    const { apiKey = process.env.CAPTCHA_KRAKEN_API_KEY ?? process.env.VLLM_API_KEY } = this.config;
+    const { apiKey } = this;
     const m = this.modelName(cliRoot);
     const args = ['-m', 'captchakraken.cli', 'solve-animated', '--frames-dir', framesDir,
       '--fps', String(this.lastBurstFps ?? this.config.videoBurstFps ?? 10), ...(m ? ['--model', m] : [])];
@@ -2187,7 +2197,7 @@ export class CaptchaKrakenSolver {
   /** One inference through the CLI. */
   private async askModel(imagePath: string, puzzleSource: Vendor = Vendor.UNKNOWN, retryMode: RetryMode | null = null, textMode = false): Promise<CliResponse> {
     const { cliRoot, py } = this.resolveCli();
-    const { apiKey = process.env.CAPTCHA_KRAKEN_API_KEY ?? process.env.VLLM_API_KEY } = this.config;
+    const { apiKey } = this;
     const args = buildSolveArgs({ imagePath, model: this.modelName(cliRoot), puzzleSource, retryMode, textMode, expert: this.config.expert });
     console.log(`Executing CaptchaKraken CLI: ${redactCommand([py, ...args].join(' '), apiKey)}`);
     try {
