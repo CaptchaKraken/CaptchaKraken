@@ -138,10 +138,15 @@ export interface BoundingBox {
   3: number;
 }
 
-/** Present only on actions from an animated challenge: the keyframe the answer was read off. */
+/**
+ * Present only on actions from an animated challenge: the moment the answer was read off, and the picture the
+ * driver waits for before acting. `frame` (a keyframe number) on prompt generation 2, `t` (seconds into the
+ * clip) on generations that watch the animation as video.
+ */
 export interface AnimatedActionFields {
   await_keyframe?: string | null;
   frame?: number | null;
+  t?: number | null;
 }
 
 export interface ClickAction extends AnimatedActionFields {
@@ -155,7 +160,7 @@ export interface ClickAction extends AnimatedActionFields {
 
 export interface DragAction extends AnimatedActionFields {
   action: typeof ActionKind.DRAG;
-  /** Null on a puzzle-piece slider: the driver finds the handle and closes the loop on the piece. */
+  /** Null on a generation-2 puzzle-piece slider: the driver finds the handle by selector and steers the piece. */
   source_bounding_box: [number, number, number, number] | null;
   target_bounding_box: [number, number, number, number];
 }
@@ -174,7 +179,35 @@ export interface WaitAction {
   duration_ms: number;
 }
 
-export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction;
+/**
+ * Press on the box and keep pressing until the widget completes (prompt generation 3). When the model also named where
+ * the fill starts and where to let go, the driver follows the fill along that line and releases at its end.
+ */
+export interface HoldAction extends AnimatedActionFields {
+  action: typeof ActionKind.HOLD;
+  target_bounding_box: [number, number, number, number];
+  fill_from_bounding_box?: [number, number, number, number] | null;
+  fill_to_bounding_box?: [number, number, number, number] | null;
+}
+
+/** Load a new puzzle instead of solving this one (prompt generation 3). The box is the model's point on the control, or null when it saw none; the driver presses the vendor's own control first either way. */
+export interface RefreshAction {
+  action: typeof ActionKind.REFRESH;
+  target_bounding_box?: [number, number, number, number] | null;
+}
+
+/**
+ * Press the handle and move it until the point on the part it moves reaches the target (prompt generation 3). The
+ * driver tracks that part on screen and steers; nothing about the widget is read from its DOM.
+ */
+export interface SlideAction {
+  action: typeof ActionKind.SLIDE;
+  handle_bounding_box: [number, number, number, number];
+  source_bounding_box: [number, number, number, number];
+  target_bounding_box: [number, number, number, number];
+}
+
+export type CaptchaAction = ClickAction | WaitAction | DragAction | TypeAction | DoneAction | HoldAction | RefreshAction | SlideAction;
 export type SolverResult = CaptchaAction | CaptchaAction[];
 
 export interface TokenUsage {
