@@ -169,6 +169,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/cli-resolution-is-memoised.test.ts` | Resolving the interpreter is paid once, not once per inference. |
 | `js/src/model-name.test.ts` | The JS port asks for the same served model the Python port does. |
 | `js/src/expert-routing.test.ts` | The `expert` knob reaches the CLI, and is absent when unset. |
+| `js/src/each-solver-has-its-own-endpoint.test.ts` | The endpoint and key travel with each solver, not the process: two solvers in one process never route to each other's server. |
 | `js/src/humanize.test.ts` | Humanisation is an input device, not a realism dial: `mobile` never touches `page.mouse`. |
 | `js/src/vendor-hint-decides-the-expert.test.ts` | The vendor hint is whichever `SELECTORS` row detection matched, and it feeds the grid SHAPE GATE: a vendor must be named off the same substring its selectors use, or a click board can be read as a lattice. |
 | `js/src/idle-wander-stops-on-time.test.ts` | The cursor drift during inference stops when the thinking stops. |

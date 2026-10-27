@@ -3,6 +3,23 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [3.3.0] - 2026-10-24
+
+### Added
+
+- **Each JS solver can have its own endpoint.** `new CaptchaKrakenSolver({ baseUrl })`
+  sets the OpenAI-compatible base for that solver; it defaults to
+  `VLLM_BASE_URL`. It decides the model name sent (`--model`), and the engine
+  each solve and outcome report starts is given it as `VLLM_BASE_URL`, together
+  with the solver's own `apiKey`. One process can now drive solvers that talk to
+  different servers with different keys without one environment variable
+  routing them all. Nothing changes when the option is absent.
+
+### Security
+
+- **Pillow 13.0.0** (`pillow==13.0.0`, was 12.3.0): 12.3.0 carries CVEs that
+  13.0.0 fixes, and the exact pin kept downstream projects on it (#70).
+
 ## [3.2.2] - 2026-10-18
 
 ### Changed
