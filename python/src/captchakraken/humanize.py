@@ -62,6 +62,11 @@ class Humanizer:
     def move(self, page: Any, to: Point) -> None:
         raise NotImplementedError
 
+    def drift(self, page: Any, to: Point) -> None:
+        """A held hand's pixel of wander. `move` is a reach, and a reach overshoots: on a 1px move it wandered up to
+        34px, off a thin bar, which the widget takes for a release."""
+        self.move(page, to)
+
     def press(self, page: Any) -> None:
         raise NotImplementedError
 
@@ -107,7 +112,8 @@ def hold(human: "Humanizer", page: Any, to: Point, done: Callable[[], bool], max
         while True:
             _delay(random.uniform(*HOLD_POLL_MS))
             try:
-                human.move(page, (anchor[0] + random.gauss(0.0, 0.8), anchor[1] + random.gauss(0.0, 0.8)))
+                getattr(human, "drift", human.move)(page, (anchor[0] + random.gauss(0.0, 0.8),
+                                                         anchor[1] + random.gauss(0.0, 0.8)))
             except Exception:
                 pass
             if done():
@@ -173,6 +179,9 @@ class MouseHumanizer(Humanizer):
             return
         points, timings = trajectory(self.at, to, self._frequency)
         self._trace(page, points, timings)
+
+    def drift(self, page: Any, to: Point) -> None:
+        self._trace(page, [to], [0.0])
 
     def _trace(self, page: Any, points: Sequence[Point], timings: Sequence[float]) -> None:
         # Clamp only when the viewport is known: a guessed edge coordinate deadlocks camoufox's juggler.
@@ -420,6 +429,12 @@ class MobileHumanizer(Humanizer):
             points, timings = trajectory(self.at, to, self._frequency)
             self._touch(page).move([(x, y, timings[i] - (timings[i - 1] if i else 0.0))
                                     for i, (x, y) in enumerate(points)])
+        self.at = to
+
+    def drift(self, page: Any, to: Point) -> None:
+        to = (float(to[0]), float(to[1]))
+        if self._down:
+            self._touch(page).move([(to[0], to[1], 0.0)])
         self.at = to
 
     def press(self, page: Any) -> None:

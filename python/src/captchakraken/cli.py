@@ -103,7 +103,7 @@ def fill_step(req: dict) -> dict:
     try:
         return step(req["first"], req["current"], start=tuple(req["start"]), end=tuple(req["end"]), t=float(req["t"]),
                     history=req.get("history") or (), poll_s=float(req.get("poll_s") or 0.25),
-                    tol=float(req.get("tol") or 2.0))
+                    tol=float(req.get("tol") or 2.0), first_t=req.get("first_t"))
     except FillError as e:
         return {"error": str(e)}
 

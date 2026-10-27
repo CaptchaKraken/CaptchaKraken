@@ -2467,8 +2467,12 @@ export class CaptchaKrakenSolver {
     const done = async (): Promise<boolean> => {
       if (await this.isCaptchaSolved(page)) return true;
       if (!(await element.boundingBox().catch(() => null))) return true;
+      const n = looks.length;
       if (shots && (await this.fillReached(element, action, elementBox, shots, looks))) return true;
-      const h = await this.elementFrameHash(element);
+      // A look that just shot the widget is its frame too: a second screenshot per look slowed the looks enough for
+      // a fast fill to pass the mark unseen between two.
+      const fresh = shots && looks.length > n ? shots[n === 0 ? 0 : 1] : null;
+      const h = fresh ? sha1(fresh) : await this.elementFrameHash(element);
       if (h !== seen.hash) {
         Object.assign(seen, { hash: h, since: Date.now(), changed: seen.changed || h !== first });
         return false;
@@ -2483,7 +2487,8 @@ export class CaptchaKrakenSolver {
   }
 
   /**
-   * One look at a held widget's fill (`fill_tracker.py` behind the CV worker): true once it reaches the answer's `to`.
+   * One look at a held widget's fill (`fill_tracker.py` behind the CV worker): true once it reaches the answer's `to`,
+   * after waiting out the tracker's `release_in` when the fill arrives between looks.
    * The first look only shoots the reference, after the press, so the button's own pressed look is not read as fill;
    * `looks` carries what each later look saw. A look that cannot be shot or read is not a release: the widget's own
    * signals still end the hold.
@@ -2494,23 +2499,31 @@ export class CaptchaKrakenSolver {
     const timeout = this.config.elementScreenshotTimeoutMs ?? 8000;
     try {
       if (!looks.length) {
+        const before = performance.now() / 1000;
         await this.shot(element, first, timeout);
-        looks.push({ t: 0, edge: null, k: this.shotScale(first, w) });
+        looks.push({ t: (before + performance.now() / 1000) / 2, edge: null, k: this.shotScale(first, w) });
         return false;
       }
+      // The shot was taken somewhere inside the call; its middle is the best guess, and the release is timed from it.
+      const before = performance.now() / 1000;
       await this.shot(element, current, timeout);
+      const shotAt = (before + performance.now() / 1000) / 2;
       const k = looks[0].k!;
       const history = looks.slice(1).map(({ t, edge }) => ({ t, edge }));
       const at = (b: [number, number, number, number]): number[] => [((b[0] + b[2]) / 2) * w * k, ((b[1] + b[3]) / 2) * h * k];
       const gaps = history.slice(1).map((o, i) => o.t - history[i].t);
       const request = {
-        first, current, start: at(action.fill_from_bounding_box!), end: at(action.fill_to_bounding_box!), t: performance.now() / 1000,
-        history, poll_s: gaps.length ? gaps.reduce((x, y) => x + y, 0) / gaps.length : 0.25, tol: SLIDE_TOLERANCE_PX * k,
+        first, current, start: at(action.fill_from_bounding_box!), end: at(action.fill_to_bounding_box!), t: shotAt,
+        history, first_t: looks[0].t, poll_s: gaps.length ? gaps.reduce((x, y) => x + y, 0) / gaps.length : 0.25, tol: SLIDE_TOLERANCE_PX * k,
       };
       const res = await this.runCvTool('fill-step', request, ['fill-step', JSON.stringify(request)]);
       if (!res?.observation) return false;
       looks.push(res.observation);
-      if (res.release) console.log(`[hold] the fill reached its mark, ${((res.length - res.edge) / k).toFixed(1)}px short of it`);
+      if (res.release) {
+        console.log(`[hold] the fill reaches its mark ${(res.release_in ?? 0).toFixed(2)}s after a look ${((res.length - res.edge) / k).toFixed(1)}px short of it`);
+        const wait = (shotAt + (res.release_in ?? 0)) * 1000 - performance.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      }
       return Boolean(res.release);
     } catch {
       return false;

@@ -192,12 +192,35 @@ def test_the_tracker_lets_go_at_the_mark_and_ahead_of_a_fast_fill():
     first = _bar(50)
     assert fill_step(first, _bar(299), start=(50, 50), end=(300, 50), t=1.0)["release"]
     assert fill_step(first, _bar(330), start=(50, 50), end=(300, 50), t=1.0)["release"], "past the mark is late"
-    # 40 px short, moving 400 px/s: the next look a quarter second on would be 60 px past, so now is closer.
+    # 40 px short, moving 400 px/s: it arrives a tenth of a second after this shot, before the next look, so the
+    # release is timed for then rather than made on a look that would land 60 px past.
     hist = [{"t": 0.75, "edge": 110.0}]
     r = fill_step(first, _bar(260), start=(50, 50), end=(300, 50), t=1.0, history=hist, poll_s=0.25)
     assert r["speed"] == pytest.approx(400, abs=10) and r["release"]
+    assert r["release_in"] == pytest.approx(0.1 + 0.06, abs=0.01), "a hair late: early restarts a widget that fills to its end"
+    assert fill_step(first, _bar(299), start=(50, 50), end=(300, 50), t=1.0)["release_in"] == 0
     slow = [{"t": 0.0, "edge": 110.0}]
     assert not fill_step(first, _bar(260), start=(50, 50), end=(300, 50), t=1.0, history=slow, poll_s=0.25)["release"]
+
+
+def test_the_pace_is_fitted_over_several_looks():
+    """A slow fill moves ~10 px a look, so a pixel of edge noise between the last two is a tenth of its pace."""
+    from captchakraken.tool_calls.fill_tracker import fill_step
+    first = _bar(50)
+    # 40 px/s; the 0.75 s look read a pixel ahead, which two looks alone would take for 36 px/s.
+    hist = [{"t": 0.0, "edge": 100.0}, {"t": 0.25, "edge": 110.0}, {"t": 0.5, "edge": 120.0}, {"t": 0.75, "edge": 131.0}]
+    r = fill_step(first, _bar(190), start=(50, 50), end=(300, 50), t=1.0, history=hist)
+    assert r["edge"] == pytest.approx(139, abs=2) and r["speed"] == pytest.approx(40, abs=2)
+
+
+def test_the_first_look_has_a_pace_from_where_the_fill_was_at_the_press():
+    """A mark near the start is reached within a look or two; waiting for two looks with an edge passes it."""
+    from captchakraken.tool_calls.fill_tracker import fill_step
+    # Shot at t=0.2 with the fill at x=80, now at t=0.5 with it at x=200: 400 px/s, 100 px short of the mark at 300.
+    r = fill_step(_bar(80), _bar(200), start=(50, 50), end=(300, 50), t=0.5, first_t=0.2, poll_s=0.3)
+    assert r["speed"] == pytest.approx(400, abs=15) and r["release"]
+    assert r["release_in"] == pytest.approx(0.25 + 0.06, abs=0.02)
+    assert fill_step(_bar(80), _bar(200), start=(50, 50), end=(300, 50), t=0.5)["speed"] is None
 
 
 def test_the_executor_lets_go_when_the_fill_reaches_the_mark(monkeypatch, tmp_path):

@@ -54,7 +54,8 @@ export async function hold(human: Humanizer, page: Page, to: Point, done: () => 
   try {
     for (;;) {
       await delay(uniform(HOLD_POLL_MS[0], HOLD_POLL_MS[1]));
-      await human.move(page, [anchor[0] + gauss(0.8), anchor[1] + gauss(0.8)]).catch(() => undefined);
+      const to: Point = [anchor[0] + gauss(0.8), anchor[1] + gauss(0.8)];
+      await (human.drift ? human.drift(page, to) : human.move(page, to)).catch(() => undefined);
       if (await done()) return true;
       if (Date.now() - t0 >= maxMs) return false;
     }
@@ -70,6 +71,8 @@ export interface Humanizer {
   at: Point;
   reset(page: Page): Promise<void>;
   move(page: Page, to: Point): Promise<void>;
+  /** A pixel of wander while held; a humanizer without it drifts with `move`. */
+  drift?(page: Page, to: Point): Promise<void>;
   press(page: Page): Promise<void>;
   release(page: Page): Promise<void>;
   click(page: Page, to: Point): Promise<void>;
@@ -92,6 +95,13 @@ export abstract class BaseHumanizer implements Humanizer {
 
   async reset(_page: Page): Promise<void> {}
   abstract move(page: Page, to: Point): Promise<void>;
+  /**
+   * A held hand's pixel of wander. `move` is a reach, and a reach overshoots: on a 1px move it wandered up to 34px,
+   * off a thin bar, which the widget takes for a release.
+   */
+  async drift(page: Page, to: Point): Promise<void> {
+    await this.move(page, to);
+  }
   abstract press(page: Page): Promise<void>;
   abstract release(page: Page): Promise<void>;
   abstract typeText(page: Page, field: PlaywrightElementHandle, text: string): Promise<boolean>;
@@ -155,6 +165,15 @@ export class MouseHumanizer extends BaseHumanizer {
       } catch { /* try the next read */ }
     }
     return this.viewportCache;
+  }
+
+  async drift(page: Page, to: Point): Promise<void> {
+    try {
+      await page.mouse.move(to[0], to[1]);
+      this.at = [to[0], to[1]];
+    } catch (e) {
+      if (closedError(e)) log('could not move mouse; page or session closed');
+    }
   }
 
   async move(page: Page, to: Point): Promise<void> {
@@ -405,6 +424,12 @@ export class MobileHumanizer extends BaseHumanizer {
       const [points, timings] = trajectory(this.at, dest, this.frequency);
       await (await this.touch(page)).move(points.map(([x, y], i) => [x, y, timings[i] - (i ? timings[i - 1] : 0)]));
     }
+    this.at = dest;
+  }
+
+  async drift(page: Page, to: Point): Promise<void> {
+    const dest: Point = [Number(to[0]), Number(to[1])];
+    if (this.down) await (await this.touch(page)).move([[dest[0], dest[1], 0]]);
     this.at = dest;
   }
 

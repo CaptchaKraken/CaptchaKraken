@@ -35,6 +35,15 @@ _RUN_SHARE = 0.6
 _PAST = 0.15
 
 
+# A timed release is aimed this long after the predicted arrival. Early and late do not cost the same: when `end` is
+# where the fill stops (HUMAN's pill, a ring closing) the widget completes on its own and a release a few ms early
+# starts it over, while a late one is free; on a mark mid-bar this is a few pixels of the mark's tolerance.
+_LATE_S = 0.06
+# The pace is fitted over this many looks: two alone turn a pixel of edge noise on a slow fill into a release a
+# whole tolerance off, and a widget that eases changes pace over more than a few.
+_PACE_LOOKS = 4
+
+
 class FillError(ValueError):
     """The line cannot be read: a degenerate segment or shots of different sizes."""
 
@@ -70,38 +79,64 @@ def profile(first: Image, current: Image, start: Point, end: Point) -> Tuple[np.
     return np.median(np.stack(across), axis=0), length
 
 
-def leading_edge(changes: np.ndarray) -> Optional[float]:
-    """The furthest step the fill has reached, or None when nothing along the line has changed."""
+def _solid(changes: np.ndarray) -> np.ndarray:
+    """The changed steps whose last _RUN_PX steps are mostly changed too."""
     on = changes > _CHANGED
-    if not on.any():
-        return None
     run = np.convolve(on.astype(np.float32), np.ones(_RUN_PX, np.float32), mode="full")[:len(on)]
     count = np.minimum(np.arange(1, len(on) + 1), _RUN_PX)
-    solid = on & (run / count >= _RUN_SHARE)
-    idx = np.flatnonzero(solid)
+    return on & (run / count >= _RUN_SHARE)
+
+
+def leading_edge(changes: np.ndarray) -> Optional[float]:
+    """The furthest step the fill has reached, or None when nothing along the line has changed."""
+    idx = np.flatnonzero(_solid(changes))
     return float(idx[-1]) if len(idx) else None
 
 
+def trailing_edge(changes: np.ndarray) -> Optional[float]:
+    """Where the fill was when the reference was shot: the changed run starts there, because what had already filled
+    by then looks the same in both shots."""
+    idx = np.flatnonzero(_solid(changes[::-1]))
+    return float(len(changes) - 1 - idx[-1]) if len(idx) else None
+
+
+def _pace(looks: Sequence[Tuple[float, float]]) -> Optional[float]:
+    """Pixels per second, least squares over (t, edge) looks; None from fewer than two."""
+    if len(looks) < 2:
+        return None
+    ts, es = np.array(looks, dtype=np.float64).T
+    if np.ptp(ts) <= 0:
+        return None
+    return float(np.polyfit(ts, es, 1)[0])
+
+
 def fill_step(first: Image, current: Image, *, start: Point, end: Point, t: float,
-              history: Sequence[Dict[str, Any]] = (), poll_s: float = 0.25, tol: float = 2.0) -> Dict[str, Any]:
+              history: Sequence[Dict[str, Any]] = (), poll_s: float = 0.25, tol: float = 2.0,
+              first_t: Optional[float] = None) -> Dict[str, Any]:
     """One look at a held widget: how far its fill has come, and whether to release it now.
 
-    `t` is the caller's clock (seconds) at this shot and `history` the `observation` of each earlier look, oldest
-    first. `release` is true once the edge is within `tol` of `end` or past it, or when the next look, at the fill's
-    measured pace `poll_s` from now, would land further past `end` than the edge is short of it now.
+    `t` is the caller's clock (seconds) when this shot was taken and `history` the `observation` of each earlier
+    look, oldest first; `first_t` is when `first` was shot, which gives the first look a pace of its own (see
+    `trailing_edge`) so a mark close to the start is not passed while two looks are gathered. `release` is true once the edge is within `tol` of `end` or past it, or when at its measured
+    pace the fill reaches `end` before the next look, `poll_s` away. `release_in` is then how long after `t` to let
+    go, a little after the arrival (`_LATE_S`): releasing on the look instead lands up to a whole look's travel past
+    the mark, and a fast fill covers more than a mark's tolerance in one.
     """
     changes, length = profile(first, current, start, end)
     edge = leading_edge(changes)
     obs = {"t": float(t), "edge": edge}
-    out: Dict[str, Any] = {"edge": edge, "length": length, "observation": obs, "release": False, "speed": None}
+    out: Dict[str, Any] = {"edge": edge, "length": length, "observation": obs, "release": False, "release_in": None,
+                           "speed": None}
     if edge is None:
         return out
     short = length - edge
-    prev = next((o for o in reversed(history) if o.get("edge") is not None and float(o["t"]) < t), None)
-    if prev is not None:
-        out["speed"] = (edge - float(prev["edge"])) / (t - float(prev["t"]))
+    seen = [(float(o["t"]), float(o["edge"])) for o in history if o.get("edge") is not None and float(o["t"]) < t]
+    back = trailing_edge(changes) if first_t is not None and float(first_t) < t else None
+    if back is not None and back < edge and all(float(first_t) < ts for ts, _ in seen):
+        seen = [(float(first_t), back)] + seen
+    out["speed"] = _pace(seen[-(_PACE_LOOKS - 1):] + [(t, edge)])
     if short <= tol:
-        out["release"] = True
-    elif out["speed"] and out["speed"] > 0:
-        out["release"] = out["speed"] * poll_s - short > short
+        out["release"], out["release_in"] = True, 0.0
+    elif out["speed"] and out["speed"] > 0 and short / out["speed"] <= poll_s:
+        out["release"], out["release_in"] = True, short / out["speed"] + _LATE_S
     return out
