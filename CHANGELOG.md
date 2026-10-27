@@ -25,6 +25,10 @@ semantic versioning; v2 is a major, **breaking** release.
 - **A `hold` action.** Both drivers press and hold until the widget reports
   success, closes, or finishes drawing its progress (12s cap), and always
   release. Press-and-hold widgets are detected by their host-page container.
+  A generation-3 hold can name where to let go —
+  `{"action": "hold", "press": [x, y], "from": [x, y], "to": [x, y]}` — and
+  then the driver follows the fill from `from` and releases when it reaches
+  `to` (new `fill-step` CLI command), timing the release between looks.
 - **A `refresh` action.** A generation-3 model can ask for a new puzzle instead
   of solving one a person would not; the driver presses the vendor's reload
   control (new `refresh` selector table) or the model's point on it, and does
