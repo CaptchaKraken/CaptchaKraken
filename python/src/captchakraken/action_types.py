@@ -55,10 +55,13 @@ class DoneAction(Action):
 
 
 class HoldAction(Action):
-    """Press on the box and keep pressing until the widget completes (prompt generation 3)."""
+    """Press on the box and keep pressing until the widget completes (prompt generation 3). When the model also named
+    where the fill starts and where to let go, the driver follows the fill along that line and releases at its end."""
 
     action: Literal[ActionKind.HOLD]
     target_bounding_box: BoundingBox
+    fill_from_bounding_box: Optional[BoundingBox] = None
+    fill_to_bounding_box: Optional[BoundingBox] = None
 
 
 class RefreshAction(Action):

@@ -706,6 +706,7 @@ class PageSolver:
 
         Complete is the vendor's done signal, the widget closing, or its picture having changed (the fill)
         and then sat still for HOLD_SETTLE_MS. A widget that draws no progress at all is held to HOLD_MAX_MS.
+        When the answer names the fill's line, the fill reaching its end is complete too: see `_fill_reached`.
         """
         self._acted_on_board = True
         rel = self._click_point_for(action, element_box)
@@ -715,25 +716,87 @@ class PageSolver:
         at = (element_box["x"] + rel[0], element_box["y"] + rel[1])
         first = self._element_frame_hash(element)
         seen = {"hash": first, "since": time.monotonic(), "changed": False}
+        line = action.get("fill_from_bounding_box") and action.get("fill_to_bounding_box")
+        shots = (_tmp_png("hold"), _tmp_png("hold")) if line else None
+        looks: List[Dict[str, Any]] = []
 
         def done() -> bool:
             if self.is_captcha_solved(page):
+                _debug("hold: the vendor reports solved")
                 return True
             try:
                 if not element.bounding_box():
+                    _debug("hold: the widget closed")
                     return True
             except Exception:
+                _debug("hold: the widget closed")
                 return True
-            h, now = self._element_frame_hash(element), time.monotonic()
+            n = len(looks)
+            if shots and self._fill_reached(element, action, element_box, shots, looks):
+                return True
+            # A look that just shot the widget is its frame too: a second screenshot per look slowed the looks
+            # enough for a fast fill to pass the mark unseen between two.
+            fresh = shots[0 if n == 0 else 1] if shots and len(looks) > n else None
+            h, now = (_sha1(fresh) if fresh else self._element_frame_hash(element)), time.monotonic()
             if h != seen["hash"]:
                 seen.update(hash=h, since=now, changed=seen["changed"] or h != first)
                 return False
-            return seen["changed"] and (now - seen["since"]) * 1000.0 >= HOLD_SETTLE_MS
+            settled = seen["changed"] and (now - seen["since"]) * 1000.0 >= HOLD_SETTLE_MS
+            if settled:
+                _debug(f"hold: the picture sat still for {HOLD_SETTLE_MS}ms")
+            return settled
 
-        with self._gesture():
-            completed = hold(self._human, page, at, done, HOLD_MAX_MS)
+        try:
+            with self._gesture():
+                completed = hold(self._human, page, at, done, HOLD_MAX_MS)
+        finally:
+            for shot in shots or ():
+                _unlink(shot)
         _log("held until the widget completed." if completed else f"released the hold at the {HOLD_MAX_MS}ms cap.")
         return completed
+
+    def _fill_reached(self, element: Any, action: Dict[str, Any], element_box: Dict[str, float],
+                      shots: Tuple[str, str], looks: List[Dict[str, Any]]) -> bool:
+        """One look at a held widget's fill (`tool_calls.fill_tracker`): True once it reaches the answer's `to`, after
+        waiting out the tracker's `release_in` when the fill arrives between looks.
+
+        The first look only shoots the reference, after the press, so the button's own pressed look is not read as
+        fill; `looks` carries what each later look saw. A look that cannot be shot or read is not a release: the
+        widget's own signals still end the hold."""
+        from .tool_calls.fill_tracker import fill_step
+
+        first, current = shots
+        w, h = element_box["width"], element_box["height"]
+        timeout = self.config.element_screenshot_timeout_ms
+        try:
+            if not looks:
+                shot_at = time.monotonic()
+                self._screenshot(element, first, timeout_ms=timeout)
+                looks.append({"k": self._shot_scale(first, w), "t": (shot_at + time.monotonic()) / 2})
+                return False
+            shot_at = time.monotonic()
+            self._screenshot(element, current, timeout_ms=timeout)
+            # The shot was taken somewhere inside the call; its middle is the best guess, and the release is timed
+            # from it.
+            shot_at = (shot_at + time.monotonic()) / 2
+            k, history = looks[0]["k"], looks[1:]
+
+            def at(bbox: Sequence[float]) -> Tuple[float, float]:
+                return (float(bbox[0]) + float(bbox[2])) / 2 * w * k, (float(bbox[1]) + float(bbox[3])) / 2 * h * k
+
+            gaps = [b["t"] - a["t"] for a, b in zip(history, history[1:])]
+            reply = fill_step(first, current, start=at(action["fill_from_bounding_box"]),
+                              end=at(action["fill_to_bounding_box"]), t=shot_at, history=history, first_t=looks[0]["t"],
+                              poll_s=sum(gaps) / len(gaps) if gaps else 0.25, tol=self.config.slide_tolerance_px * k)
+        except Exception as exc:
+            _debug(f"hold: the fill was not read ({exc})")
+            return False
+        looks.append(reply["observation"])
+        if reply["release"]:
+            _log(f"hold: the fill reaches its mark {reply['release_in'] or 0:.2f}s after a look "
+                 f"{(reply['length'] - reply['edge']) / k:+.1f}px short of it")
+            _delay((shot_at + (reply["release_in"] or 0.0) - time.monotonic()) * 1000.0)
+        return bool(reply["release"])
 
     def _execute_refresh(self, page: Any, scope: Any, action: Dict[str, Any],
                          element_box: Optional[Dict[str, float]]) -> bool:

@@ -94,6 +94,20 @@ def slide_step(req: dict) -> dict:
         return {"error": str(e)}
 
 
+def fill_step(req: dict) -> dict:
+    """One look at a held widget's fill (`tool_calls/fill_tracker.py`); an unreadable line is `{"error"}`, never a
+    release, so the driver keeps holding on the widget's own signals."""
+    from .tool_calls.fill_tracker import FillError
+    from .tool_calls.fill_tracker import fill_step as step
+
+    try:
+        return step(req["first"], req["current"], start=tuple(req["start"]), end=tuple(req["end"]), t=float(req["t"]),
+                    history=req.get("history") or (), poll_s=float(req.get("poll_s") or 0.25),
+                    tol=float(req.get("tol") or 2.0), first_t=req.get("first_t"))
+    except FillError as e:
+        return {"error": str(e)}
+
+
 def _find_grid(args):
     from .tool_calls.find_grid import find_grid
 
@@ -179,6 +193,12 @@ def _slide_step(args):
     return slide_step(json.loads(open(raw).read() if os.path.exists(raw) else raw))
 
 
+def _fill_step(args):
+    _need(args, 1, "fill-step request.json  (or the JSON itself)")
+    raw = args[0]
+    return fill_step(json.loads(open(raw).read() if os.path.exists(raw) else raw))
+
+
 def _report_outcome(args):
     """Tell the hosted API whether the widget accepted. Always exits 0: this runs after the solve is over."""
     if len(args) < 2 or args[1] not in list(Outcome):
@@ -223,6 +243,8 @@ def _serve(args):
             return find_checkbox(req["image"])
         if cmd == "slide-step":
             return slide_step(req)
+        if cmd == "fill-step":
+            return fill_step(req)
         raise ValueError(f"unknown cmd: {cmd!r}")
 
     sys.stdout.write(json.dumps({"ready": True}) + "\n")
@@ -342,6 +364,7 @@ COMMANDS: Dict[str, Callable[[List[str]], Any]] = {
     "match-region": _match_region,
     "board-painted": _board_painted,
     "slide-step": _slide_step,
+    "fill-step": _fill_step,
     "report-outcome": _report_outcome,
     "serve": _serve,
     "solve-animated": _solve_animated,

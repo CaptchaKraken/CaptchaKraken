@@ -55,12 +55,14 @@ VISION_END = "<|vision_end|>"
 
 #: (question, kind). A kind has its own query projections: what a click names
 #: differs from what a drag picks up (`pick`), where it lets go (`drop`), and what
-#: a slider presses. A slide's `from` is picked up and its `to` dropped on.
+#: a slider presses. A slide's `from` is picked up and its `to` dropped on; a
+#: hold presses like a handle, and its fill runs from `from` to where it is let go.
 SLOTS: List[Tuple[str, str]] = (
     [(f"click{k}", "click") for k in range(1, MAX_CLICKS + 1)]
     + [(f"drag{k} {end}", kind) for k in range(1, MAX_DRAGS + 1)
        for end, kind in (("from", "pick"), ("to", "drop"))]
     + [("slide handle", "handle"), ("slide from", "pick"), ("slide to", "drop")]
+    + [("hold press", "handle"), ("hold from", "pick"), ("hold to", "drop")]
 )
 KINDS = ("click", "pick", "drop", "handle")
 TEXT = [f"text{k}" for k in range(1, MAX_TEXT + 1)]
@@ -168,10 +170,8 @@ def answer(decision: Dict, grid: Tuple[int, int], *, text: Optional[str] = None,
     if timestamps:
         out["t"] = float(timestamps[min(decision["moment"], len(timestamps) - 1)])
     out["action"] = act
-    if act in ("click", "hold", "refresh"):
+    if act in ("click", "refresh"):
         n = max(range(N_COUNTS), key=lambda k: decision["count_p"][k])
-        if act == "hold":
-            n = 1
         if act == "refresh":
             n = min(n, 1)
         names = [f"click{k}" for k in range(1, n + 1)]
@@ -184,6 +184,8 @@ def answer(decision: Dict, grid: Tuple[int, int], *, text: Optional[str] = None,
         out["drags"] = drags
     elif act == "slide":
         out.update({"handle": p("slide handle"), "from": p("slide from"), "to": p("slide to")})
+    elif act == "hold":
+        out.update({"press": p("hold press"), "from": p("hold from"), "to": p("hold to")})
     else:
         out["text"] = text or ""
     return out

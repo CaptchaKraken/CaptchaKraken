@@ -155,6 +155,7 @@
       "check-movement",
       "detect-selected",
       "fetch",
+      "fill-step",
       "find-checkbox",
       "find-grid",
       "get-numbered-grid",
