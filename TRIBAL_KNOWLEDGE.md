@@ -328,6 +328,19 @@ the recorded page in Chromium and in a Firefox-based browser. The enclave itself
 or a page showing nothing but an idle enclave would be reported as markup the
 table no longer matches.
 
+**A modal opened by a box on the page is a `challenge`, not a `widget`.**
+CaptchaFox's "I am human" box stays on screen under the puzzle it opens, and
+detection reads challenges, then checkboxes, then widgets. Listed as a widget,
+the open modal would be outranked by the box, and the next round would click
+the box again. An inline element in `challenge` is fine: the role decides the order and
+the checkbox flow, not whether the row is a frame. Dingxiang's trigger bar is
+left out on purpose: `find-checkbox` finds no box in it, so as a checkbox it
+would fail every round; its popup is a plain widget. Four of the five rows
+added to the table have no `response`: AWS WAF, Dingxiang and Proton hand the
+token to a callback or a `postMessage`, and Arkose writes `fc-token` inside its
+own frame, out of the host page's reach. Their done signal is the widget
+leaving the page.
+
 **Yandex and MTCaptcha are iframed.** `.CheckboxCaptcha` and `.mtcap` live
 inside the frame document and `querySelector` does not cross a frame boundary,
 so on the host page those entries matched nothing, ever. Iframe selectors go

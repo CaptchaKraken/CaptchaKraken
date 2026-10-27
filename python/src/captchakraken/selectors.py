@@ -56,10 +56,12 @@ class VendorSelectors:
 
 
 SELECTORS: Mapping[Vendor, VendorSelectors] = {
+    # An Enterprise sitekey serves the same widget from /recaptcha/enterprise/ instead of /recaptcha/api2/.
     Vendor.RECAPTCHA: VendorSelectors(
         hosts=("google.com/recaptcha", "recaptcha.net"),
-        challenge=('iframe[src*="recaptcha/api2/bframe"]',),
-        checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',),
+        challenge=('iframe[src*="recaptcha/api2/bframe"]', 'iframe[src*="recaptcha/enterprise/bframe"]'),
+        checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',
+                  'iframe[src*="recaptcha/enterprise/anchor"]:not([src*="size=invisible"])'),
         response='[name="g-recaptcha-response"]',
         checked=".recaptcha-checkbox-checked",
         box=("#recaptcha-anchor",),
@@ -157,6 +159,37 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         hosts=(),
         widget=("#px-captcha",),
     ),
+    # The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.
+    Vendor.AWSWAF: VendorSelectors(
+        hosts=("awswaf.com",),
+        widget=(".amzn-captcha-modal",),
+    ),
+    # The puzzle opens in a modal over the "I am human" box, which stays on screen, so the modal is a challenge: a
+    # widget would be outranked by the box and the box clicked again.
+    Vendor.CAPTCHAFOX: VendorSelectors(
+        hosts=("captchafox.com",),
+        challenge=(".cf-modal__challenge",),
+        checkbox=('div[id^="cf-widget-"]',),
+        response='[name="cf-captcha-response"]',
+        slider_handle=(".cf-slider__button",),
+    ),
+    # Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.
+    Vendor.DINGXIANG: VendorSelectors(
+        hosts=("cdn.dingxiang-inc.com/ctu-group/captcha", "cap.dingxiang-inc.com"),
+        widget=(".dx_captcha_oneclick_one-step",),
+        slider_handle=(".dx_captcha_basic_slider", ".dx_captcha_rotate_slider"),
+    ),
+    # The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside
+    # it; the game frame's own path is listed so a page that frames the game directly is found too.
+    Vendor.FUNCAPTCHA: VendorSelectors(
+        hosts=("arkoselabs.com",),
+        widget=('iframe[src*="arkoselabs.com"]', 'iframe[src*="ec-game-core/game-core"]'),
+    ),
+    # Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.
+    Vendor.PROTON: VendorSelectors(
+        hosts=("/core/v4/captcha",),
+        widget=('iframe[src*="/core/v4/captcha"]',),
+    ),
     Vendor.UNKNOWN: VendorSelectors(hosts=()),
 }
 assert set(SELECTORS) == set(Vendor), "every vendor names its selectors"
@@ -194,8 +227,9 @@ def submit_by_text(text: str) -> str:
     return f"xpath=.//button[contains({_LOWER}, '{text}')] | .//div[@role=\"button\" and contains({_LOWER}, '{text}')]"
 
 
-# A real Verify/Next/Submit/Skip first; the vendor-named controls are fallbacks.
-SUBMIT_SELECTORS: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip")), *_of_every_vendor("submit"))
+# A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
+SUBMIT_SELECTORS: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip", "confirm")),
+                                   *_of_every_vendor("submit"))
 
 # Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
 # reached before the vendor's own is how a captcha's answer ends up in a login form's username box.

@@ -17,6 +17,11 @@ class Vendor(StrEnum):
     MTCAPTCHA = "mtcaptcha"
     BOTDETECT = "botdetect"
     HUMAN = "human"
+    AWSWAF = "awswaf"
+    CAPTCHAFOX = "captchafox"
+    DINGXIANG = "dingxiang"
+    FUNCAPTCHA = "funcaptcha"
+    PROTON = "proton"
     UNKNOWN = "unknown"
 
 

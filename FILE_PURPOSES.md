@@ -206,6 +206,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/the-vendor-says-whether-the-round-was-taken.test.ts` | Every recorded answer-check response parses as the vendor meant it, an accepted verdict ends the solve, a rejected one counts a loop, and only a refusal to serve ends the solve early. |
 | `js/src/a-widget-is-waited-for.test.ts` | A widget that draws late is waited for without charging the solve budget, and "no captcha" names the cause instead of blaming the selectors. |
 | `js/src/a-widget-inside-an-enclave-is-found.test.ts` | A challenge drawn inside a vendor's enclave frame is found, in the visible enclave only, and is clicked and read as solved through both frame levels; the enclave is never reported as markup the table missed. |
+| `js/src/every-trained-vendor-is-found.test.ts` | Each vendor added to the table (AWS WAF, CaptchaFox, Dingxiang, FunCaptcha, Proton, and reCAPTCHA Enterprise's frames) is found from the markup its own page ships and named by its own row; an open modal outranks the box that opened it, and a Confirm button submits. |
 | `js/src/outcome-reporting.test.ts` | The outcome report reaches the engine with the session, vendor and site, a hosted refusal is warned about every time, and a self-hosted endpoint with no route is not asked again. |
 | `js/src/the-package-ships-only-what-it-runs.test.ts` | The npm tarball holds the driver and the engine source it installs, and nothing else. |
 | `js/src/watcher.test.ts` | The watcher's contract, driven against a fake solver. |
@@ -312,6 +313,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer` and never runs find_grid; its answer is performed like generation 3's. |
 | `python/tests/test_an_element_is_outlined_by_its_mask.py` | The overlay traces each element's mask, keeps its tags small and off one another, and its look is frozen by a hash. |
 | `python/tests/test_the_pointer_reads_its_answer_from_one_prefill.py` | The heads find their 46 questions and the video moments in one prompt, and the packed decision round-trips. |
+| `python/tests/test_earlier_screens_are_context_before_the_board.py` | A pointer request may carry a puzzle's earlier screens: they go before the board, oldest first, as context, and points are read off the board alone. |
 | `python/tests/test_every_captcha_is_asked_the_same_prompt.py` | Every captcha is asked one fixed prompt with its board after it; a video's elements keep one number across frames; an element number is read from what lies under each point. |
 | `python/tests/test_a_blank_board_is_not_photographed.py` | The load gate in front of every inference screenshot, and the fences that stop it stalling a legitimately sparse puzzle. |
 | `python/tests/test_a_board_that_will_not_film_may_already_be_solved.py` | A burst that caught no frame is not a verdict about the board; it must not discard a board the vendor already took. |
@@ -343,6 +345,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_the_vendor_says_whether_the_round_was_taken.py` | Every recorded answer-check response parses as the vendor meant it, an accepted verdict ends the solve, a rejected one counts a loop, and only a refusal to serve ends the solve early. |
 | `python/tests/test_a_widget_is_waited_for.py` | A widget that draws late is waited for without charging the solve budget, and "no captcha" names the cause instead of blaming the selectors. |
 | `python/tests/test_a_widget_inside_an_enclave_is_found.py` | A challenge drawn inside a vendor's enclave frame is found, in the visible enclave only, and is clicked and read as solved through both frame levels; the enclave is never reported as markup the table missed. |
+| `python/tests/test_every_trained_vendor_is_found.py` | Each vendor added to the table (AWS WAF, CaptchaFox, Dingxiang, FunCaptcha, Proton, and reCAPTCHA Enterprise's frames) is found from the markup its own page ships and named by its own row; an open modal outranks the box that opened it, and a Confirm button submits. |
 | `python/tests/test_outcome_reporting.py` | The outcome report's contract: endpoint, body and timeout, a self-hosted 404 switching it off, a hosted failure warned about every time, and the vendor, site and widget-host headers. |
 | `python/tests/test_the_legacy_model_warning_is_one_text.py` | A hosted model name with no route is warned about once per process, and both ports print the same words. |
 | `python/tests/test_endpoint_is_dialled_once.py` | Connections are reused instead of a fresh handshake per inference. |

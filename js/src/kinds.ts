@@ -17,6 +17,11 @@ export const Vendor = {
   MTCAPTCHA: 'mtcaptcha',
   BOTDETECT: 'botdetect',
   HUMAN: 'human',
+  AWSWAF: 'awswaf',
+  CAPTCHAFOX: 'captchafox',
+  DINGXIANG: 'dingxiang',
+  FUNCAPTCHA: 'funcaptcha',
+  PROTON: 'proton',
   UNKNOWN: 'unknown',
 } as const;
 export type Vendor = (typeof Vendor)[keyof typeof Vendor];
