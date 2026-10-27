@@ -2193,7 +2193,11 @@ export class CaptchaKrakenSolver {
     } catch {
       cacheKey = null;
     }
-    const ask = () => this.askModel(imagePath, puzzleSource, retryMode, textMode);
+    const ask = () => this.askModel(imagePath, puzzleSource, retryMode, textMode).catch((e: any) => {
+      // No answer is an empty plan, which presses Skip for a new board. An empty text box is a wrong answer.
+      if (!e?.unsupported || textMode) throw e;
+      return { actions: [], token_usage: [] };
+    });
     return cacheKey ? this.answerFor(cacheKey, ask) : ask();
   }
 

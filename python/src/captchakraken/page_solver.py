@@ -625,8 +625,16 @@ class PageSolver:
 
     def _get_solution(self, image_path: str, puzzle_source: Vendor, retry_mode: Optional[RetryMode],
                       text_mode: bool = False):
-        return self._ask(lambda: self._solver.solve(
-            image_path, puzzle_source=puzzle_source, retry_mode=retry_mode, text_mode=text_mode))
+        def solve():
+            try:
+                return self._solver.solve(image_path, puzzle_source=puzzle_source, retry_mode=retry_mode,
+                                          text_mode=text_mode)
+            except UnsupportedCaptchaError:
+                # No answer is an empty plan, which presses Skip for a new board. An empty text box is a wrong answer.
+                if text_mode:
+                    raise
+                return []
+        return self._ask(solve)
 
     def _get_keyframe_solution(self, recording: AnimatedRecording):
         """The animated ask: keyframes or video, whichever the model's prompt generation was trained on."""
