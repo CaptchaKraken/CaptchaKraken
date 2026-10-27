@@ -9,12 +9,10 @@ import os
 import sys
 
 import pytest
-import torch
 from PIL import Image
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from captchakraken.pointer import heads as Hd
 from captchakraken.pointer import layout as L
 from captchakraken.pointer import server as S
 
@@ -51,6 +49,7 @@ VS = 5  # vision_start
 
 
 def _prompt(blocks):
+    torch = pytest.importorskip("torch")
     ids = [9, 9]
     for n in blocks:
         ids += [VS] + [IDS[L.IMAGE_PAD]] * n + [IDS[L.VISION_END]]
@@ -58,6 +57,7 @@ def _prompt(blocks):
 
 
 def test_points_land_only_on_the_last_screen():
+    Hd = pytest.importorskip("captchakraken.pointer.heads")
     pos = Hd.Positions(_prompt([4, 4, 6]), IDS)
     assert pos.n_moments == 1 and pos.per_moment == 6
     assert pos.history == 2
@@ -66,6 +66,7 @@ def test_points_land_only_on_the_last_screen():
 
 
 def test_a_lone_screen_reads_as_before():
+    Hd = pytest.importorskip("captchakraken.pointer.heads")
     pos = Hd.Positions(_prompt([6]), IDS)
     assert (pos.n_moments, pos.per_moment, pos.history) == (1, 6, 0)
 
