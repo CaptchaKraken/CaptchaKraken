@@ -161,6 +161,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/browser-compat.test.ts` | The compatibility claim, driven against **real** Playwright and Puppeteer, so a library renaming a method we call is caught rather than agreed with by a fake. |
 | `js/src/a-capture-never-clips-the-page.test.ts` | Every capture is one unclipped viewport screenshot cropped locally, at the page's device pixel ratio, scrolled into view once rather than per shot. |
 | `js/src/a-checkbox-is-clicked-not-watched.test.ts` | A checkbox is ticked from the DOM, or found on one capture by OpenCV when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `js/src/a-board-with-no-answer-is-skipped.test.ts` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `js/src/our-own-gesture-is-not-animation.test.ts` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `js/src/puppeteer-adapter.test.ts` | The adapter's translation layer, pinned difference by difference. |
 | `js/src/fake-dom.test.ts` | The one locator-shaped fake DOM the driver tests share: nodes name the selectors they answer to, so no test carries its own CSS matcher. |
@@ -349,11 +350,13 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_one_ask_cannot_outlive_the_solve.py` | The planner's request timeout is the caller's remaining budget, floored, and the request actually sends it. |
 | `python/tests/test_the_second_look_believes_its_recording.py` | The second look at a board that failed once is a question, and the clip it records answers it: a board that never moved goes back to the still expert. |
 | `python/tests/test_a_board_is_routed_and_watched_once_it_has_painted.py` | A widget that has not drawn yet picks the wrong expert and reads as a still; both questions wait for the paint. |
+| `python/tests/test_a_board_with_no_answer_is_skipped.py` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `python/tests/test_the_notice_travels_with_the_package.py` | The LGPL notice for Cursory has to reach both published packages, and three copies are three chances to drift. |
 | `python/tests/test_a_grid_is_a_regular_lattice.py` | Every other grid check asks what is inside the cells; a click board over a photo passes those and is not a lattice. |
 | `python/tests/test_grid_dims_must_be_possible.py` | `find_grid` proposes lattices; a shape no vendor actually ships is a false positive. |
 | `python/tests/test_grid_flank_contrast.py` | A chosen lattice must separate something — gutters running across a smooth background separate nothing. |
 | `python/tests/test_grid_never_pairs_tiles.py` | A board of tall tiles is never read as a lattice of tile pairs, which sent it to the wrong expert. |
+| `python/tests/test_hcaptcha_boards_reach_the_right_expert.py` | Two captured Tier 3 boards: a 6x3 card board is not read as a 3x3 of tile pairs, and an off-centre 3x3 photo grid is still found. |
 | `python/tests/test_grid_noisy_gutter.py` | A traced gutter line must survive noise instead of ending at the first pixel that fails the step test. |
 | `python/tests/test_grid_off_lattice_clusters.py` | A correct lattice that already won scoring must not then be thrown away by the off-lattice check. |
 | `python/tests/test_grid_overcount_falls_back.py` | Every widget puts a footer under its grid, so an overcounted row falls back rather than answering the wrong shape. |
@@ -387,6 +390,8 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_find_checkbox_rejects_what_is_not_a_checkbox.py` | One test per gate in the checkbox detector, on synthetic images: squareness, absolute size, relative area and content variance. A false positive here clicks the page background; a false negative reports no widget on a page that has one. |
 | `python/tests/test_the_two_ports_share_one_mouse.py` | The mouse is a port, not a rewrite, so the two drivers agree on a seed exactly rather than statistically. |
 | `python/tests/fixtures/cursory_cross_port.json` | The recorded JS-port trajectories `test_the_two_ports_share_one_mouse.py` checks the Python port against: four seeds, points and timings. |
+| `python/tests/fixtures/grid/groceries_6x3_mac.png` | A 6x3 grocery board as the engine received it on macOS, where scrollbars shift the layout; the tile-pairs regression image. |
+| `python/tests/fixtures/grid/photos_3x3_offcentre.png` | An hCaptcha 3x3 photo grid sitting off-centre in its panel, as the engine received it; find_grid once returned nothing on it. |
 | `python/tests/fixtures/hcaptcha_enclave/challenge.html` | A recorded challenge frame (3x3 image grid), reduced to the markup the driver reads, with flat pictures and a stand-in script that toggles tiles and hands the enclave a token. |
 | `python/tests/fixtures/hcaptcha_enclave/enclave.html` | A recorded enclave frame with its challenge open: the challenge frame, the invisible-checkbox frame and the response fields the token is written to. |
 | `python/tests/fixtures/hcaptcha_enclave/host.html` | A recorded host page after the challenge was raised: two full-viewport enclaves and no vendor frame of its own, one enclave hidden. Both ports' enclave tests serve it. |

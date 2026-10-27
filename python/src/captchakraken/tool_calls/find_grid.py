@@ -61,7 +61,9 @@ MIN_IMAGE_AREA_COVERAGE = 0.30
 CELL_REGULARITY_TOL = 0.12
 MIN_GRID_DIM = 3
 # A true internal line has perpendicular gutters running ~a full cell past it on both sides; a frame line does not.
-CORROB_FRAC = 0.9
+# Not 0.9: the cell is often estimated off the other axis's pitch, and on hCaptcha's off-centre photo grid that runs
+# ~10% high, so a true gutter came up 0.3px short and the 3x3 went to the pixel expert.
+CORROB_FRAC = 0.85
 GRID_OVERSHOOT = 0.35
 FULL_SPAN_MARGIN = 0.5
 MIN_GRID_COVERAGE = 0.72
@@ -953,7 +955,7 @@ def _halves_a_finer_lattice(positions, pitch, kept_lines):
     mids = ([lines[0] - pitch / 2.0] + [(a + b) / 2.0 for a, b in zip(lines, lines[1:])]
             + [lines[-1] + pitch / 2.0])
     tol = HALVED_CELL_TOL * pitch
-    return all(any(abs(l.midline_pos - m) <= tol for l in kept_lines) for m in mids)
+    return sum(any(abs(l.midline_pos - m) <= tol for l in kept_lines) for m in mids) * 2 > len(mids)
 
 
 def extract_grid_from_lines(h_lines, v_lines, h, w, lab=None):
