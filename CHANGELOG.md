@@ -63,6 +63,14 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Fixed
 
+- **A board the model has no answer for is skipped.** Both ports pressed on
+  re-asking the same board until the loop cap (~30 s); they now press Skip for
+  a new one, as the empty-plan path already did. An unread text captcha is
+  still never submitted empty.
+- **hCaptcha boards reach the right expert more often.** A 6x3 card board is
+  no longer read as a 3x3 of tile pairs when the frame's scrollbars shift it
+  (macOS), and an off-centre 3x3 photo grid is no longer missed. Routing over
+  13,325 captured live boards (every vendor) is unchanged.
 - **reCAPTCHA Enterprise is detected.** An Enterprise sitekey serves the
   checkbox and the challenge from `/recaptcha/enterprise/`, which the table's
   `/recaptcha/api2/` selectors never matched, so the page read as "no captcha".
@@ -83,17 +91,6 @@ semantic versioning; v2 is a major, **breaking** release.
   with the solver's own `apiKey`. One process can now drive solvers that talk to
   different servers with different keys without one environment variable
   routing them all. Nothing changes when the option is absent.
-
-### Fixed
-
-- **A board the model has no answer for is skipped.** Both ports pressed on
-  re-asking the same board until the loop cap (~30 s); they now press Skip for
-  a new one, as the empty-plan path already did. An unread text captcha is
-  still never submitted empty.
-- **hCaptcha boards reach the right expert more often.** A 6x3 card board is
-  no longer read as a 3x3 of tile pairs when the frame's scrollbars shift it
-  (macOS), and an off-centre 3x3 photo grid is no longer missed. Routing over
-  2,588 captured live hCaptcha boards is unchanged.
 
 ### Security
 
