@@ -257,7 +257,9 @@ class CaptchaSolver:
             elif kind == PixelAnswerKind.TYPE:
                 out.append(TypeAction(action=ActionKind.TYPE, text=a["text"]))
             elif kind == PixelAnswerKind.HOLD and a.get("points"):
-                out.append(HoldAction(action=ActionKind.HOLD, target_bounding_box=box(*a["points"][0])))
+                fill = ({"fill_from_bounding_box": box(*a["src"]), "fill_to_bounding_box": box(*a["dst"])}
+                        if a.get("src") and a.get("dst") else {})
+                out.append(HoldAction(action=ActionKind.HOLD, target_bounding_box=box(*a["points"][0]), **fill))
             elif kind == PixelAnswerKind.REFRESH:
                 points = a.get("points")
                 out.append(RefreshAction(action=ActionKind.REFRESH,

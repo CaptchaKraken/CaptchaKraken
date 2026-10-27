@@ -69,9 +69,10 @@ def test_a_slide_gives_handle_piece_and_slot():
     assert set(ans) == {"action", "handle", "from", "to"}
 
 
-def test_a_hold_presses_exactly_one_point():
-    v = packed("hold", count=3, slots={"click1": (21, 0, 0)})
-    assert L.answer(L.unpack(v), (20, 24))["points"] == [[75, 62]]
+def test_a_hold_is_its_press_and_the_fills_line():
+    v = packed("hold", count=3, slots={"hold press": (21, 0, 0), "hold from": (22, 0, 0), "hold to": (25, 0, 0)})
+    assert L.answer(L.unpack(v), (20, 24)) == {"action": "hold", "press": [75, 62], "from": [125, 62],
+                                                "to": [275, 62]}
 
 
 def test_a_typed_answer_is_its_text():

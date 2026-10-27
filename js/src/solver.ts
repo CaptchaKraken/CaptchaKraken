@@ -154,6 +154,9 @@ interface SlideStepReply {
   observation: { s: number | number[]; params: number[] };
 }
 
+/** What one look at a held widget's fill saw (`fill_tracker.py`); the first look carries only the shot's scale. */
+interface FillLook { t: number; edge: number | null; k?: number }
+
 /** An allow-list of what needs nothing: the other direction raises instead of clicking at the origin. */
 export function answerNeedsElementBox(actions: ReadonlyArray<{ action?: string }>): boolean {
   return actions.some((a) => a?.action !== ActionKind.DONE);
@@ -2451,6 +2454,7 @@ export class CaptchaKrakenSolver {
   /**
    * Press-and-hold until the widget completes: true when it did, false when the cap ran out. Complete is the vendor's
    * done signal, the widget closing, or its picture having changed (the fill) and then sat still for HOLD_SETTLE_MS.
+   * When the answer names the fill's line, the fill reaching its end is complete too: see `fillReached`.
    */
   private async executeHold(page: Page, element: ElementHandle, action: HoldAction, elementBox: Box): Promise<boolean> {
     this.actedOnBoard = true;
@@ -2458,9 +2462,12 @@ export class CaptchaKrakenSolver {
     if (!rel) return false;
     const first = await this.elementFrameHash(element);
     const seen = { hash: first, since: Date.now(), changed: false };
+    const shots: [string, string] | null = action.fill_from_bounding_box && action.fill_to_bounding_box ? [tmp('hold_0'), tmp('hold_1')] : null;
+    const looks: FillLook[] = [];
     const done = async (): Promise<boolean> => {
       if (await this.isCaptchaSolved(page)) return true;
       if (!(await element.boundingBox().catch(() => null))) return true;
+      if (shots && (await this.fillReached(element, action, elementBox, shots, looks))) return true;
       const h = await this.elementFrameHash(element);
       if (h !== seen.hash) {
         Object.assign(seen, { hash: h, since: Date.now(), changed: seen.changed || h !== first });
@@ -2468,7 +2475,46 @@ export class CaptchaKrakenSolver {
       }
       return seen.changed && Date.now() - seen.since >= HOLD_SETTLE_MS;
     };
-    return this.gesture(() => hold(this.human, page, [elementBox.x + rel[0], elementBox.y + rel[1]], done, HOLD_MAX_MS));
+    try {
+      return await this.gesture(() => hold(this.human, page, [elementBox.x + rel[0], elementBox.y + rel[1]], done, HOLD_MAX_MS));
+    } finally {
+      for (const f of shots ?? []) unlink(f);
+    }
+  }
+
+  /**
+   * One look at a held widget's fill (`fill_tracker.py` behind the CV worker): true once it reaches the answer's `to`.
+   * The first look only shoots the reference, after the press, so the button's own pressed look is not read as fill;
+   * `looks` carries what each later look saw. A look that cannot be shot or read is not a release: the widget's own
+   * signals still end the hold.
+   */
+  private async fillReached(element: ElementHandle, action: HoldAction, elementBox: Box, shots: [string, string], looks: FillLook[]): Promise<boolean> {
+    const [first, current] = shots;
+    const { width: w, height: h } = elementBox;
+    const timeout = this.config.elementScreenshotTimeoutMs ?? 8000;
+    try {
+      if (!looks.length) {
+        await this.shot(element, first, timeout);
+        looks.push({ t: 0, edge: null, k: this.shotScale(first, w) });
+        return false;
+      }
+      await this.shot(element, current, timeout);
+      const k = looks[0].k!;
+      const history = looks.slice(1).map(({ t, edge }) => ({ t, edge }));
+      const at = (b: [number, number, number, number]): number[] => [((b[0] + b[2]) / 2) * w * k, ((b[1] + b[3]) / 2) * h * k];
+      const gaps = history.slice(1).map((o, i) => o.t - history[i].t);
+      const request = {
+        first, current, start: at(action.fill_from_bounding_box!), end: at(action.fill_to_bounding_box!), t: performance.now() / 1000,
+        history, poll_s: gaps.length ? gaps.reduce((x, y) => x + y, 0) / gaps.length : 0.25, tol: SLIDE_TOLERANCE_PX * k,
+      };
+      const res = await this.runCvTool('fill-step', request, ['fill-step', JSON.stringify(request)]);
+      if (!res?.observation) return false;
+      looks.push(res.observation);
+      if (res.release) console.log(`[hold] the fill reached its mark, ${((res.length - res.edge) / k).toFixed(1)}px short of it`);
+      return Boolean(res.release);
+    } catch {
+      return false;
+    }
   }
 
   /** Deal a new puzzle: the vendor's own control, else the model's point on one. False when there is neither. */

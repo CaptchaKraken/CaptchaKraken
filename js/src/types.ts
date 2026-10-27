@@ -177,10 +177,15 @@ export interface WaitAction {
   duration_ms: number;
 }
 
-/** Press on the box and keep pressing until the widget completes (prompt generation 3). */
+/**
+ * Press on the box and keep pressing until the widget completes (prompt generation 3). When the model also named where
+ * the fill starts and where to let go, the driver follows the fill along that line and releases at its end.
+ */
 export interface HoldAction extends AnimatedActionFields {
   action: typeof ActionKind.HOLD;
   target_bounding_box: [number, number, number, number];
+  fill_from_bounding_box?: [number, number, number, number] | null;
+  fill_to_bounding_box?: [number, number, number, number] | null;
 }
 
 /** Load a new puzzle instead of solving this one (prompt generation 3). The box is the model's point on the control, or null when it saw none; the driver presses the vendor's own control first either way. */

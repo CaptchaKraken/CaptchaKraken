@@ -654,6 +654,8 @@ class ActionPlanner:
         act = data.get("action")
         if act == ActionKind.SLIDE:
             return ActionPlanner._normalize_slide(data)
+        if act == ActionKind.HOLD and "press" in data:
+            return ActionPlanner._normalize_hold(data)
         if act not in (ActionKind.CLICK, ActionKind.REFRESH):
             return ActionPlanner._normalize_pixel(data)
         raw_points = data.get("points")
@@ -667,16 +669,28 @@ class ActionPlanner:
         return [{"kind": PixelAnswerKind.CLICK, "points": points, "ids": ids}]
 
     @staticmethod
+    def _answer_point(data: Dict[str, Any], key: str) -> Optional[tuple]:
+        v = data.get(key)
+        if not isinstance(v, (list, tuple)) or len(v) < 2 or any(isinstance(c, bool) for c in v[:2]):
+            return None
+        return _norm_xy(v[0], v[1])
+
+    @staticmethod
+    def _normalize_hold(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """The press, and the fill's line when both its ends are named: one end alone says nothing about where to let
+        go, so the hold falls back to waiting for the widget to finish."""
+        press = ActionPlanner._answer_point(data, "press")
+        if press is None:
+            return []
+        src, dst = ActionPlanner._answer_point(data, "from"), ActionPlanner._answer_point(data, "to")
+        line = {"src": src, "dst": dst} if src is not None and dst is not None else {}
+        return [{"kind": PixelAnswerKind.HOLD, "points": [press], **line}]
+
+    @staticmethod
     def _normalize_slide(data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """All three points or nothing: a slide missing one has no defined stop, and guessing it would steer the
         handle to a place the model never named."""
-        def point(key: str) -> Optional[tuple]:
-            v = data.get(key)
-            if not isinstance(v, (list, tuple)) or len(v) < 2 or any(isinstance(c, bool) for c in v[:2]):
-                return None
-            return _norm_xy(v[0], v[1])
-
-        handle, src, dst = point("handle"), point("from"), point("to")
+        handle, src, dst = (ActionPlanner._answer_point(data, k) for k in ("handle", "from", "to"))
         if handle is None or src is None or dst is None:
             return []
         return [{"kind": PixelAnswerKind.SLIDE, "handle": handle, "src": src, "dst": dst}]

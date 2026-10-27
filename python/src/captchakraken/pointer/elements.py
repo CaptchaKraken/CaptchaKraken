@@ -18,8 +18,10 @@ from .layout import MAX_ELEMENTS
 
 #: Detector classes that are numbered. `grid` is acted on through its cells, and
 #: `click_area` is the well a free click lands in: it holds every point on the
-#: board and so names none of them. The detector's `submit` is a button.
-NUMBERED = ("cell", "item", "draggable", "drop_target", "slider", "button", "text_input")
+#: board and so names none of them. The detector's `submit` is a button. A
+#: `fill` is what a press-and-hold widget fills: the bar or ring a hold's
+#: `from`/`to` lie on.
+NUMBERED = ("cell", "item", "draggable", "drop_target", "slider", "button", "text_input", "fill")
 RENAME = {"submit": "button"}
 #: A point this close to an element's mask (px) still lands on it: anti-aliased edges.
 EDGE_PX = 3
@@ -173,7 +175,7 @@ def element_at(pt: Sequence[float], size: Tuple[int, int], els: Sequence[Dict]) 
 def ids_for(answer: Dict, size: Tuple[int, int], els: Sequence[Optional[Dict]]) -> Dict:
     """`answer` (generation 3's shape, 0-1000 points) with the 1-based number of
     the element under each point beside it: `ids` for clicks, `from_id`/`to_id`
-    for drags, `handle_id` for a slide. A point on no element gets None, and a
+    for drags, `handle_id` for a slide, `press_id` for a hold. A point on no element gets None, and a
     board with no elements gets no ids at all. `els` is what the board was shown
     with (a video's: `on_frame` of the answer's moment)."""
     if not any(e is not None for e in els):
@@ -188,4 +190,6 @@ def ids_for(answer: Dict, size: Tuple[int, int], els: Sequence[Optional[Dict]]) 
         out["drags"] = [{**d, "from_id": n(d["from"]), "to_id": n(d["to"])} for d in out["drags"]]
     if out.get("handle") is not None:
         out["handle_id"] = n(out["handle"])
+    if out.get("press") is not None:
+        out["press_id"] = n(out["press"])
     return out
