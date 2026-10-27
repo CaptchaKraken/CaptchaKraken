@@ -16,6 +16,11 @@ class Vendor(StrEnum):
     PROSOPO = "prosopo"
     MTCAPTCHA = "mtcaptcha"
     BOTDETECT = "botdetect"
+    AWSWAF = "awswaf"
+    CAPTCHAFOX = "captchafox"
+    DINGXIANG = "dingxiang"
+    FUNCAPTCHA = "funcaptcha"
+    PROTON = "proton"
     UNKNOWN = "unknown"
 
 

@@ -3,6 +3,28 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [3.3.0] - 2026-10-26
+
+### Added
+
+- **Five more vendors are found and driven by the general solve loop**: AWS WAF,
+  CaptchaFox, Dingxiang, Arkose FunCaptcha and Proton's own captcha. Each is a
+  row in the selector table of both drivers, read off the markup the vendor's
+  own page ships: AWS WAF's card (in an open shadow root, which Playwright
+  pierces), CaptchaFox's "I am human" box and the puzzle modal it opens,
+  Dingxiang's popup card, the Arkose frame on the host page, and Proton's
+  `/core/v4/captcha` frame. The `puzzleSource` / `puzzle_source` value and the
+  `X-CK-Vendor` header name them `awswaf`, `captchafox`, `dingxiang`,
+  `funcaptcha` and `proton` instead of `unknown`.
+- **A button labelled Confirm submits a round**, after Verify, Next, Submit and
+  Skip. AWS WAF's card has no other submit control.
+
+### Fixed
+
+- **reCAPTCHA Enterprise is detected.** An Enterprise sitekey serves the
+  checkbox and the challenge from `/recaptcha/enterprise/`, which the table's
+  `/recaptcha/api2/` selectors never matched, so the page read as "no captcha".
+
 ## [3.2.2] - 2026-10-18
 
 ### Changed
