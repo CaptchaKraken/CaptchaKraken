@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import random
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from cursory import generate_trajectory
 
@@ -22,6 +22,8 @@ Point = Tuple[float, float]
 # Each device supplies its own table. An unknown kind yields no wait rather than raising, so adding
 # a pause site cannot break a custom humanizer written against an older release.
 PAUSE_KINDS = tuple(PauseKind)
+# How often a held press looks at the widget, in ms: a frame hash per look, so not every frame.
+HOLD_POLL_MS = (180.0, 320.0)
 
 
 def _delay(ms: float) -> None:
@@ -89,6 +91,31 @@ class Humanizer:
         self.move(page, dst)
         self.pause(PauseKind.DROP)
         self.release(page)
+
+
+def hold(human: "Humanizer", page: Any, to: Point, done: Callable[[], bool], max_ms: float) -> bool:
+    """Press at `to` until `done()` says the widget completed, or `max_ms` passes; True when it completed.
+
+    Built on move/press/release so any humanizer can hold. The hand drifts a pixel or so meanwhile, because a
+    press that does not move for seconds is a synthetic one, and the button is released whatever `done` raises.
+    """
+    human.move(page, to)
+    anchor = human.at
+    human.press(page)
+    t0 = time.monotonic()
+    try:
+        while True:
+            _delay(random.uniform(*HOLD_POLL_MS))
+            try:
+                human.move(page, (anchor[0] + random.gauss(0.0, 0.8), anchor[1] + random.gauss(0.0, 0.8)))
+            except Exception:
+                pass
+            if done():
+                return True
+            if (time.monotonic() - t0) * 1000.0 >= max_ms:
+                return False
+    finally:
+        human.release(page)
 
 
 class MouseHumanizer(Humanizer):

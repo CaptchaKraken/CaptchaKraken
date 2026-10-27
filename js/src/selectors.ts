@@ -41,18 +41,25 @@ export interface VendorSelectors {
   readonly sliderHandle?: readonly string[];
   /** Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track. */
   readonly piece?: readonly string[];
+  /** Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`. */
+  readonly refresh?: readonly string[];
 }
 
 export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
+  // An Enterprise sitekey serves the same widget from /recaptcha/enterprise/ instead of /recaptcha/api2/.
   [Vendor.RECAPTCHA]: {
     hosts: ['google.com/recaptcha', 'recaptcha.net'],
-    challenge: ['iframe[src*="recaptcha/api2/bframe"]'],
-    checkbox: ['iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])'],
+    challenge: ['iframe[src*="recaptcha/api2/bframe"]', 'iframe[src*="recaptcha/enterprise/bframe"]'],
+    checkbox: [
+      'iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',
+      'iframe[src*="recaptcha/enterprise/anchor"]:not([src*="size=invisible"])',
+    ],
     response: '[name="g-recaptcha-response"]',
     checked: '.recaptcha-checkbox-checked',
     box: ['#recaptcha-anchor'],
     fresh: '.rc-imageselect-instructions, #rc-imageselect',
     submit: ['#recaptcha-verify-button'],
+    refresh: ['#recaptcha-reload-button'],
     banners: [
       ['.rc-imageselect-error-select-more', RecaptchaBanner.SELECT_MORE],
       ['.rc-imageselect-error-dynamic-more', RecaptchaBanner.DYNAMIC_MORE],
@@ -74,6 +81,7 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     fresh: '.prompt-text',
     images: ['.task-image .image', '.task .image', '.challenge-example img', '.image-wrapper img'],
     submit: ['.button-submit'],
+    refresh: ['.refresh.button'],
     passive: ['iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'],
   },
   [Vendor.TURNSTILE]: {
@@ -86,6 +94,7 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     widget: ['.geetest_box', '.geetest_panel_box', '.geetest_popup_window', '.geetest_widget'],
     accepted: '.geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, .geetest_captcha.geetest_lock_success',
     submit: ['.geetest_submit'],
+    refresh: ['.geetest_refresh', '.geetest_refresh_1'],
     sliderHandle: ['.geetest_slider_button', '.geetest_btn', '.geetest_slider .geetest_arrow'],
     piece: ['.geetest_slice'],
   },
@@ -96,12 +105,14 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     widget: ['#tcaptcha_transform_dy', '#tCaptchaDyContent', '.tencent-captcha-dy__content', 'iframe#tcaptcha_iframe_dy', 'iframe[id^="tcaptcha"]', 'iframe[src*="captcha.gtimg.com"]', 'iframe[src*="captcha.qq.com"]'],
     sliderHandle: ['.tencent-captcha-dy__slider-block', '#tcaptcha_drag_thumb', '.tc-slider-normal', '[id*=slideBlock]'],
     piece: ['.tencent-captcha-dy__fg-item'],
+    refresh: ['.tencent-captcha-dy__footer-icon--refresh'],
   },
   [Vendor.YIDUN]: {
     hosts: ['dun.163.com', 'cstaticdun.126.net', 'necaptcha.nosdn.127.net'],
     widget: ['.yidun_panel', '.yidun'],
     sliderHandle: ['.yidun_slider', '.yidun_jigsaw'],
     piece: ['.yidun_jigsaw'],
+    refresh: ['.yidun_refresh'],
   },
   [Vendor.YANDEX]: {
     hosts: ['smartcaptcha.yandexcloud.net'],
@@ -122,11 +133,50 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
     hosts: ['mtcaptcha.com'],
     widget: ['iframe[src*="service.mtcaptcha.com"]', 'iframe[id^="mtcaptcha-iframe"]', '.mtcaptcha', '.mtcap'],
     textInput: ['input.mtcap-inputtext', '.mtcap input[type=text]'],
+    refresh: ['.mtcap-refresh'],
   },
   [Vendor.BOTDETECT]: {
     hosts: [],
     widget: ['.BDC_CaptchaDiv'],
     textInput: ['input[id*=captchaCode]', 'input#captchaCode', 'input[id*=validateCaptcha]', '.BDC_CaptchaDiv input[type=text]'],
+    refresh: ['a[id*="ReloadLink"]', '.BDC_ReloadIcon'],
+  },
+  // The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's
+  // iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.
+  [Vendor.HUMAN]: {
+    hosts: [],
+    widget: ['#px-captcha'],
+  },
+  // The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.
+  [Vendor.AWSWAF]: {
+    hosts: ['awswaf.com'],
+    widget: ['.amzn-captcha-modal'],
+  },
+  // The puzzle opens in a modal over the "I am human" box, which stays on screen, so the modal is a challenge: a
+  // widget would be outranked by the box and the box clicked again.
+  [Vendor.CAPTCHAFOX]: {
+    hosts: ['captchafox.com'],
+    challenge: ['.cf-modal__challenge'],
+    checkbox: ['div[id^="cf-widget-"]'],
+    response: '[name="cf-captcha-response"]',
+    sliderHandle: ['.cf-slider__button'],
+  },
+  // Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.
+  [Vendor.DINGXIANG]: {
+    hosts: ['cdn.dingxiang-inc.com/ctu-group/captcha', 'cap.dingxiang-inc.com'],
+    widget: ['.dx_captcha_oneclick_one-step'],
+    sliderHandle: ['.dx_captcha_basic_slider', '.dx_captcha_rotate_slider'],
+  },
+  // The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside
+  // it; the game frame's own path is listed so a page that frames the game directly is found too.
+  [Vendor.FUNCAPTCHA]: {
+    hosts: ['arkoselabs.com'],
+    widget: ['iframe[src*="arkoselabs.com"]', 'iframe[src*="ec-game-core/game-core"]'],
+  },
+  // Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.
+  [Vendor.PROTON]: {
+    hosts: ['/core/v4/captcha'],
+    widget: ['iframe[src*="/core/v4/captcha"]'],
   },
   [Vendor.UNKNOWN]: { hosts: [] },
 };
@@ -155,8 +205,8 @@ const lower = "translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstu
 /** `.//` keeps the xpath relative so a host-page widget cannot reach the form's own submit. */
 export const submitByText = (text: string): string =>
   `xpath=.//button[contains(${lower}, '${text}')] | .//div[@role="button" and contains(${lower}, '${text}')]`;
-/** A real Verify/Next/Submit/Skip first; the vendor-named controls are fallbacks. */
-export const SUBMIT_SELECTORS: readonly string[] = [...['verify', 'next', 'submit', 'skip'].map(submitByText), ...ofEveryVendor('submit')];
+/** A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks. */
+export const SUBMIT_SELECTORS: readonly string[] = [...['verify', 'next', 'submit', 'skip', 'confirm'].map(submitByText), ...ofEveryVendor('submit')];
 
 // Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
 // reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
@@ -172,4 +222,5 @@ export const SLIDER_HANDLE_SELECTORS: readonly string[] = [...ofEveryVendor('sli
   '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
   '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
 ];
+export const REFRESH_SELECTORS: readonly string[] = ofEveryVendor('refresh');
 export const PIECE_SELECTORS: readonly string[] = [...ofEveryVendor('piece'), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]'];

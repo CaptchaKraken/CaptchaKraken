@@ -16,7 +16,6 @@ from .errors import CaptchaKrakenAPIError
 from .kinds import Outcome, PromptFamily, RetryMode, Vendor
 from .solver import CaptchaSolver, UnsupportedCaptchaError
 
-
 _SELF_PRINTED = object()
 
 
@@ -77,12 +76,22 @@ def board_painted(image: str, floor=None, box=None) -> dict:
     return board_is_painted(image, floor, box)
 
 
-def track_piece(before: str, after: str, exclude=None, travel: float = 0.0) -> dict:
-    from .tool_calls.track_piece import changed_bbox, locate_piece
+def slide_step(req: dict) -> dict:
+    """One look of the slide loop (`tool_calls/slide_tracker.py`); a lost or unseen object is `{"error"}`, never a
+    position, so the driver releases rather than steering by a guess."""
+    from .tool_calls.slide_tracker import TrackingError
+    from .tool_calls.slide_tracker import slide_step as step
 
-    bbox = changed_bbox(before, after, exclude)
-    piece = locate_piece(before, after, travel, exclude) if bbox is not None else None
-    return {"bbox": bbox, "piece": piece, "moved": bbox is not None}
+    def pt(v):
+        return None if v is None else (float(v[0]), float(v[1]))
+
+    try:
+        return step(req["first"], req["probe"], req["current"], probe_s=req["probe_s"], s=req["s"],
+                    goal=pt(req["goal"]), seed=pt(req.get("seed")), handle=pt(req.get("handle")),
+                    bounds=tuple(req["bounds"]) if req.get("bounds") else None,
+                    history=req.get("history") or (), tol=float(req.get("tol") or 2.0))
+    except TrackingError as e:
+        return {"error": str(e)}
 
 
 def _find_grid(args):
@@ -164,10 +173,10 @@ def _board_painted(args):
     return board_painted(args[0], float(args[1]) if len(args) > 1 else None)
 
 
-def _track_piece(args):
-    _need(args, 2, "track-piece before.png after.png [exclude_json] [travel]")
-    return track_piece(args[0], args[1], json.loads(args[2]) if len(args) > 2 else None,
-                       float(args[3]) if len(args) > 3 else 0.0)
+def _slide_step(args):
+    _need(args, 1, "slide-step request.json  (or the JSON itself)")
+    raw = args[0]
+    return slide_step(json.loads(open(raw).read() if os.path.exists(raw) else raw))
 
 
 def _report_outcome(args):
@@ -212,8 +221,8 @@ def _serve(args):
             return board_painted(req["image"], req.get("floor"), req.get("box"))
         if cmd == "find-checkbox":
             return find_checkbox(req["image"])
-        if cmd == "track-piece":
-            return track_piece(req["before"], req["after"], req.get("exclude"), req.get("travel") or 0.0)
+        if cmd == "slide-step":
+            return slide_step(req)
         raise ValueError(f"unknown cmd: {cmd!r}")
 
     sys.stdout.write(json.dumps({"ready": True}) + "\n")
@@ -249,7 +258,7 @@ def _run_solve(query: Callable[[], dict]) -> None:
 
 
 def _solve_animated(args):
-    """Slice a recorded burst (zero-padded PNGs in `--frames-dir`) into keyframes and solve them."""
+    """Solve a recorded burst (zero-padded PNGs in `--frames-dir`) as the model's prompt generation asks it."""
     import glob
 
     parser = argparse.ArgumentParser(prog="captchakraken solve-animated")
@@ -266,18 +275,18 @@ def _solve_animated(args):
     def query():
         import cv2
 
-        from .keyframes import extract_keyframes, write_keyframes
+        from .solver import cut_recording
 
         imgs = [im for im in (cv2.imread(p) for p in frames) if im is not None]
         if not imgs:
             _fail("no frame decoded")
-        kfset = extract_keyframes(imgs, fps=float(opts.fps))
-        paths = [os.path.abspath(p) for p in write_keyframes(kfset, os.path.join(opts.frames_dir, "keyframes"), stem="challenge")]
+        recording = cut_recording(imgs, float(opts.fps), os.path.abspath(os.path.join(opts.frames_dir, "keyframes")))
         solver = CaptchaSolver(model=opts.model, api_key=opts.api_key, expert=opts.expert)
-        result = solver.solve_keyframes(paths)
+        result = solver.solve_animated(recording)
+        kfset = recording.keyframes
         return {"actions": [a.model_dump() for a in result], "token_usage": solver.planner.token_usage,
-                "keyframes": paths, "keyframe_mode": kfset.mode, "steady_screens": kfset.steady_screens,
-                "source_frames": len(imgs)}
+                "keyframes": recording.keyframe_paths, "keyframe_mode": kfset.mode,
+                "steady_screens": kfset.steady_screens, "source_frames": len(imgs)}
 
     _run_solve(query)
     return _SELF_PRINTED
@@ -332,7 +341,7 @@ COMMANDS: Dict[str, Callable[[List[str]], Any]] = {
     "grid-cell-states-fixed": _grid_cell_states_fixed,
     "match-region": _match_region,
     "board-painted": _board_painted,
-    "track-piece": _track_piece,
+    "slide-step": _slide_step,
     "report-outcome": _report_outcome,
     "serve": _serve,
     "solve-animated": _solve_animated,

@@ -51,18 +51,23 @@ class VendorSelectors:
     slider_handle: Sequence[str] = ()
     # Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.
     piece: Sequence[str] = ()
+    # Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.
+    refresh: Sequence[str] = ()
 
 
 SELECTORS: Mapping[Vendor, VendorSelectors] = {
+    # An Enterprise sitekey serves the same widget from /recaptcha/enterprise/ instead of /recaptcha/api2/.
     Vendor.RECAPTCHA: VendorSelectors(
         hosts=("google.com/recaptcha", "recaptcha.net"),
-        challenge=('iframe[src*="recaptcha/api2/bframe"]',),
-        checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',),
+        challenge=('iframe[src*="recaptcha/api2/bframe"]', 'iframe[src*="recaptcha/enterprise/bframe"]'),
+        checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',
+                  'iframe[src*="recaptcha/enterprise/anchor"]:not([src*="size=invisible"])'),
         response='[name="g-recaptcha-response"]',
         checked=".recaptcha-checkbox-checked",
         box=("#recaptcha-anchor",),
         fresh=".rc-imageselect-instructions, #rc-imageselect",
         submit=("#recaptcha-verify-button",),
+        refresh=("#recaptcha-reload-button",),
         banners=(
             (".rc-imageselect-error-select-more", RecaptchaBanner.SELECT_MORE),
             (".rc-imageselect-error-dynamic-more", RecaptchaBanner.DYNAMIC_MORE),
@@ -84,6 +89,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         fresh=".prompt-text",
         images=(".task-image .image", ".task .image", ".challenge-example img", ".image-wrapper img"),
         submit=(".button-submit",),
+        refresh=(".refresh.button",),
         passive=('iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'),
     ),
     Vendor.TURNSTILE: VendorSelectors(
@@ -97,6 +103,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         accepted=(".geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, "
                   ".geetest_captcha.geetest_lock_success"),
         submit=(".geetest_submit",),
+        refresh=(".geetest_refresh", ".geetest_refresh_1"),
         slider_handle=(".geetest_slider_button", ".geetest_btn", ".geetest_slider .geetest_arrow"),
         piece=(".geetest_slice",),
     ),
@@ -108,12 +115,14 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
                 'iframe[id^="tcaptcha"]', 'iframe[src*="captcha.gtimg.com"]', 'iframe[src*="captcha.qq.com"]'),
         slider_handle=(".tencent-captcha-dy__slider-block", "#tcaptcha_drag_thumb", ".tc-slider-normal", "[id*=slideBlock]"),
         piece=(".tencent-captcha-dy__fg-item",),
+        refresh=(".tencent-captcha-dy__footer-icon--refresh",),
     ),
     Vendor.YIDUN: VendorSelectors(
         hosts=("dun.163.com", "cstaticdun.126.net", "necaptcha.nosdn.127.net"),
         widget=(".yidun_panel", ".yidun"),
         slider_handle=(".yidun_slider", ".yidun_jigsaw"),
         piece=(".yidun_jigsaw",),
+        refresh=(".yidun_refresh",),
     ),
     Vendor.YANDEX: VendorSelectors(
         hosts=("smartcaptcha.yandexcloud.net",),
@@ -135,12 +144,51 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         hosts=("mtcaptcha.com",),
         widget=('iframe[src*="service.mtcaptcha.com"]', 'iframe[id^="mtcaptcha-iframe"]', ".mtcaptcha", ".mtcap"),
         text_input=("input.mtcap-inputtext", ".mtcap input[type=text]"),
+        refresh=(".mtcap-refresh",),
     ),
     Vendor.BOTDETECT: VendorSelectors(
         hosts=(),
         widget=(".BDC_CaptchaDiv",),
         text_input=("input[id*=captchaCode]", "input#captchaCode", "input[id*=validateCaptcha]",
                     ".BDC_CaptchaDiv input[type=text]"),
+        refresh=('a[id*="ReloadLink"]', ".BDC_ReloadIcon"),
+    ),
+    # The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's
+    # iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.
+    Vendor.HUMAN: VendorSelectors(
+        hosts=(),
+        widget=("#px-captcha",),
+    ),
+    # The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.
+    Vendor.AWSWAF: VendorSelectors(
+        hosts=("awswaf.com",),
+        widget=(".amzn-captcha-modal",),
+    ),
+    # The puzzle opens in a modal over the "I am human" box, which stays on screen, so the modal is a challenge: a
+    # widget would be outranked by the box and the box clicked again.
+    Vendor.CAPTCHAFOX: VendorSelectors(
+        hosts=("captchafox.com",),
+        challenge=(".cf-modal__challenge",),
+        checkbox=('div[id^="cf-widget-"]',),
+        response='[name="cf-captcha-response"]',
+        slider_handle=(".cf-slider__button",),
+    ),
+    # Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.
+    Vendor.DINGXIANG: VendorSelectors(
+        hosts=("cdn.dingxiang-inc.com/ctu-group/captcha", "cap.dingxiang-inc.com"),
+        widget=(".dx_captcha_oneclick_one-step",),
+        slider_handle=(".dx_captcha_basic_slider", ".dx_captcha_rotate_slider"),
+    ),
+    # The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside
+    # it; the game frame's own path is listed so a page that frames the game directly is found too.
+    Vendor.FUNCAPTCHA: VendorSelectors(
+        hosts=("arkoselabs.com",),
+        widget=('iframe[src*="arkoselabs.com"]', 'iframe[src*="ec-game-core/game-core"]'),
+    ),
+    # Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.
+    Vendor.PROTON: VendorSelectors(
+        hosts=("/core/v4/captcha",),
+        widget=('iframe[src*="/core/v4/captcha"]',),
     ),
     Vendor.UNKNOWN: VendorSelectors(hosts=()),
 }
@@ -179,8 +227,9 @@ def submit_by_text(text: str) -> str:
     return f"xpath=.//button[contains({_LOWER}, '{text}')] | .//div[@role=\"button\" and contains({_LOWER}, '{text}')]"
 
 
-# A real Verify/Next/Submit/Skip first; the vendor-named controls are fallbacks.
-SUBMIT_SELECTORS: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip")), *_of_every_vendor("submit"))
+# A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
+SUBMIT_SELECTORS: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip", "confirm")),
+                                   *_of_every_vendor("submit"))
 
 # Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
 # reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
@@ -198,4 +247,5 @@ SLIDER_HANDLE_SELECTORS: Sequence[str] = (
     '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
     '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
 )
+REFRESH_SELECTORS: Sequence[str] = _of_every_vendor("refresh")
 PIECE_SELECTORS: Sequence[str] = (*_of_every_vendor("piece"), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]')

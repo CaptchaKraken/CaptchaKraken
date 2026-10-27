@@ -11,7 +11,7 @@ import {
   ViewportSize,
 } from './playwright-types';
 import { watchPage, CaptchaWatcher, WatchOptions } from './watcher';
-import { Humanizer, resolveHumanizer } from './humanize.js';
+import { Humanizer, hold, resolveHumanizer } from './humanize.js';
 import { execFile, spawn, spawnSync, ChildProcessWithoutNullStreams } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -20,7 +20,7 @@ import * as os from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { PhaseBudget, timingsEnabled } from './timing';
 import { CaptureRect, cropPng, enclosingRect } from './png';
-import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
+import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, HoldAction, RefreshAction, SlideAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
 import { ActionKind, FrameRole, KeyframeMode, Outcome, PaintVerdict, PauseKind, Phase, RecaptchaBanner, RetryMode, SettleVerdict, SolveStage, Vendor, Verdict, isOneOf } from './kinds';
 import { VerdictLog } from './verdicts';
 import { aggregateTokenUsage } from './token-usage';
@@ -28,10 +28,9 @@ import { parseApiError } from './errors';
 import { DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS } from './limits';
 import { resolvePythonCommand } from './python-command';
 import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
-import { solveSlideGeometry, MIN_PIECE_PX, MAX_PIECE_FRACTION } from './slide-geometry';
 import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
 import { SELECTORS, VENDORS, VendorSelectors, WIDGET_PROBES, WidgetProbe, ENCLAVE_SELECTORS, RESPONSE_SELECTORS, ACCEPTED_SELECTORS, SUBMIT_SELECTORS,
-  TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS } from './selectors';
+  TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS, REFRESH_SELECTORS } from './selectors';
 
 const execFileAsync = promisify(execFile);
 /** The ceiling on one ask, matching the Python planner's own default. */
@@ -106,11 +105,6 @@ interface GridCellStates {
   selected: number[];
 }
 
-interface TrackedPiece {
-  bbox: [number, number, number, number];
-  piece: { centre: number, width: number } | null;
-}
-
 /** What detection found: the handle to photograph, the locator to search inside, and which table entry named it. */
 export interface Widget {
   el: ElementHandle;
@@ -144,6 +138,21 @@ const hasText = async (el: ElementHandle): Promise<boolean> => !!((await el.text
 
 const SLIDE_TOLERANCE_PX = 2;
 const SLIDE_MAX_CORRECTIONS = 3;
+// The nudge that shows the tracker what the handle moves: enough to separate the part from still ground, little
+// enough that a piece resting against the board's edge stays on it. Mirrors page_solver.py SLIDE_PROBE_PX.
+const SLIDE_PROBE_PX = 8;
+
+interface SlideStepRequest {
+  first: string; probe: string; current: string; probe_s: number; s: number | [number, number];
+  goal: number[]; seed: number[] | null; handle: number[]; bounds: number[]; tol: number;
+  history: { s: number | number[]; params: number[] }[];
+}
+
+interface SlideStepReply {
+  pos: [number, number]; params: [number, number, number]; error: number; grabbed: boolean; kind: 'slide' | 'turn';
+  next: number | [number, number]; done: boolean; correlation: number;
+  observation: { s: number | number[]; params: number[] };
+}
 
 /** An allow-list of what needs nothing: the other direction raises instead of clicking at the origin. */
 export function answerNeedsElementBox(actions: ReadonlyArray<{ action?: string }>): boolean {
@@ -173,6 +182,10 @@ const NOT_THIS_BOARD_POLLS = 3;
 // How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read inside
 // this window is wearing our own feedback, which is not a screen it ever showed by itself.
 export const INPUT_SETTLE_MS = 400;
+// A press-and-hold is released once the widget's picture has stopped changing for this long after its fill
+// moved, and at HOLD_MAX_MS whatever it shows. Press & Hold widgets ask for seconds, not tens of seconds.
+export const HOLD_SETTLE_MS = 900;
+export const HOLD_MAX_MS = 12_000;
 
 /** `viewportSize()` is null on a context launched without one (camoufox), where only the window knows. */
 async function viewportOf(page: Page): Promise<ViewportSize> {
@@ -946,8 +959,8 @@ export class CaptchaKrakenSolver {
           }
           performedAction = answered = true;
           await this.emitStep(captchaElement, SolveStage.CLICK, `clicked ${bboxes.length || 1} target(s)`, puzzleSource, frameRole, attempt, { bboxes });
-        } else if (action.action === ActionKind.DRAG && !(action as DragAction).source_bounding_box) {
-          if (await this.executeSlide(page, captchaElement, scope, action as DragAction, requireBox())) {
+        } else if (action.action === ActionKind.SLIDE || (action.action === ActionKind.DRAG && !(action as DragAction).source_bounding_box)) {
+          if (await this.executeSlide(page, captchaElement, scope, action as DragAction | SlideAction, requireBox())) {
             performedAction = slid = true;
             await this.emitStep(captchaElement, SolveStage.DRAG, 'slid the piece into the slot', puzzleSource, frameRole, attempt, { action });
           }
@@ -957,11 +970,21 @@ export class CaptchaKrakenSolver {
           await this.executeDrag(page, captchaElement, action as any, requireBox());
           performedAction = answered = true;
           await this.emitStep(captchaElement, SolveStage.DRAG, 'drag', puzzleSource, frameRole, attempt, { action });
+        } else if (action.action === ActionKind.HOLD) {
+          // The widget submits itself when the hold completes, like a slide on release.
+          const completed = await this.executeHold(page, captchaElement, action as HoldAction, requireBox());
+          performedAction = slid = true;
+          await this.emitStep(captchaElement, SolveStage.HOLD, completed ? 'held until the widget completed' : 'released the hold at the cap', puzzleSource, frameRole, attempt, { action });
         } else if (action.action === ActionKind.TYPE) {
           if (await this.executeType(page, scope, action as TypeAction, widget.at)) {
             performedAction = answered = true;
             await this.emitStep(captchaElement, SolveStage.TYPE, 'typed the code', puzzleSource, frameRole, attempt, { action });
           }
+        } else if (action.action === ActionKind.REFRESH) {
+          // Nothing after a refresh, Verify included, belongs to the board it replaces.
+          const refreshed = await this.executeRefresh(page, captchaElement, scope, action as RefreshAction, elementBox);
+          if (refreshed) await this.emitStep(captchaElement, SolveStage.REFRESH, 'asked for a new puzzle', puzzleSource, frameRole, attempt, { action });
+          return { didInteract: refreshed, tokenUsage: allTokenUsage };
         } else if (action.action === ActionKind.WAIT && (action as any).duration_ms > 0) {
           await delay((action as any).duration_ms);
           performedAction = true;
@@ -1557,6 +1580,12 @@ export class CaptchaKrakenSolver {
         });
         continue;
       }
+      if (action.action === ActionKind.REFRESH) {
+        // A new board replaces this one: nothing clicked on it is submitted, and the next loop reads the new one.
+        const frame = await captchaElement.contentFrame();
+        const refreshed = !!frame && await this.executeRefresh(page, captchaElement, frame, action as RefreshAction, elementBox);
+        return { didInteract: refreshed || performedAction, tokenUsage: allTokenUsage };
+      }
       if (action.action !== ActionKind.CLICK) {
         console.warn(`[recaptcha-grid] round ${round}: unexpected action '${(action as any).action}'; re-solving.`);
         continue;
@@ -2063,6 +2092,13 @@ export class CaptchaKrakenSolver {
   /** True when this answer already ran and changed nothing: resample, and let the recording path have a go. */
   private noteAnswer(actions: any[], retryMode: RetryMode | null): boolean {
     const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode);
+    // A refresh asks for a different board, so the same refresh twice is two boards, not a refused answer. An
+    // answer that could not be signed could not be read either, and is not looked into.
+    if (sig !== null && actions.some((a) => a?.action === ActionKind.REFRESH)) {
+      this.noProgressRounds = 0;
+      this.lastAnswerSig = null;
+      return false;
+    }
     if (sig !== null && sig === this.lastAnswerSig) {
       this.noProgressRounds++;
       console.log(`[no-progress] the model returned the same answer again (${this.noProgressRounds} in a row) — the previous one already ran and changed nothing`);
@@ -2422,6 +2458,45 @@ export class CaptchaKrakenSolver {
     await this.gesture(() => this.human.click(page, [elementBox.x + rel[0], elementBox.y + rel[1]]));
   }
 
+  /**
+   * Press-and-hold until the widget completes: true when it did, false when the cap ran out. Complete is the vendor's
+   * done signal, the widget closing, or its picture having changed (the fill) and then sat still for HOLD_SETTLE_MS.
+   */
+  private async executeHold(page: Page, element: ElementHandle, action: HoldAction, elementBox: Box): Promise<boolean> {
+    this.actedOnBoard = true;
+    const rel = this.clickPointFor({ action: ActionKind.CLICK, target_bounding_box: action.target_bounding_box }, elementBox);
+    if (!rel) return false;
+    const first = await this.elementFrameHash(element);
+    const seen = { hash: first, since: Date.now(), changed: false };
+    const done = async (): Promise<boolean> => {
+      if (await this.isCaptchaSolved(page)) return true;
+      if (!(await element.boundingBox().catch(() => null))) return true;
+      const h = await this.elementFrameHash(element);
+      if (h !== seen.hash) {
+        Object.assign(seen, { hash: h, since: Date.now(), changed: seen.changed || h !== first });
+        return false;
+      }
+      return seen.changed && Date.now() - seen.since >= HOLD_SETTLE_MS;
+    };
+    return this.gesture(() => hold(this.human, page, [elementBox.x + rel[0], elementBox.y + rel[1]], done, HOLD_MAX_MS));
+  }
+
+  /** Deal a new puzzle: the vendor's own control, else the model's point on one. False when there is neither. */
+  private async executeRefresh(page: Page, element: ElementHandle, scope: Scope, action: RefreshAction, elementBox: Box | null): Promise<boolean> {
+    const control = await this.findControl(scope, REFRESH_SELECTORS);
+    if (control) {
+      this.actedOnBoard = true;
+      await this.moveAndClick(page, control);
+    } else if (action.target_bounding_box && elementBox) {
+      await this.executeClick(page, element, { action: ActionKind.CLICK, target_bounding_box: action.target_bounding_box }, elementBox);
+    } else {
+      console.log('The model asked for a new puzzle, and there is no control to deal one; ending the round.');
+      return false;
+    }
+    console.log('Asked for a new puzzle instead of solving this one.');
+    return true;
+  }
+
   private async executeDrag(page: Page, _element: ElementHandle,
                             action: { source_bounding_box: [number, number, number, number]; target_bounding_box: [number, number, number, number] },
                             elementBox: Box) {
@@ -2429,15 +2504,6 @@ export class CaptchaKrakenSolver {
     const center = (bbox: [number, number, number, number]): [number, number] =>
       [elementBox.x + ((bbox[0] + bbox[2]) / 2) * elementBox.width, elementBox.y + ((bbox[1] + bbox[3]) / 2) * elementBox.height];
     await this.gesture(() => this.human.drag(page, center(action.source_bounding_box), center(action.target_bounding_box)));
-  }
-
-  /**
-   * The slider piece's box: the first visible match small enough to be a piece. Runs during detection, so it must
-   * not set `actedOnBoard`: marking there disabled `shouldSpeculate` on every slide solve.
-   */
-  private async measurePieceBox(scope: Scope, widgetWidth: number): Promise<Box | null> {
-    const boxes = await Promise.all((await handles(await visible(scope, PIECE_SELECTORS))).map((h) => h.boundingBox().catch(() => null)));
-    return boxes.find((b): b is Box => !!b && b.width >= MIN_PIECE_PX && b.width <= widgetWidth * MAX_PIECE_FRACTION) ?? null;
   }
 
   private async findControl(scope: Scope, selectors: readonly string[]): Promise<ElementHandle | null> {
@@ -2473,16 +2539,15 @@ export class CaptchaKrakenSolver {
     return true;
   }
 
-  private async trackPiece(element: ElementHandle, beforePath: string, afterPath: string, exclude: [number, number, number, number], travel = 0): Promise<TrackedPiece | null> {
-    try {
-      await this.shot(element, afterPath, this.config.elementScreenshotTimeoutMs ?? 8000);
-      const res = await this.runCvTool('track-piece', { before: beforePath, after: afterPath, exclude, travel },
-        ['track-piece', beforePath, afterPath, JSON.stringify(exclude), String(travel)]);
-      return res && res.bbox ? { bbox: res.bbox, piece: res.piece ?? null } : null;
-    } catch (e) {
-      console.warn('track-piece failed:', e);
+  /** One look of the slide loop (`slide_tracker.py` behind the CV worker); null when the part cannot be followed. */
+  private async slideStep(request: SlideStepRequest): Promise<SlideStepReply | null> {
+    const res = await this.runCvTool('slide-step', request, ['slide-step', JSON.stringify(request)]);
+    // A reply's `error` is the distance still to go; a failure is `{error: why}` with no position.
+    if (!res?.pos) {
+      console.warn(`[slide] ${res?.error ?? 'the tracker gave no answer'}; released where the handle is`);
       return null;
     }
+    return res as SlideStepReply;
   }
 
   private shotScale(shot: string, cssWidth: number): number {
@@ -2490,91 +2555,74 @@ export class CaptchaKrakenSolver {
     return dims && cssWidth > 0 ? dims.width / cssWidth : 1;
   }
 
-  /** Aim the handle at the slot once, then look and correct until the piece is home. Release is the submit. */
-  private async executeSlide(page: Page, element: ElementHandle, scope: Scope, action: DragAction, elementBox: Box): Promise<boolean> {
+  /**
+   * Press the handle, nudge it to see what it moves, then steer that part's point onto its target. Release is the submit.
+   * A generation-3 answer names all three points, so nothing is read from the page but pixels. A generation-2 answer
+   * names only the target: its handle comes from the selector table and the part it moves is whatever moved most.
+   * That path goes when the last generation-2 model does.
+   */
+  private async executeSlide(page: Page, element: ElementHandle, scope: Scope, action: DragAction | SlideAction, elementBox: Box): Promise<boolean> {
     this.actedOnBoard = true;
-    const tb = action.target_bounding_box;
-    const targetX = ((tb[0] + tb[2]) / 2) * elementBox.width;
-
-    const handle = await this.findControl(scope, SLIDER_HANDLE_SELECTORS);
-    if (!handle) {
-      const piece = await this.findControl(scope, PIECE_SELECTORS);
-      const box = piece ? await piece.boundingBox() : null;
+    const { width: w, height: h } = elementBox;
+    const at = (b: [number, number, number, number]): [number, number] => [((b[0] + b[2]) / 2) * w, ((b[1] + b[3]) / 2) * h];
+    const goal = at(action.target_bounding_box);
+    let handle: [number, number];
+    let seed: [number, number] | null;
+    if (action.action === ActionKind.SLIDE) {
+      handle = at(action.handle_bounding_box);
+      seed = at(action.source_bounding_box);
+    } else {
+      const slider = await this.findControl(scope, SLIDER_HANDLE_SELECTORS);
+      const piece = slider ? null : await this.findControl(scope, PIECE_SELECTORS);
+      const box = await (slider ?? piece)?.boundingBox().catch(() => null);
       if (!box) {
         console.warn('Slide action, but the widget has neither a slider nor a draggable piece.');
         return false;
       }
-      const targetY = ((tb[1] + tb[3]) / 2) * elementBox.height;
-      console.log('No slider track; dragging the piece to the slot directly.');
-      await this.gesture(() => this.human.drag(page, [box.x + box.width / 2, box.y + box.height / 2], [elementBox.x + targetX, elementBox.y + targetY]));
-      return true;
+      handle = [box.x + box.width / 2 - elementBox.x, box.y + box.height / 2 - elementBox.y];
+      // A piece with no track is the handle itself, and what it moves is it.
+      seed = piece ? handle : null;
     }
 
-    const hbox = await handle.boundingBox();
-    if (!hbox) return false;
-    const startX = hbox.x + hbox.width / 2;
-    const holdY = hbox.y + hbox.height / 2;
-    // Mask from the handle's band to the widget's bottom, not the handle's bottom: the filled track moves too, and
-    // masked to the band alone the loop once derived a 135.4px piece on Tencent's track against 42.0px masked to the bottom.
-    const pad = Math.max(4, hbox.height * 0.35);
-    const band: [number, number, number, number] = [0, hbox.y - elementBox.y - pad, elementBox.width, elementBox.height];
-    const shots = [tmp('slide_0'), tmp('slide_1')];
+    const press: [number, number] = [elementBox.x + handle[0], elementBox.y + handle[1]];
+    const probe = goal[0] >= (seed ?? handle)[0] ? SLIDE_PROBE_PX : -SLIDE_PROBE_PX;
+    const timeout = this.config.elementScreenshotTimeoutMs ?? 8000;
+    const [first, probed, current] = [tmp('slide_0'), tmp('slide_1'), tmp('slide_2')];
     try {
-      await this.move(page, handle, { paddingPercentage: 30 });
+      await this.performSmoothMove(page, ...press);
       await this.human.press(page);
       await this.human.pause(PauseKind.GRAB);
-      await this.shot(element, shots[0], this.config.elementScreenshotTimeoutMs ?? 8000);
-      const scale = this.shotScale(shots[0], elementBox.width);
-      const exclude = band.map((v) => v * scale) as [number, number, number, number];
-      const liveCentre = async (): Promise<number | null> => {
-        const b = await this.measurePieceBox(scope, elementBox.width);
-        return b ? b.x + b.width / 2 - elementBox.x : null;
+      await this.shot(element, first, timeout);
+      const k = this.shotScale(first, w);
+      await this.performSmoothMove(page, press[0] + probe, press[1]);
+      await this.human.pause(PauseKind.PROBE);
+      await this.shot(element, probed, timeout);
+      const ask = {
+        first, probe: probed, probe_s: probe * k, goal: [goal[0] * k, goal[1] * k], seed: seed && [seed[0] * k, seed[1] * k],
+        handle: [handle[0] * k, handle[1] * k], bounds: [-handle[0] * k, (w - handle[0]) * k], tol: SLIDE_TOLERANCE_PX * k,
       };
-
-      const restCentre = (await liveCentre()) ?? (startX - elementBox.x);
-      let offset = targetX - restCentre;
-      await this.performSmoothMove(page, startX + offset, holdY);
-
-      const widths: Array<[number, number]> = [];
-      let lastBox: [number, number, number, number] | null = null;
-      let lastPiece: { centre: number, width: number } | null = null;
-      let lastCentre: number | null = null;
-      let ratio = 1;
-      let i = 0;
-      for (; i < SLIDE_MAX_CORRECTIONS; i++) {
-        await this.human.pause(PauseKind.PROBE);
-        const seen = await this.trackPiece(element, shots[0], shots[1], exclude, offset * ratio * scale);
-        if (seen) {
-          widths.push([offset, (seen.bbox[2] - seen.bbox[0]) / scale]);
-          lastBox = seen.bbox;
-          lastPiece = seen.piece;
+      let look = probed;
+      let s: number | [number, number] = probe * k;
+      const history: SlideStepReply['observation'][] = [];
+      for (let moves = 0; ; moves++) {
+        const reply = await this.slideStep({ ...ask, current: look, s, history });
+        if (!reply) break;
+        if (look !== probed) history.push(reply.observation);
+        if (reply.done || moves >= SLIDE_MAX_CORRECTIONS) {
+          if (reply.error > ask.tol) console.warn(`[slide] releasing ${(reply.error / k).toFixed(1)}px off target`);
+          break;
         }
-        const solved = solveSlideGeometry(widths, elementBox.width);
-        ratio = solved.ratio;
-        const live = await liveCentre();
-        const pieceCentre = live !== null ? live
-          : lastPiece !== null ? lastPiece.centre / scale
-            : (lastBox && solved.pieceWidth !== null ? lastBox[2] / scale - solved.pieceWidth / 2 : null);
-        if (pieceCentre === null) continue;
-        lastCentre = pieceCentre;
-        const error = targetX - pieceCentre;
-        console.log(`[slide] ${live !== null ? 'the piece element' : lastPiece !== null ? 'the pixel diff' : "the diff's union"} puts it at ${Math.round(pieceCentre)}px, want ${Math.round(targetX)}px, ratio ${ratio.toFixed(2)}`);
-        if (Math.abs(error) <= SLIDE_TOLERANCE_PX) break;
-        offset += error / ratio;
-        await this.performSmoothMove(page, startX + offset, holdY);
-      }
-      if (lastCentre === null) {
-        console.warn('Slider: the piece never resolved on screen; released where the opening sweep put it.');
-      } else if (i >= SLIDE_MAX_CORRECTIONS) {
-        const settled = await liveCentre();
-        const left = targetX - (settled !== null ? settled : lastCentre);
-        if (Math.abs(left) > SLIDE_TOLERANCE_PX) console.warn(`[slide] out of corrections with ${left >= 0 ? '+' : ''}${left.toFixed(1)}px still to go — releasing off-target`);
+        s = reply.next;
+        const [dx, dy] = Array.isArray(s) ? s : [s, 0];
+        await this.performSmoothMove(page, press[0] + dx / k, press[1] + dy / k);
+        await this.human.pause(PauseKind.PROBE);
+        await this.shot(element, current, timeout);
+        look = current;
       }
       await this.human.pause(PauseKind.SETTLE);
     } finally {
       try { await this.human.release(page); } catch { /* the page may have navigated */ }
-      this.lastInputAt = Date.now();
-      for (const s of shots) unlink(s);
+      for (const f of [first, probed, current]) unlink(f);
     }
     return true;
   }

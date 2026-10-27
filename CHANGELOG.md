@@ -3,6 +3,67 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [Unreleased]
+
+### Added
+
+- **Prompt generation 4: the pointer.** A generation-4 model is a pointer, not a
+  chat model. The client POSTs the bare board (or the `clipvideo`-cut frames) to
+  `{base_url}/pointer` and never runs `find_grid`. The server numbers every
+  element its detector finds, outlining each by its mask, and reads the answer
+  from one prefill: no token is generated. The answer is generation 3's shape,
+  always with points, plus the number of the element under each point when one
+  was found (`ids`, `from_id`/`to_id`, `handle_id`). It is served by a vLLM
+  plugin (`captchakraken.pointer.vllm_plugin`, registered via the
+  `vllm.general_plugins` entry point) behind `python -m
+  captchakraken.pointer.server`. `LATEST_PROMPT_VERSION` is unchanged.
+- **Prompt generation 3: one prompt for every puzzle.** `BUILTIN_PROMPTS["3"]`
+  is a single `general` prompt; the puzzle's type is never named and a
+  generation-3 model's `experts` are never routed to. A grid the driver finds is
+  sent with its cells numbered and read by the ids the model names. Generations
+  1 and 2 are unchanged and `LATEST_PROMPT_VERSION` stays `"2"`.
+- **A `hold` action.** Both drivers press and hold until the widget reports
+  success, closes, or finishes drawing its progress (12s cap), and always
+  release. Press-and-hold widgets are detected by their host-page container.
+- **A `refresh` action.** A generation-3 model can ask for a new puzzle instead
+  of solving one a person would not; the driver presses the vendor's reload
+  control (new `refresh` selector table) or the model's point on it, and does
+  nothing more on the replaced board.
+- **Prompt generation 3 watches an animated captcha as a video.** A model on
+  generation 3 is sent the recorded frames as one video and answers the moment
+  it acts on as `"t"`, in seconds; `CaptchaSolver.solve_animated` picks the
+  video or the keyframe stills by the model's generation. Generation 2 models
+  are unchanged. The local vLLM is started with the video flags it needs.
+- **A `slide` action, steered by what the handle moves.** A generation-3 model
+  answers a slider with the handle, a point on the part it moves, and where that
+  point belongs. Both drivers press the handle, nudge it, track that part on
+  screen — a jigsaw piece, a picture that turns, a piece the pointer carries —
+  and steer until the point is on its target. No selector is read and no
+  handle-to-piece ratio is assumed. The tracker is the new `slide-step` CLI
+  command.
+- **Five more vendors are found and driven by the general solve loop**: AWS WAF,
+  CaptchaFox, Dingxiang, Arkose FunCaptcha and Proton's own captcha. Each is a
+  row in the selector table of both drivers, read off the markup the vendor's
+  own page ships: AWS WAF's card (in an open shadow root, which Playwright
+  pierces), CaptchaFox's "I am human" box and the puzzle modal it opens,
+  Dingxiang's popup card, the Arkose frame on the host page, and Proton's
+  `/core/v4/captcha` frame. The `puzzleSource` / `puzzle_source` value and the
+  `X-CK-Vendor` header name them `awswaf`, `captchafox`, `dingxiang`,
+  `funcaptcha` and `proton` instead of `unknown`.
+- **A button labelled Confirm submits a round**, after Verify, Next, Submit and
+  Skip. AWS WAF's card has no other submit control.
+
+### Fixed
+
+- **reCAPTCHA Enterprise is detected.** An Enterprise sitekey serves the
+  checkbox and the challenge from `/recaptcha/enterprise/`, which the table's
+  `/recaptcha/api2/` selectors never matched, so the page read as "no captcha".
+
+### Removed
+
+- **The `track-piece` CLI command** and the diff-based piece finder behind it.
+  `slide-step` replaces it, for generation-2 answers too.
+
 ## [3.3.0] - 2026-10-24
 
 ### Added

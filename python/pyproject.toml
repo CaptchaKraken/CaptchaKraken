@@ -90,6 +90,12 @@ dev = [
 [project.scripts]
 captchakraken = "captchakraken.cli:main"
 
+# vLLM loads general plugins in every process it starts (the API server and each
+# engine core), so the pointer model's architecture is known wherever a
+# checkpoint naming it is loaded. Inert unless vLLM is installed (`serve` extra).
+[project.entry-points."vllm.general_plugins"]
+captchakraken_pointer = "captchakraken.pointer.vllm_plugin:register"
+
 [project.urls]
 Homepage = "https://captchakraken.com"
 Documentation = "https://github.com/CaptchaKraken/CaptchaKraken#readme"

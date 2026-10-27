@@ -15,6 +15,10 @@ _DISABLE_FETCH_ENV = "CAPTCHA_PROMPTS_NO_FETCH"
 
 LATEST_PROMPT_VERSION = "2"
 
+# The generations that show the model an animated captcha as one video (`clipvideo.py`) and read the moment it
+# acts on as `"t"`, in seconds. Every earlier generation sends numbered keyframe stills and reads `"frame"`.
+VIDEO_GENERATIONS = ("3", "4")
+
 
 # Pure literals only, no f-strings, joins or constant references: the training repo's release parity gate reads
 # this dict by AST without importing the package, and the gate going quiet is how prompt drift shipped once.
@@ -135,6 +139,58 @@ BUILTIN_PROMPTS = {
             "}"
         ),
     },
+    "3": {
+        "general": (
+            "Your task is to solve the captcha. Read its instruction, usually at the top, and decide "
+            "what a person would do to solve it.\n\n"
+            "You are given either one screenshot or a video. Each moment of a video is labelled with "
+            "its time, like <1.3 seconds>. In a video the answer may depend on how things move or "
+            "change: what grows or shrinks, which way something turns, what appears, disappears or "
+            "moves, and in what order.\n\n"
+            "Some screenshots have numbered boxes drawn over the things you can interact with — "
+            "tiles, buttons, pieces, handles. The boxes and numbers are ours, not part of the "
+            "puzzle. When something you act on has a box, also give its number as an id. Not "
+            "everything is boxed and many screenshots have no boxes at all: a point is always "
+            "required, an id never is.\n\n"
+            "Points are on a 0–1000 scale of the image: (0, 0) is the top-left corner, (1000, 1000) "
+            "the bottom-right.\n\n"
+            "Choose ONE action:\n\n"
+            "CLICK one or more things, in the order to click them:\n"
+            "  {\"action\": \"click\", \"points\": [[x, y], ...], \"ids\": [n, ...]}\n"
+            "  When the instruction asks for every match, a tile that is already selected (a small "
+            "checkmark, border or highlight) still counts; a tile being replaced (a large checkmark, a "
+            "picture fading out or in) does not. If nothing matches, give empty points.\n\n"
+            "DRAG pieces, one drag per piece:\n"
+            "  {\"action\": \"drag\", \"drags\": [{\"from\": [x, y], \"to\": [x, y], \"from_id\": n, "
+            "\"to_id\": n}, ...]}\n\n"
+            "SLIDE a slider: press its handle and move it until the part of the picture it moves "
+            "lines up with where it belongs — a jigsaw piece over its slot, a turned picture upright, "
+            "a shifted strip continuing the rest:\n"
+            "  {\"action\": \"slide\", \"handle\": [x, y], \"from\": [x, y], \"to\": [x, y]}\n"
+            "  \"handle\" is what you press, \"from\" a point on the part that moves, \"to\" where that "
+            "point belongs. When the piece itself is what you press, \"handle\" and \"from\" are the "
+            "same point.\n\n"
+            "PRESS AND HOLD a button until the page confirms:\n"
+            "  {\"action\": \"hold\", \"points\": [[x, y]], \"ids\": [n]}\n\n"
+            "TYPE the characters shown, exactly as printed — keep their case, add no spaces; "
+            "strike-throughs, dots and background texture are not characters:\n"
+            "  {\"action\": \"type\", \"text\": \"...\"}\n\n"
+            "REFRESH instead of solving if the puzzle looks impossible, or would take a reasonable "
+            "person more than a minute. Click the control that loads a new puzzle, usually a "
+            "circular arrow (empty points if there is none):\n"
+            "  {\"action\": \"refresh\", \"points\": [[x, y]]}\n\n"
+            "For a video, put \"t\" first: the time of the moment where your answer is clearest, in "
+            "seconds exactly as it is labelled, so the solver can wait for that moment. Leave it out "
+            "if the answer is the same throughout.\n\n"
+            "Leave out any key you have no value for. Respond ONLY with the JSON."
+        ),
+    },
+    # Generation 4 is the pointer (`captchakraken.pointer`): the board goes to the server's /pointer endpoint,
+    # which numbers its elements with the element detector, builds the prompt itself and reads the answer from one
+    # prefill. The client sends no prompt text, so there is none to drift.
+    "4": {
+        "pointer": True,
+    },
 }
 
 
@@ -213,43 +269,56 @@ def requires_auth(model: Optional[str]) -> bool:
 
 @dataclass
 class PromptSet:
+    """One generation's prompts. Generations 1 and 2 ask a prompt per family; generation 3 asks `general`, one
+    prompt for every puzzle, and has no family templates at all."""
 
     version: str
-    action_prompt: str
-    grid_template: str
+    action_prompt: Optional[str]
+    grid_template: Optional[str]
     video_template: Optional[str]
     text_template: Optional[str]
     grid_by_type: Dict[str, str]
     source: str
+    general: Optional[str] = None
+    sends_video: bool = False
+    #: Asked at /pointer with the bare board; the server owns the prompt (generation 4).
+    pointer: bool = False
+
+    def _family(self, template: Optional[str], family: str) -> str:
+        if template is None:
+            raise ValueError(
+                f"prompt generation {self.version} has no {family} prompt"
+                + (" — it asks one general prompt for every puzzle" if self.general else
+                   f" — model was trained before the {family} family existed. Use a model on "
+                   "generation 2 or later."))
+        return template
+
+    def pixel_prompt(self) -> str:
+        return self._family(self.action_prompt, "click-and-drag")
 
     def grid_prompt(self, *, rows: int, cols: int, grid_hint: str = "",
                     puzzle_type: Optional[str] = None) -> str:
         if puzzle_type and puzzle_type in self.grid_by_type:
             return self.grid_by_type[puzzle_type]
-        return self.grid_template.format(rows=rows, cols=cols,
-                                         total=rows * cols, grid_hint=grid_hint)
+        return self._family(self.grid_template, "grid").format(rows=rows, cols=cols,
+                                                               total=rows * cols, grid_hint=grid_hint)
 
-    def video_prompt(self, n_keyframes: int) -> str:
-        n = int(n_keyframes)
+    def video_prompt(self, n_keyframes: Optional[int] = None) -> str:
+        """The animated prompt. A video generation asks its one prompt over the clip; a keyframe generation's
+        text states how many stills it sent."""
+        if self.sends_video:
+            return self.general if self.general is not None else self._family(self.video_template, "animated-puzzle")
+        if self.general is not None:
+            # Never trained on keyframes: sending them under the general prompt would answer silently worse.
+            raise ValueError(f"prompt generation {self.version} was never trained on keyframe stills")
+        n = int(n_keyframes or 0)
         if n < 1:
             raise ValueError(f"a keyframe request needs at least one frame, got {n_keyframes}")
-        if self.video_template is None:
-            raise ValueError(
-                f"prompt generation {self.version} has no animated-puzzle prompt — "
-                f"model was trained before the video family existed. Use a model on "
-                f"generation 2 or later for animated captchas."
-            )
         listing = ", ".join(f"frame {i}" for i in range(1, n + 1))
-        return self.video_template.format(n=n, listing=listing)
+        return self._family(self.video_template, "animated-puzzle").format(n=n, listing=listing)
 
     def text_prompt(self) -> str:
-        if self.text_template is None:
-            raise ValueError(
-                f"prompt generation {self.version} has no distorted-text prompt — "
-                f"model was trained before the text family existed. Use a model on "
-                f"generation 2 or later for BotDetect/MTCaptcha/Yandex text captchas."
-            )
-        return self.text_template
+        return self._family(self.text_template, "distorted-text")
 
 
 def builtin(version: str) -> Optional[PromptSet]:
@@ -258,12 +327,15 @@ def builtin(version: str) -> Optional[PromptSet]:
         return None
     return PromptSet(
         version=str(version),
-        action_prompt=spec["action_pixel"],
-        grid_template=spec["grid"],
-        video_template=spec["video"],
-        text_template=spec["text"],
+        action_prompt=spec.get("action_pixel"),
+        grid_template=spec.get("grid"),
+        video_template=spec.get("video"),
+        text_template=spec.get("text"),
         grid_by_type={},
         source=f"built-in v{version}",
+        general=spec.get("general"),
+        sends_video=str(version) in VIDEO_GENERATIONS,
+        pointer=bool(spec.get("pointer")),
     )
 
 
@@ -281,6 +353,10 @@ def _from_doc(doc: Dict[str, Any], source: str) -> PromptSet:
         text_template=templates.get("text") or base.text_template,
         grid_by_type=grid_by_type,
         source=source,
+        general=templates.get("general") or base.general,
+        # From the generation, never from the document: a template can be overridden, the way it is asked cannot.
+        sends_video=base.sends_video,
+        pointer=base.pointer,
     )
 
 
@@ -400,6 +476,10 @@ def experts(model: Optional[str]) -> Dict[PromptFamily, str]:
     entry = (registered_models().get(repo_id) or {}) if repo_id else {}
     mapping = entry.get("experts")
     if not isinstance(mapping, dict):
+        return {}
+    if (builtin(str(entry.get("prompt_version", ""))) or builtin(LATEST_PROMPT_VERSION)).general is not None:
+        _warn(f"model {repo_id!r} is on prompt generation {entry.get('prompt_version')}, which is one model "
+              "asked one prompt; its `experts` are never routed to.")
         return {}
     out: Dict[PromptFamily, str] = {}
     for family in PromptFamily:

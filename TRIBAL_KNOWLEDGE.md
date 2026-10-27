@@ -168,6 +168,34 @@ f-string, a `.join()`, a constant reference or an enum member reads as "unset"
 to that gate, and the gate going quiet is how prompt drift shipped on
 2026-07-18: every drag failed as "unsupported" with CI green.
 
+**Prompt generation 3 is one model asked one prompt.** Its `BUILTIN_PROMPTS`
+entry is the single `general` prompt: the puzzle's type is never named, and a
+generation-3 model is never routed by family, even if its registry entry
+declares `experts`. The driver still decides how the board is SHOWN — a grid
+that `find_grid`, `_grid_dims` and `_is_real_grid` accept is sent with its
+cells numbered, anything else as the plain picture — because the model was
+trained on exactly what those three would number. Its `ids` name cells; when
+they name none, the cells its points land in do.
+
+**An animated board on generation 3 is a video, and the answer names WHEN in
+seconds.** `clipvideo.py` sends the recorded frames as one
+`data:video/jpeg` sequence; vLLM labels each frame pair with its time
+(`<1.3 seconds>`) exactly as training did, the model copies one into `"t"`, and
+`time_to_index` maps it back to the recorded frame the wait gate matches. Two
+other designs were dropped: numbered keyframe stills (generation 2) throw away
+the motion the vision tower compares frame to frame, and frame numbers drawn
+into the picture taught the model our overlay. Keyframes still exist on
+generation 3, but only for the driver's wait gate; a generation-3 model is never
+shown them. `VIDEO_GENERATIONS` is per generation and a prompts file cannot
+change it: a template can be overridden, the way it is asked cannot.
+
+**`refresh` is an answer, not a failure.** Some boards a person would not
+solve, and solving them instantly is itself a tell, so generation 3 may ask for
+a new puzzle. The driver presses the vendor's own control (`refresh` in the
+selector table), else the model's point on it, else ends the round. Nothing
+after it — Verify included — belongs to the replaced board, and a second
+refresh is a second board, never counted as a repeated answer.
+
 **The pin decides the registry entry.** Reading `base_model` and `lora_name`
 off `latest` while `CAPTCHA_LORA_ADAPTER` named Abyss-27B downloaded a 9B base,
 tried to load a 27B adapter onto it, and errored deep inside vLLM as a shape
@@ -230,26 +258,37 @@ test` named every test and every module it imported, so adding a test meant
 editing that list and a test left out of it silently never ran — which had
 already happened.
 
-**A puzzle-piece slider is aimed once and then corrected, not calibrated
-first.** The distance between the piece and the slot is already an estimate of
-how far the handle has to travel, so the drag opens with one sweep at the gap —
-the gesture a person makes, and one move and one screenshot cheaper than the two
-measurement nudges it replaces. What the nudges were really for is the piece's
-width and the handle-to-piece ratio, and the sweep supplies both better: it
-carries the piece clear of the ground it vacated, leaving two separate marks in
-the frame, and the right-hand one IS the piece. Measuring it beats inferring it
-from the union of the two, whose width is the piece plus a travel that is only
-believed.
+**A slider is steered by what the handle visibly moves, not by selectors or a
+ratio.** Generation 3 answers a slide with three points: the handle, a point on
+the part it moves, and where that point belongs. The driver presses the handle,
+nudges it 8px, and `slide_tracker.py` segments the part from optical flow
+between those two shots: the part under the model's point, cut to the pixels
+its own motion carries onto the probe. The handle, the filled track and any
+animated badge are parts of their own and drop out without a mask. The probe
+also decides once whether the handle SLIDES the part or TURNS it. Fitting both
+from a short probe let half a degree of noise grow into a ten-degree turn by the
+far end of the track. Each look is then masked template matching near the
+prediction, polished on the exact warp to a tenth of a pixel. Masked ECC drifted
+along edges by a third of a pixel per step, so it is not used. The handle travel
+is planned on a line fitted through every look, so the vendor's
+handle-to-piece ratio is measured, never assumed, and one correction after the
+probe seats it.
 
-**The piece does not always start under the handle, and a sweep aimed from the
-handle can push it off the board.** One vendor's handle sits 42px into a 360px
-card while its piece sits 136px in, so aiming the handle at a slot 288px across
-sends the piece to 382 — past the edge, where the only thing left to photograph
-is the ground it vacated. `locate_piece` reports that for what it is, a mark
-narrower than the distance travelled, and says where the piece went; the next
-correction brings it back. Reported instead as "nothing moved", it is
-unrecoverable: the loop looks again, sees the same thing, and lets go with the
-piece off the board.
+What this replaced, and why: an x-only diff of two shots read the piece as
+"the right-hand mark" and needed the handle's band masked out, `PIECE_SELECTORS`
+for its precise position, and a sweep aimed by arithmetic. It could not follow a
+turn at all, and a rotate slider had to be answered as a handle stop computed
+from one vendor's 260px-per-turn ratio, which the model had to memorise. A part
+that cannot be followed (it never moved, the model's point is nowhere near
+anything that did, or the match falls below 0.6 correlation) is released where
+the handle is, never swept by a guess.
+
+**Generation 2 still slides with selectors, until its last model retires.** A
+generation-2 answer names only the slot, so the handle comes from
+`SLIDER_HANDLE_SELECTORS` (else a track-less piece from `PIECE_SELECTORS`, which
+is then the handle AND what is tracked), and the tracker follows whatever moved
+most that is not the handle. It is the same loop. Only the source of the press
+point differs.
 
 **Nothing may be written to stdout by the MCP server.** On the stdio transport
 stdout *is* the protocol channel, so one stray `console.log` — a banner, a
@@ -288,6 +327,19 @@ which is what lets the crop and the clicks work unchanged; that was checked on
 the recorded page in Chromium and in a Firefox-based browser. The enclave itself is `passive`,
 or a page showing nothing but an idle enclave would be reported as markup the
 table no longer matches.
+
+**A modal opened by a box on the page is a `challenge`, not a `widget`.**
+CaptchaFox's "I am human" box stays on screen under the puzzle it opens, and
+detection reads challenges, then checkboxes, then widgets. Listed as a widget,
+the open modal would be outranked by the box, and the next round would click
+the box again. An inline element in `challenge` is fine: the role decides the order and
+the checkbox flow, not whether the row is a frame. Dingxiang's trigger bar is
+left out on purpose: `find-checkbox` finds no box in it, so as a checkbox it
+would fail every round; its popup is a plain widget. Four of the five rows
+added to the table have no `response`: AWS WAF, Dingxiang and Proton hand the
+token to a callback or a `postMessage`, and Arkose writes `fc-token` inside its
+own frame, out of the host page's reach. Their done signal is the widget
+leaving the page.
 
 **Yandex and MTCaptcha are iframed.** `.CheckboxCaptcha` and `.mtcap` live
 inside the frame document and `querySelector` does not cross a frame boundary,
@@ -645,10 +697,6 @@ port cannot run a camera on another thread at all; it films another chunk each
 round and slices the accumulation. Same contract — a refused animated answer is
 re-asked against strictly more of the board — at a sparser sample.
 
-**`measurePieceBox` must not set `actedOnBoard`.** It runs during detection,
-and marking there disabled `shouldSpeculate` on every slide solve, so the
-speculative burst had never run on those boards.
-
 **`DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS = 8` sits inside the gateway's comped
 band.** Rounds 1-5 are billed, 6-10 served and comped, 11 refused with 409; 8
 keeps a margin on both sides. If the billable cap moves, re-derive it and move
@@ -944,10 +992,10 @@ on refusal, which is what lets the next round re-classify a board that has
 stopped moving as the still it now is.
 
 **`PIECE_SELECTORS` is a second vendor surface, and it fails silently.**
+(Generation 2 only, and since the slide tracker only for a piece with no track.)
 The widget selectors failing is loud — nothing is detected. The piece list
-failing is not: the driver falls back to measuring what moved between two
-screenshots and solves anyway, so the pass rate does not move and no gate can
-see it. Re-measured against the live vendor demos 2026-09-13 and it had two
+failing is not: the driver solved anyway by measuring what moved, so the pass
+rate did not move and no gate could see it. Re-measured against the live vendor demos 2026-09-13 and it had two
 defects. Tencent's piece carries a real, stable, vendor-named class that matches
 none of the generic patterns, so every live Tencent slide had been taking the
 fallback. And on Yidun the generic `[class*="jigsaw"]` matches TWO elements, the
