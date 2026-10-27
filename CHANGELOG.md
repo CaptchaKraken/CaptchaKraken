@@ -15,6 +15,11 @@ semantic versioning; v2 is a major, **breaking** release.
   different servers with different keys without one environment variable
   routing them all. Nothing changes when the option is absent.
 
+### Security
+
+- **Pillow 13.0.0** (`pillow==13.0.0`, was 12.3.0): 12.3.0 carries CVEs that
+  13.0.0 fixes, and the exact pin kept downstream projects on it (#70).
+
 ## [3.2.2] - 2026-10-18
 
 ### Changed
