@@ -393,6 +393,7 @@
     ],
     "js_only_config": [
       "apiKey",
+      "baseUrl",
       "idleMouseWander",
       "maxStaleFrameReSolves",
       "maxUnsupportedReSolves",
@@ -466,6 +467,7 @@
       "animatedChallengeAfterMs",
       "animatedMotionStreak",
       "apiKey",
+      "baseUrl",
       "boardPaintFloor",
       "boardPaintPollMs",
       "boardPaintTimeoutMs",

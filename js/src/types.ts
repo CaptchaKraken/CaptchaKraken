@@ -39,6 +39,8 @@ export interface CaptchaKrakenConfig {
   expert?: PromptFamily;
   /** Bearer token; also read from CAPTCHA_KRAKEN_API_KEY / VLLM_API_KEY. */
   apiKey?: string;
+  /** OpenAI-compatible base for this solver; defaults to VLLM_BASE_URL. */
+  baseUrl?: string;
   /** Where the pointer starts. Default { x: 100, y: 100 }. */
   startingMousePosition?: { x: number, y: number };
   /** Solve rounds that fit the timeout. Default 6. */

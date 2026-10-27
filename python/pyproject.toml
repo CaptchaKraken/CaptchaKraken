@@ -53,7 +53,7 @@ classifiers = [
 # against the floor before changing any of these, and see TRIBAL_KNOWLEDGE.md.
 dependencies = [
   "pydantic==2.13.5",
-  "pillow==12.3.0",
+  "pillow==13.0.0",
   # 2.3.x rather than 2.2.6 because `cursory` requires `numpy~=2.3.3` and the
   # old pin was ours, not opencv's — opencv-python-headless asks only for
   # `numpy>=2`. Moved deliberately as part of the major bump.
