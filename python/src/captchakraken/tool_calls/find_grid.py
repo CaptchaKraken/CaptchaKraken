@@ -61,9 +61,12 @@ MIN_IMAGE_AREA_COVERAGE = 0.30
 CELL_REGULARITY_TOL = 0.12
 MIN_GRID_DIM = 3
 # A true internal line has perpendicular gutters running ~a full cell past it on both sides; a frame line does not.
-# Not 0.9: the cell is often estimated off the other axis's pitch, and on hCaptcha's off-centre photo grid that runs
-# ~10% high, so a true gutter came up 0.3px short and the 3x3 went to the pixel expert.
-CORROB_FRAC = 0.85
+CORROB_FRAC = 0.9
+# When this axis's own gaps are too noisy to give a cell size, the cell is the OTHER axis's pitch, and cells are not
+# square: on hCaptcha's off-centre 3x3 photo grid the borrowed width ran ~10% over the row height, so a true gutter
+# sat 105.0px from the frame against a 105.3px need and the 3x3 went to the pixel expert. A global 0.85-0.89 rescued
+# it but lost up to 3 real grids (2026-10-27, over 13,325 captures); only the borrowed size is discounted.
+CORROB_FRAC_BORROWED = 0.85
 GRID_OVERSHOOT = 0.35
 FULL_SPAN_MARGIN = 0.5
 MIN_GRID_COVERAGE = 0.72
@@ -787,7 +790,9 @@ def _corroborate(lines, perp_lines, total):
         cell = float(np.median(pgaps)) if len(pgaps) else 0.0
         if cell < MIN_CELL:
             return lines
-    need = CORROB_FRAC * cell
+        need = CORROB_FRAC_BORROWED * cell
+    else:
+        need = CORROB_FRAC * cell
     kept = []
     for l in lines:
         p = l.midline_pos
@@ -940,7 +945,10 @@ def _axis_candidates(lines, total):
 
 
 # How near a cell's midpoint a detected gutter must sit, as a fraction of the pitch, to say the cell is two cells.
-HALVED_CELL_TOL = 0.12
+# 0.12 missed a 6x3 grocery board's outer split by a hair (14.9px off, 14.9px allowed: macOS scrollbars shift the
+# frame), and it was read as a 3x3 of tile pairs. 0.13 loses none of 13,325 captures' grids (2026-10-27); a
+# majority-of-splits rule instead lost 10 real 3x3 photo grids.
+HALVED_CELL_TOL = 0.13
 
 
 def _halves_a_finer_lattice(positions, pitch, kept_lines):
@@ -955,7 +963,7 @@ def _halves_a_finer_lattice(positions, pitch, kept_lines):
     mids = ([lines[0] - pitch / 2.0] + [(a + b) / 2.0 for a, b in zip(lines, lines[1:])]
             + [lines[-1] + pitch / 2.0])
     tol = HALVED_CELL_TOL * pitch
-    return sum(any(abs(l.midline_pos - m) <= tol for l in kept_lines) for m in mids) * 2 > len(mids)
+    return all(any(abs(l.midline_pos - m) <= tol for l in kept_lines) for m in mids)
 
 
 def extract_grid_from_lines(h_lines, v_lines, h, w, lab=None):
