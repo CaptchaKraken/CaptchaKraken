@@ -11,7 +11,11 @@ and one query vector per question, at its `<|quad_end|>`. The element a point
 names is not decided here: it is the one under the point (`elements.ids_for`).
 
 A point is a softmax over the chosen moment's tokens plus an offset inside the
-winning token, so a coordinate is never decoded digit by digit. A typed answer
+winning token, so a coordinate is never decoded digit by digit. The offset head
+normalises its input and answers linearly, clamped to the token only when
+deciding: the hidden states it reads are large, and behind a final tanh a single
+optimiser step could saturate it for good, leaving every point at its token's
+centre. A typed answer
 reads each `textK` marker through the language model's own head, one token per
 marker, in parallel.
 """
@@ -74,7 +78,7 @@ class Heads(nn.Module):
         self.pq = nn.ModuleDict({k: nn.Linear(d, dp) for k in L.KINDS})
         self.pk = nn.Linear(d, dp)
         self.mq, self.mk = nn.Linear(d, dp), nn.Linear(d, dp)
-        self.offset = nn.Sequential(nn.Linear(2 * d, 512), nn.GELU(), nn.Linear(512, 2))
+        self.offset = nn.Sequential(nn.LayerNorm(2 * d), nn.Linear(2 * d, 512), nn.GELU(), nn.Linear(512, 2))
         # A low-rank nudge before the language model's head, zero at the start, so
         # a `textK` marker begins as the model's own next-token guess.
         self.text_down = nn.Linear(d, text_rank, bias=False)
@@ -89,8 +93,8 @@ class Heads(nn.Module):
     def moment(self, hq, hm):                             # [d], [M,d] -> [M]
         return (self.mk(hm) @ self.mq(hq)) * self.scale
 
-    def off(self, hq, htok):                              # [d], [d] -> [2], in tokens
-        return torch.tanh(self.offset(torch.cat([hq, htok], -1))) * 0.5
+    def off(self, hq, htok):                              # [d], [d] -> [2], in tokens, unclamped
+        return self.offset(torch.cat([hq, htok], -1))
 
     def text(self, hq, lm_weight: torch.Tensor):          # [T,d], [V,d] -> [T,V]
         z = hq.float() + self.text_up(self.text_down(hq.float()))
@@ -120,7 +124,7 @@ class Heads(nn.Module):
         for name, kind in L.SLOTS:
             pp = F.softmax(self.point(kind, q[name], tok), -1)
             t = int(pp.argmax())
-            dx, dy = self.off(q[name], tok[t])
+            dx, dy = self.off(q[name], tok[t]).clamp(-0.5, 0.5)
             parts.append(torch.stack([torch.tensor(float(t), device=h.device), dx, dy, pp[t]]))
         if lm_weight is not None:
             hq = torch.stack([q[n] for n in L.TEXT])
