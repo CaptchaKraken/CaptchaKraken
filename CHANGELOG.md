@@ -61,6 +61,13 @@ semantic versioning; v2 is a major, **breaking** release.
 - **A button labelled Confirm submits a round**, after Verify, Next, Submit and
   Skip. AWS WAF's card has no other submit control.
 
+### Changed
+
+- **The pointer overlay's numbers are drawn at 3x.** Each tag's digits are
+  15x21 px with 3 px strokes, so a digit spans more than one vision patch. The
+  look is part of a pointer model's input: models trained on the old overlay
+  must be retrained.
+
 ### Fixed
 
 - **A board the model has no answer for is skipped.** Both ports pressed on
