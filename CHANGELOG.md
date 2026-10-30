@@ -106,6 +106,13 @@ semantic versioning; v2 is a major, **breaking** release.
   different servers with different keys without one environment variable
   routing them all. Nothing changes when the option is absent.
 
+### Changed
+
+- **The pointer overlay's numbers are drawn at 3x.** Each tag's digits are
+  15x21 px with 3 px strokes, so a digit spans more than one vision patch. The
+  look is part of a pointer model's input: models trained on the old overlay
+  must be retrained.
+
 ### Fixed
 
 - **A board the model has no answer for is skipped.** Both ports pressed on

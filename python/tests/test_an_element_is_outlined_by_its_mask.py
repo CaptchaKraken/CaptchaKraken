@@ -87,13 +87,14 @@ def test_the_outline_is_one_pixel_wide():
     assert line[90].sum() == 2
 
 
-def test_every_element_gets_a_small_numbered_tag_in_its_colour():
+def test_every_element_gets_a_numbered_tag_in_its_colour_big_enough_to_read():
     img = Image.new("RGB", (300, 300), (255, 255, 255))
     els = [el("cell", 20 + 90 * c, 40, square(80)) for c in range(3)]
     out = np.array(M.draw(img, els))
     for n in (1, 2, 3):
         tw, th = M.tag_size(n)
-        assert th <= 9 and tw <= 7
+        # A digit's 7 font rows at SCALE span more than one 16 px ViT patch.
+        assert th >= 16 + 2 * M.PAD and tw <= 5 * M.SCALE + 2 * M.PAD
         assert (out == M.colour(n)).all(-1).sum() > 4 * 80
 
 
@@ -116,4 +117,4 @@ def test_the_look_is_frozen():
     assert digest == FROZEN
 
 
-FROZEN = "95713ddb569868b43786f070eb2d579ea4f0ac226ae88004c041d22bc717be72"
+FROZEN = "f597cbc52c7442b96bdd314a4efbf65760c7670e10b42775afb472ebdaf87992"

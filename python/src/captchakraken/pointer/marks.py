@@ -7,9 +7,11 @@ colour just outside the object's top edge, so the tag hides the object's
 background rather than the object.
 
 The digits are a 5x7 pixel font defined here, not a system font: what the model
-was trained on must be what it is shown, on every machine, to the pixel. The
-look is frozen. Changing anything here changes the model's input and needs a
-retrain.
+was trained on must be what it is shown, on every machine, to the pixel. Each
+font pixel is drawn `SCALE` x `SCALE`, so a digit is 15x21 px with 3 px strokes
+and spans more than one 16 px vision patch; at 1x a digit was a fifth of a
+patch, too small to tell 3 from 8 from 9. The look is frozen. Changing anything
+here changes the model's input and needs a retrain.
 """
 from __future__ import annotations
 
@@ -31,8 +33,10 @@ _GLYPHS = {
     "9": ("01110", "10001", "10001", "01111", "00001", "00010", "01100"),
 }
 GLYPH_W, GLYPH_H = 5, 7
+#: Board pixels per font pixel.
+SCALE = 3
 #: Tag padding around the digits, px.
-PAD = 1
+PAD = 2
 #: Outline and tag colours, by element number: saturated, mutually distinct, and
 #: dark enough that white digits read on every one of them.
 PALETTE = [
@@ -52,7 +56,7 @@ def _digits(text: str) -> np.ndarray:
         if k:
             cols.append(np.zeros((GLYPH_H, 1), bool))
         cols.append(np.array([[c == "1" for c in row] for row in _GLYPHS[ch]], bool))
-    return np.hstack(cols)
+    return np.kron(np.hstack(cols), np.ones((SCALE, SCALE), bool))
 
 
 def tag_size(n: int) -> Tuple[int, int]:
