@@ -133,6 +133,9 @@ export abstract class BaseHumanizer implements Humanizer {
   }
 }
 
+/** How much longer than the bare round trip a step takes when the browser re-draws it as a path of its own. */
+export const BROWSER_PATH_MS = 100;
+
 export class MouseHumanizer extends BaseHumanizer {
   readonly name: HumanizationMode = HumanizationMode.MOUSE;
   readonly hovers = true;
@@ -142,13 +145,18 @@ export class MouseHumanizer extends BaseHumanizer {
   };
   private frequency: number;
   private viewportCache: ViewportSize | null | undefined;
+  /** Undefined until the first move of a solve measures it. */
+  private browserDrawsPath: boolean | undefined;
 
   constructor(start: Point = [0, 0], frequency = 60) {
     super(start);
     this.frequency = frequency;
   }
 
-  async reset(_page: Page): Promise<void> { this.viewportCache = undefined; }
+  async reset(_page: Page): Promise<void> {
+    this.viewportCache = undefined;
+    this.browserDrawsPath = undefined;
+  }
 
   /** The window to keep the cursor inside; null under camoufox, which reports no viewport and whose window we ask instead. */
   private async viewport(page: Page): Promise<ViewportSize | null> {
@@ -176,15 +184,47 @@ export class MouseHumanizer extends BaseHumanizer {
     }
   }
 
+  /** Clamp only when the viewport is known: a coordinate pinned to the edge of a guessed one deadlocks camoufox's juggler (upstream #225). */
+  private async clamp(page: Page, [x, y]: Point): Promise<Point> {
+    const viewport = await this.viewport(page);
+    return viewport ? [Math.max(1, Math.min(x, viewport.width - 1)), Math.max(1, Math.min(y, viewport.height - 1))] : [x, y];
+  }
+
+  /**
+   * Whether the browser draws its own path for every mouse.move(), as camoufox's humanize does. Ours on top has every
+   * sample re-drawn: a 1px step took 190ms there against 1ms, and one GeeTest slider 82s against 13s. One short step
+   * towards `to`, timed against a zero-length move (the bare round trip, so a remote browser is not mistaken for
+   * one), tells them apart with no movement the page could single out.
+   */
+  private async measureBrowserPath(page: Page, to: Point): Promise<boolean> {
+    const from = await this.clamp(page, this.at);
+    const d = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    const step = await this.clamp(page, d <= 3 ? to : [from[0] + 3 * (to[0] - from[0]) / d, from[1] + 3 * (to[1] - from[1]) / d]);
+    try {
+      await page.mouse.move(from[0], from[1]);
+      let t = Date.now();
+      await page.mouse.move(from[0], from[1]);
+      const roundTrip = Date.now() - t;
+      t = Date.now();
+      await page.mouse.move(step[0], step[1]);
+      this.at = step;
+      const drawn = Date.now() - t - roundTrip > BROWSER_PATH_MS;
+      if (drawn) log('the browser draws its own pointer paths (camoufox humanize); handing it one move per gesture');
+      return drawn;
+    } catch (e) {
+      if (closedError(e)) log('could not move mouse; page or session closed');
+      return false;
+    }
+  }
+
   async move(page: Page, to: Point): Promise<void> {
     if (samePoint(this.at, to)) return;
+    this.browserDrawsPath ??= await this.measureBrowserPath(page, to);
+    if (this.browserDrawsPath) return this.drift(page, await this.clamp(page, to));
     const [points, timings] = trajectory(this.at, to, this.frequency);
-    // Clamp only when the viewport is known: a coordinate pinned to the edge of a guessed one deadlocks camoufox's juggler (upstream #225).
-    const viewport = await this.viewport(page);
     const startTime = Date.now();
     for (let i = 0; i < points.length; i++) {
-      const cx = viewport ? Math.max(1, Math.min(points[i][0], viewport.width - 1)) : points[i][0];
-      const cy = viewport ? Math.max(1, Math.min(points[i][1], viewport.height - 1)) : points[i][1];
+      const [cx, cy] = await this.clamp(page, points[i]);
       try {
         await page.mouse.move(cx, cy);
       } catch (e) {

@@ -1129,7 +1129,10 @@ class PageSolver:
         if box is not None:
             self._move_to_element(page, box)
         else:
-            self._smooth_move(page, *self._find_checkbox_on_screen(widget.element))
+            at = self._find_checkbox_on_screen(page, widget.element)
+            if at is None:
+                return
+            self._smooth_move(page, *at)
         self._human.pause(PauseKind.BETWEEN)
         with self._gesture():
             self._human.click(page, self._last_mouse)
@@ -1149,8 +1152,25 @@ class PageSolver:
             _log(f"[checkbox] the box is out of the DOM's reach ({str(exc).splitlines()[0]}); finding it on screen")
             return None
 
-    def _find_checkbox_on_screen(self, element: Any) -> Tuple[float, float]:
-        """One capture and OpenCV: a point inside the tick box, in page coordinates. No model is asked."""
+    def _find_checkbox_on_screen(self, page: Any, element: Any) -> Optional[Tuple[float, float]]:
+        """A point inside the tick box, in page coordinates, or None when the widget passed without drawing one.
+
+        Turnstile shows "Verifying…" before its box, so an empty capture is looked at again until
+        `detection_timeout_ms`.
+        """
+        deadline = _now() + self.config.detection_timeout_ms
+        while True:
+            at = self._checkbox_on_screen(element)
+            if at is not None:
+                return at
+            if self.is_captcha_solved(page):
+                return None
+            if _now() >= deadline:
+                raise UnsupportedCaptchaError("the checkbox widget shows no tick box to click")
+            _delay(_DETECTION_POLL_MS)
+
+    def _checkbox_on_screen(self, element: Any) -> Optional[Tuple[float, float]]:
+        """One capture and OpenCV, no model: a point inside the tick box, or None when none is drawn."""
         from .tool_calls.find_checkbox import find_checkbox
 
         box = element.bounding_box()
@@ -1165,7 +1185,7 @@ class PageSolver:
         finally:
             _unlink(shot)
         if found is None:
-            raise UnsupportedCaptchaError("the checkbox widget shows no tick box to click")
+            return None
         x, y, w, h = (v / scale for v in found)
         return box["x"] + x + w * (0.3 + random.random() * 0.4), box["y"] + y + h * (0.3 + random.random() * 0.4)
 

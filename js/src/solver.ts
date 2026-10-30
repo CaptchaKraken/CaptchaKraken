@@ -1023,7 +1023,11 @@ export class CaptchaKrakenSolver {
   private async clickCheckbox(page: Page, widget: Widget, frame: Frame | null): Promise<void> {
     const box = await this.checkboxBox(frame, widget.vendor);
     if (box) await this.move(page, box);
-    else await this.performSmoothMove(page, ...await this.findCheckboxOnScreen(widget.el));
+    else {
+      const at = await this.findCheckboxOnScreen(page, widget.el);
+      if (!at) return;
+      await this.performSmoothMove(page, ...at);
+    }
     await this.human.pause(PauseKind.BETWEEN);
     await this.gesture(() => this.human.click(page, this.human.at));
     await this.awaitWhatTheCheckboxOpened(page);
@@ -1044,8 +1048,27 @@ export class CaptchaKrakenSolver {
     }
   }
 
-  /** One capture and OpenCV: a point inside the tick box, in page coordinates. No model is asked. */
-  private async findCheckboxOnScreen(el: ElementHandle): Promise<[number, number]> {
+  /**
+   * A point inside the tick box, in page coordinates, or null when the widget passed without drawing one. Turnstile
+   * shows "Verifying…" before its box, so an empty capture is looked at again until `detectionTimeoutMs`.
+   */
+  private async findCheckboxOnScreen(page: Page, el: ElementHandle): Promise<[number, number] | null> {
+    const deadline = Date.now() + (this.config.detectionTimeoutMs ?? SOLVE_DEFAULTS.detectionTimeoutMs);
+    for (;;) {
+      const at = await this.checkboxOnScreen(el);
+      if (at) return at;
+      if (await this.isCaptchaSolved(page)) return null;
+      if (Date.now() >= deadline) {
+        const e: any = new Error('UNSUPPORTED_CAPTCHA: the checkbox widget shows no tick box to click');
+        e.unsupported = true;
+        throw e;
+      }
+      await delay(DETECTION_POLL_MS);
+    }
+  }
+
+  /** One capture and OpenCV, no model: a point inside the tick box, or null when none is drawn. */
+  private async checkboxOnScreen(el: ElementHandle): Promise<[number, number] | null> {
     const box = await el.boundingBox();
     if (!box) throw new Error('Could not get bounding box of captcha element');
     const shot = tmp('checkbox');
@@ -1058,11 +1081,7 @@ export class CaptchaKrakenSolver {
     } finally {
       unlink(shot);
     }
-    if (!found) {
-      const e: any = new Error('UNSUPPORTED_CAPTCHA: the checkbox widget shows no tick box to click');
-      e.unsupported = true;
-      throw e;
-    }
+    if (!found) return null;
     const [x, y, w, h] = found.map((v) => v / scale);
     return [box.x + x + w * (0.3 + Math.random() * 0.4), box.y + y + h * (0.3 + Math.random() * 0.4)];
   }

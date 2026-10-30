@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +50,20 @@ class RecordingPage:
     def __init__(self) -> None:
         self.mouse = RecordingMouse()
         self.viewport_size = {"width": 800, "height": 600}
+
+
+class SlowMouse(RecordingMouse):
+    """A browser that answers each move after `latency_s`, plus `path_s` when the move goes anywhere."""
+
+    def __init__(self, latency_s: float, path_s: float) -> None:
+        super().__init__()
+        self.latency_s, self.path_s, self.last = latency_s, path_s, None
+
+    def move(self, x: float, y: float) -> None:
+        travels = self.last != (x, y)
+        self.last = (x, y)
+        time.sleep(self.latency_s + (self.path_s if travels else 0.0))
+        super().move(x, y)
 
 
 class RecordingTouch(TouchBackend):
@@ -313,3 +328,24 @@ class TestAppiumScaleIsNotGuessed:
         backend = humanize.touch_backend_for(RatioPage(3.0), RecordingDriver())
         with pytest.raises(RuntimeError):
             backend.down(0.0, 0.0)
+
+
+def test_a_browser_that_draws_its_own_path_gets_one_move_per_gesture():
+    """camoufox's humanize re-draws every mouse.move(); our trajectory on top of it is drawn twice."""
+    page, human = RecordingPage(), MouseHumanizer(start=(10.0, 10.0))
+    page.mouse = SlowMouse(0.0, 0.15)
+    human.click(page, (400.0, 300.0))
+    human.drag(page, (400.0, 300.0), (150.0, 120.0))
+
+    # the solve's seed, then sync, round trip and the timed step; then one move per destination
+    kinds = [e[0] for e in page.mouse.events]
+    assert kinds == ["move"] * 5 + ["down", "up", "down", "move", "up"]
+    assert page.mouse.events[4][1:] == (400.0, 300.0)
+    assert human.at == (150.0, 120.0)
+
+
+def test_a_slow_round_trip_alone_is_not_taken_for_a_browser_that_draws_its_own_path():
+    page, human = RecordingPage(), MouseHumanizer(start=(10.0, 10.0))
+    page.mouse = SlowMouse(0.12, 0.0)
+    human.move(page, (30.0, 22.0))
+    assert len(page.mouse.events) > 6, f"{len(page.mouse.events)} moves; a remote browser lost its trajectory"

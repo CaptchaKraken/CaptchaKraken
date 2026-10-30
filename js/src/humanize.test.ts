@@ -105,6 +105,39 @@ test('a mouse click is a trajectory then a press', async () => {
   assert.deepEqual(human.at, [400, 300]);
 });
 
+/** A browser that answers each mouse.move after `latencyMs`, plus `pathMs` when the move goes anywhere. */
+class SlowPage extends RecordingPage {
+  private last: [number, number] | null = null;
+  constructor(latencyMs: number, pathMs: number) {
+    super();
+    const record = this.mouse.move;
+    this.mouse.move = async (x: number, y: number) => {
+      const travels = !this.last || this.last[0] !== x || this.last[1] !== y;
+      this.last = [x, y];
+      await new Promise((r) => setTimeout(r, latencyMs + (travels ? pathMs : 0)));
+      await record(x, y);
+    };
+  }
+}
+
+test('a browser that draws its own path (camoufox humanize) gets one move per gesture', async () => {
+  const page = new SlowPage(0, 150);
+  const human = new MouseHumanizer([10, 10]);
+  await human.click(page.asPage(), [400, 300]);
+  await human.drag(page.asPage(), [400, 300], [150, 120]);
+  // sync, round trip and the timed step; then one move per destination
+  assert.deepEqual(page.kinds, ['move', 'move', 'move', 'move', 'down', 'up', 'down', 'move', 'up']);
+  assert.deepEqual(page.events[3].slice(1), [400, 300]);
+  assert.deepEqual(human.at, [150, 120]);
+});
+
+test('a slow round trip alone is not taken for a browser that draws its own path', async () => {
+  const page = new SlowPage(120, 0);
+  const human = new MouseHumanizer([10, 10]);
+  await human.move(page.asPage(), [30, 22]);
+  assert.ok(page.kinds.length > 6, `${page.kinds.length} moves; a remote browser lost its trajectory`);
+});
+
 test('the mouse mode still hovers', () => {
   assert.equal(new MouseHumanizer().hovers, true);
 });

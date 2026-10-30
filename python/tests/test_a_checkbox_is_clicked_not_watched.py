@@ -79,7 +79,7 @@ def _checkbox_picture(path: str) -> None:
     cv2.imwrite(path, img)
 
 
-def _round(vendor: Vendor, frame: Optional[CheckboxFrame]):
+def _round(vendor: Vendor, frame: Optional[CheckboxFrame], blank_captures: int = 0, solved=lambda: False):
     solver = PageSolver(config=PageSolverConfig(humanization=HumanizationMode.NONE, post_solve_outcome_poll_ms=1))
     page = Page()
     solver._page = page
@@ -90,7 +90,10 @@ def _round(vendor: Vendor, frame: Optional[CheckboxFrame]):
 
     def capture(_el: Any, path: str, **_: Any) -> None:
         seen["captures"] += 1
-        _checkbox_picture(path)
+        if seen["captures"] > blank_captures:
+            _checkbox_picture(path)
+        else:
+            cv2.imwrite(path, np.full((76, 302, 3), 249, dtype=np.uint8))
 
     def ask(*_: Any, **__: Any):
         seen["asks"] += 1
@@ -110,7 +113,7 @@ def _round(vendor: Vendor, frame: Optional[CheckboxFrame]):
     solver._settle_or_animated = board_path
     solver._burst = board_path
     solver.detect_captcha = detect
-    solver.is_captcha_solved = lambda _page: False
+    solver.is_captcha_solved = lambda _page: solved()
     performed, usage = solver._solve_single(page, checkbox, None)
     return performed, usage, page, seen
 
@@ -142,3 +145,19 @@ def test_a_box_the_dom_cannot_reach_is_found_on_one_capture_with_no_model(frame:
     assert performed and len(page.mouse.pressed_at) == 1
     assert _inside(page.mouse.pressed_at[0], {"x": 33 + 16, "y": 237 + 23, "width": 30, "height": 30}), (
         f"clicked {page.mouse.pressed_at[0]}, outside the tick box OpenCV found")
+
+
+def test_a_turnstile_box_drawn_after_verifying_is_waited_for_not_reported_missing() -> None:
+    performed, usage, page, seen = _round(Vendor.TURNSTILE, None, blank_captures=2)
+
+    assert seen["captures"] == 3
+    assert len(page.mouse.pressed_at) == 1
+    assert _inside(page.mouse.pressed_at[0], {"x": 33 + 16, "y": 237 + 23, "width": 30, "height": 30})
+
+
+def test_a_turnstile_widget_that_passes_without_drawing_a_box_is_not_clicked() -> None:
+    looks = iter(range(100))
+    performed, usage, page, seen = _round(Vendor.TURNSTILE, None, blank_captures=100, solved=lambda: next(looks) > 0)
+
+    assert page.mouse.pressed_at == [], "clicked a widget that had already passed"
+    assert seen["asks"] == 0

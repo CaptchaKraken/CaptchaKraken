@@ -3,6 +3,26 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [Unreleased]
+
+### Changed
+
+- **`mouse` mode hands a browser that humanises its own pointer one move per
+  gesture.** The first move of each solve times one 3 px step against a
+  zero-length move; under camoufox's `humanize` the step takes hundreds of
+  milliseconds, and from then on the browser draws the path instead of
+  re-drawing each of ours. Pauses and per-key typing are unchanged. A checkbox
+  click under camoufox `humanize=True` went from 14-23 s to under 4 s.
+
+### Fixed
+
+- **Cloudflare Turnstile's tick box is found.** The on-screen finder looked only
+  for a dark outline on a light panel, so a dark-theme widget (and `auto` on a
+  dark-mode system) reported "no tick box to click" on every attempt. It now
+  reads both themes. And a widget still showing "Verifying…" is looked at again
+  until `detectionTimeoutMs` instead of failing on the first capture; one that
+  passes without drawing a box is not clicked.
+
 ## [3.3.0] - 2026-10-27
 
 ### Added

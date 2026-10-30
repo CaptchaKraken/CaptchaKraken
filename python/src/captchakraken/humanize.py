@@ -8,6 +8,7 @@ touch mode that dispatches no motion between taps still has to say where the nex
 
 from __future__ import annotations
 
+import math
 import os
 import random
 import time
@@ -124,6 +125,10 @@ def hold(human: "Humanizer", page: Any, to: Point, done: Callable[[], bool], max
         human.release(page)
 
 
+# How much longer than the bare round trip a step takes when the browser re-draws it as a path of its own.
+BROWSER_PATH_MS = 100.0
+
+
 class MouseHumanizer(Humanizer):
     name = HumanizationMode.MOUSE
     hovers = True
@@ -137,11 +142,13 @@ class MouseHumanizer(Humanizer):
         self._viewport_cache: Optional[Dict[str, float]] = None
         self._down = False
         self._cursor_seeded = False
+        self._browser_draws_path: Optional[bool] = None
 
     def reset(self, page: Any) -> None:
         self._viewport_cache = None
         self._cursor_seeded = False
         self._down = False
+        self._browser_draws_path = None
 
     def _viewport(self, page: Any) -> Optional[Dict[str, float]]:
         """The window to keep the cursor inside; None under camoufox, which reports no viewport."""
@@ -173,9 +180,49 @@ class MouseHumanizer(Humanizer):
         except Exception:
             pass
 
+    def _clamp(self, page: Any, point: Point) -> Point:
+        # Clamp only when the viewport is known: a guessed edge coordinate deadlocks camoufox's juggler.
+        x, y = float(point[0]), float(point[1])
+        viewport = self._viewport(page)
+        if viewport is None:
+            return x, y
+        return max(1.0, min(x, viewport["width"] - 1.0)), max(1.0, min(y, viewport["height"] - 1.0))
+
+    def _measure_browser_path(self, page: Any, to: Point) -> bool:
+        """Whether the browser draws its own path for every mouse.move(), as camoufox's humanize does.
+
+        Ours on top has every sample re-drawn: a 1px step took 190ms there against 1ms, and one GeeTest slider 82s
+        against 13s. One short step towards `to`, timed against a zero-length move (the bare round trip, so a remote
+        browser is not mistaken for one), tells them apart with no movement the page could single out.
+        """
+        x0, y0 = self._clamp(page, self.at)
+        d = math.hypot(to[0] - x0, to[1] - y0)
+        step = self._clamp(page, to if d <= 3 else (x0 + 3 * (to[0] - x0) / d, y0 + 3 * (to[1] - y0) / d))
+        try:
+            page.mouse.move(x0, y0)
+            t = time.monotonic()
+            page.mouse.move(x0, y0)
+            round_trip = time.monotonic() - t
+            t = time.monotonic()
+            page.mouse.move(*step)
+        except Exception as exc:
+            if "Target closed" in str(exc) or "Session closed" in str(exc):
+                _log("could not move mouse; page or session closed")
+            return False
+        self.at = step
+        drawn = (time.monotonic() - t - round_trip) * 1000.0 > BROWSER_PATH_MS
+        if drawn:
+            _log("the browser draws its own pointer paths (camoufox humanize); handing it one move per gesture")
+        return drawn
+
     def move(self, page: Any, to: Point) -> None:
         self._seed_cursor(page)
         if _same_point(self.at, to):
+            return
+        if self._browser_draws_path is None:
+            self._browser_draws_path = self._measure_browser_path(page, to)
+        if self._browser_draws_path:
+            self._trace(page, [to], [0.0])
             return
         points, timings = trajectory(self.at, to, self._frequency)
         self._trace(page, points, timings)
@@ -184,14 +231,9 @@ class MouseHumanizer(Humanizer):
         self._trace(page, [to], [0.0])
 
     def _trace(self, page: Any, points: Sequence[Point], timings: Sequence[float]) -> None:
-        # Clamp only when the viewport is known: a guessed edge coordinate deadlocks camoufox's juggler.
-        viewport = self._viewport(page)
         start = time.monotonic() * 1000.0
-        for (x, y), t in zip(points, timings):
-            x, y = float(x), float(y)
-            if viewport is not None:
-                x = max(1.0, min(x, viewport["width"] - 1.0))
-                y = max(1.0, min(y, viewport["height"] - 1.0))
+        for point, t in zip(points, timings):
+            x, y = self._clamp(page, point)
             try:
                 page.mouse.move(x, y)
             except Exception as exc:
