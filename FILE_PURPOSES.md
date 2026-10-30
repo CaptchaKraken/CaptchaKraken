@@ -315,6 +315,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_pointer_answer_always_carries_points.py` | Every pointer answer is its points: the click, drag, slide, type, hold and moment shapes the heads decode to. |
 | `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer` and never runs find_grid; its answer is performed like generation 3's. |
 | `python/tests/test_an_element_is_outlined_by_its_mask.py` | The overlay traces each element's mask, keeps its tags readable and off one another, and its look is frozen by a hash. |
+| `python/tests/test_the_offset_head_learns.py` | The point offset head learns from hidden states at the base model's scale instead of saturating on its first step. |
 | `python/tests/test_the_pointer_reads_its_answer_from_one_prefill.py` | The heads find their 46 questions and the video moments in one prompt, and the packed decision round-trips. |
 | `python/tests/test_earlier_screens_are_context_before_the_board.py` | A pointer request may carry a puzzle's earlier screens: they go before the board, oldest first, as context, and points are read off the board alone. |
 | `python/tests/test_every_captcha_is_asked_the_same_prompt.py` | Every captcha is asked one fixed prompt with its board after it; a video's elements keep one number across frames; an element number is read from what lies under each point. |

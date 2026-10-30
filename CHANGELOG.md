@@ -115,6 +115,10 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Fixed
 
+- **The pointer's point offset head learns.** It normalises its input and
+  answers linearly, clamped to the token when deciding, instead of passing raw
+  hidden states through a tanh that one optimiser step could saturate. Its
+  weights change shape (`offset.0` is now a LayerNorm): retrain, then re-export.
 - **A board the model has no answer for is skipped.** Both ports pressed on
   re-asking the same board until the loop cap (~30 s); they now press Skip for
   a new one, as the empty-plan path already did. An unread text captcha is
