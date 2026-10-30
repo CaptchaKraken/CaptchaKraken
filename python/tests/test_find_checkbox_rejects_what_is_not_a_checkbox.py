@@ -82,3 +82,15 @@ def test_the_box_is_found_on_a_checkbox_widget_s_own_proportions(tmp_path):
     _draw_square(img, 250, 22, 30, thickness=2, colour=(90, 90, 90))
     x, y, w, h = find_checkbox(_save(tmp_path / "widget.png", img))
     assert abs(x - 16) <= 3 and abs(y - 23) <= 3 and 24 <= w <= 34, f"found {(x, y, w, h)}, not the box at (16, 23)"
+
+
+def test_the_box_is_found_on_a_dark_theme_widget(tmp_path):
+    """A dark widget draws a light outline round a near-black box, beside the page's own white."""
+    img = np.full((75, 864, 3), 255, dtype=np.uint8)
+    img[:, :300] = 49
+    cv2.rectangle(img, (9, 21), (33, 45), (10, 10, 10), -1)
+    _draw_square(img, 9, 21, 24, thickness=2, colour=(153, 153, 153))
+    found = find_checkbox(_save(tmp_path / "dark.png", img))
+    assert found is not None, "the dark-theme tick box was not found"
+    x, y, w, h = found
+    assert abs(x - 9) <= 3 and abs(y - 21) <= 3 and 22 <= w <= 30, f"found {(x, y, w, h)}, not the box at (9, 21)"

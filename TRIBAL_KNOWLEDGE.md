@@ -409,7 +409,12 @@ sleep.
 **Humanisation is an interface because two humanisers compose badly.**
 camoufox's `humanize` juggler re-humanises every `mouse.move()` it is handed,
 and running ours on top measured 82.1 s against 13.4 s on one GeeTest v4
-slider solve. A touch widget needs touch events: dispatching mousemove there is
+slider solve. `mouse` mode detects such a browser itself rather than asking the
+user to pick `none`, because nobody did: one 3 px step is timed against a
+zero-length move, which pays the same round trip, so a remote browser's latency
+is not read as humanisation. There is no page-visible probe to use instead, and
+a zero-length move alone does not tell (camoufox passes it straight through).
+A touch widget needs touch events: dispatching mousemove there is
 the wrong event type, the page's touch handlers never fire, and the report
 reads as a model that cannot solve mobile puzzles. Mode precedence is code,
 then env, then mouse, the opposite of the model-identity settings, because an

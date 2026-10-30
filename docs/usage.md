@@ -273,7 +273,7 @@ desktop solve to touch dispatch would break every one of them silently.
 
 | Mode | What it dispatches | Use it when |
 |---|---|---|
-| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised (Cursory) | Default. Desktop pages. |
+| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised (Cursory); one move per gesture when the browser humanises its own pointer | Default. Desktop pages. |
 | `mobile` | Real touch events with finger kinematics — see below | The page is a mobile site, or you are driving a phone |
 | `none` | One move, one press, one release. No dwell, no jitter | Your own fixtures, or your stack humanises elsewhere |
 | custom | Whatever you write | You already model your users' input |
@@ -404,11 +404,15 @@ class HardwareMouse extends NullHumanizer implements Humanizer {
 new CaptchaKrakenSolver({ humanizer: new HardwareMouse() });
 ```
 
-This is also the right answer when your **browser already humanises**. Camoufox's
-`humanize` juggler re-humanises every `mouse.move()` it is handed, so running it
-against `mouse` mode composes two models: measured **82.1 s against 13.4 s** on
-one geetest slide, because each of the 60 trajectory points became its own
-humanised sub-trajectory. Use `none` there, and let camoufox do it.
+When your **browser already humanises**, `mouse` mode notices and steps aside.
+Camoufox's `humanize` juggler re-humanises every `mouse.move()` it is handed, so
+running both composes two models: measured **82.1 s against 13.4 s** on one
+geetest slide, because each of the 60 trajectory points became its own
+humanised sub-trajectory. The first move of each solve times a 3 px step against
+a zero-length move; when the step is more than 100 ms slower, every later
+gesture is a single `mouse.move()` and the browser draws the path. Pauses and
+per-key typing stay on. A slow remote browser is not mistaken for one, because
+the zero-length move pays the same round trip.
 
 ## Solve captchas as they appear
 

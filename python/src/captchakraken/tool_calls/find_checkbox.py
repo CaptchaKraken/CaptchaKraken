@@ -4,18 +4,30 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple
 
-def find_checkbox(image_path: str) -> Optional[Tuple[int, int, int, int]]:
+Box = Tuple[int, int, int, int]
+
+
+def find_checkbox(image_path: str) -> Optional[Box]:
     img = cv2.imread(image_path)
     if img is None:
         return None
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # A dark-theme widget draws a light outline round a near-black box: the light-theme search on the negative.
+    return _find(gray) or _find(255 - gray)
 
+
+def _inside(a: Box, b: Box) -> bool:
+    return b[0] <= a[0] and b[1] <= a[1] and a[0] + a[2] <= b[0] + b[2] and a[1] + a[3] <= b[1] + b[3]
+
+
+def _find(gray: np.ndarray) -> Optional[Box]:
     _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
 
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Every contour, not only the outermost: a widget's own frame encloses its box.
+    contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
-    height, width = img.shape[:2]
+    height, width = gray.shape[:2]
     image_area = width * height
 
     candidates = []
@@ -24,7 +36,6 @@ def find_checkbox(image_path: str) -> Optional[Tuple[int, int, int, int]]:
         x, y, w, h = cv2.boundingRect(cnt)
         area = w * h
         aspect_ratio = float(w) / h
-        
 
         if not (0.8 < aspect_ratio < 1.2):
             continue
@@ -53,7 +64,17 @@ def find_checkbox(image_path: str) -> Optional[Tuple[int, int, int, int]]:
             if std_dev > 35.0:
                 continue
 
+        # A widget sets its box on a flat panel; a square hole cut in a photo is surrounded by the photo.
+        x0, y0 = max(0, x - 6), max(0, y - 6)
+        ring = gray[y0:y + h + 6, x0:x + w + 6].astype(float)
+        ring[y - y0:y - y0 + h, x - x0:x - x0 + w] = np.nan
+        if np.nanstd(ring) > 20:
+            continue
+
         candidates.append((x, y, w, h))
+
+    # An outline traces twice, round its outside and round its hole; the hole is the same box.
+    candidates = [c for c in candidates if not any(o is not c and _inside(c, o) for o in candidates)]
 
     # Many candidates means a grid, not a checkbox page.
     if len(candidates) > 2:
