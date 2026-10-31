@@ -51,3 +51,19 @@ def test_a_board_answered_the_same_way_three_times_ends_the_solve():
     except CaptchaSolveError as exc:
         assert "same answer 3 times" in str(exc), str(exc)
     assert len(rounds) == 3, f"spent {len(rounds)} rounds on a board the model cannot read"
+
+
+def test_a_repeat_makes_the_pointer_ask_past_its_refused_answers_until_the_board_changes():
+    """The pointer is an argmax: a sampled re-ask returns the same answer, so the planner is told to name the
+    answers already tried instead, and forgets them on a new board."""
+    from captchakraken import planner as P
+    pl = P.ActionPlanner.__new__(P.ActionPlanner)
+    pl.sampling, pl.pointer_answers, pl.avoid_refused = {}, [], False
+    solver = PageSolver(config=PageSolverConfig(), solver=type("S", (), {"planner": pl})())
+    pl.pointer_answers.append({"action": "type", "text": "XK4XWP"})
+    solver._note_answer(ANSWER, None)
+    assert pl.avoid_refused is False
+    solver._note_answer(ANSWER, None)
+    assert pl.avoid_refused is True and pl.pointer_answers
+    solver._fresh_board()
+    assert pl.avoid_refused is False and pl.pointer_answers == []

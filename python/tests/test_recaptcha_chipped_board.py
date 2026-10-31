@@ -165,3 +165,14 @@ def test_a_rested_hand_drifts_a_few_pixels_and_stays_on_its_tile():
         PageSolver._hover_cell(solver, _FakePage(), _session(), 5)
     assert all(100.0 < x < 200.0 and 100.0 < y < 200.0 for x, y in moves)
     assert max(abs(x - 150.0) + abs(y - 150.0) for x, y in moves) < 30.0
+
+
+def test_two_points_in_one_tile_press_it_once():
+    """A second press on a tile deselects it: live, round 2 clicked cells [1, 9, 9] and lost tile 9."""
+    other_5 = [0.45, 0.42, 0.58, 0.55]
+    solver, log = _driver(
+        {"empty": [], "changing": [5], "loaded": [1, 2, 3, 4, 6, 7, 8, 9], "selected": [5]},
+        [{"action": "click", "target_bounding_boxes": [CELL_5, other_5]}, DONE],
+    )
+    _solve(solver)
+    assert log["clicked"] == [CELL_5]

@@ -28,6 +28,8 @@ board's token grid, which only the caller knows.
 """
 from __future__ import annotations
 
+import copy
+import math
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..clipvideo import frame_size
@@ -77,12 +79,19 @@ QUESTION_TEXT = " ".join(f"{q}{Q_END}" for q in QUESTIONS)
 
 # ── the packed decision vector ──────────────────────────────────────────────
 #: Per slot: vision token index (within the chosen moment), dx, dy (offset from
-#: the token's centre, in tokens), p(token).
-SLOT_WIDTH = 4
+#: the token's centre, in tokens), p(token), the element number read off the
+#: marks (0 for none), p(element).
+SLOT_WIDTH = 6
 N_COUNTS = MAX_CLICKS + 1          # clicks 0..16
 N_DRAG_COUNTS = MAX_DRAGS          # drags 1..4
+#: Runner-up places per slot, after the decisions: each slot's next-likeliest
+#: tokens (index, dx, dy, p), and each `textK` marker's p(token) with its
+#: runner-up token and that one's p. A retry reads them (`variants`) when the
+#: widget refused the first answer, so it never has to ask the same thing twice.
+ALTS = 2
+ALT_WIDTH = 4
 PACKED = (len(ACTIONS) + N_COUNTS + N_DRAG_COUNTS + SLOT_WIDTH * len(SLOTS)
-          + MAX_TEXT + 2)
+          + MAX_TEXT + 2 + ALTS * ALT_WIDTH * len(SLOTS) + 3 * MAX_TEXT)
 
 
 def board_size(width: int, height: int) -> Tuple[int, int]:
@@ -142,10 +151,21 @@ def unpack(v: Sequence[float]) -> Dict:
     out = {"action_p": take(len(ACTIONS)), "count_p": take(N_COUNTS),
            "drag_count_p": take(N_DRAG_COUNTS), "slots": {}}
     for name, _ in SLOTS:
-        tok, dx, dy, pt = take(SLOT_WIDTH)
-        out["slots"][name] = {"token": int(tok), "dx": dx, "dy": dy, "p_point": pt}
+        tok, dx, dy, pt, el, pe = take(SLOT_WIDTH)
+        out["slots"][name] = {"token": int(tok), "dx": dx, "dy": dy, "p_point": pt,
+                              "element": int(el), "p_element": pe}
     out["text_ids"] = [int(t) for t in take(MAX_TEXT)]
-    out["moment"], out["moment_p"] = int(v[i]), v[i + 1]
+    out["moment"], out["moment_p"] = take(2)
+    out["moment"] = int(out["moment"])
+    for name, _ in SLOTS:
+        alts = []
+        for _k in range(ALTS):
+            tok, dx, dy, pt = take(ALT_WIDTH)
+            alts.append({"token": int(tok), "dx": dx, "dy": dy, "p_point": pt})
+        out["slots"][name]["alts"] = alts
+    out["text_p"] = take(MAX_TEXT)
+    out["text_alt_ids"] = [int(t) for t in take(MAX_TEXT)]
+    out["text_alt_p"] = take(MAX_TEXT)
     return out
 
 
@@ -162,30 +182,131 @@ def answer(decision: Dict, grid: Tuple[int, int], *, text: Optional[str] = None,
            timestamps: Optional[Sequence[float]] = None) -> Dict:
     """Unpacked decisions -> the generation-3 answer shape, points only
     (`elements.ids_for` adds the element numbers). `text` is the decoded typed
-    string (the caller owns the tokenizer); `timestamps` are a video's pair times."""
+    string (the caller owns the tokenizer); `timestamps` are a video's pair times.
+
+    `checks` says how sure each decision was: the action's, the count's and the
+    moment's probability, and per slot used, in answer order, p(point) and the
+    element number read off the marks with its probability (None: no number)."""
     def p(name):
         return to_point(decision["slots"][name], grid)
-    act = ACTIONS[max(range(len(ACTIONS)), key=lambda k: decision["action_p"][k])]
+    a = decision.get("action", max(range(len(ACTIONS)), key=lambda k: decision["action_p"][k]))
+    act = ACTIONS[a]
     out: Dict = {}
+    checks: Dict = {"action_p": round(decision["action_p"][a], 4)}
     if timestamps:
         out["t"] = float(timestamps[min(decision["moment"], len(timestamps) - 1)])
+        checks["moment_p"] = round(decision["moment_p"], 4)
     out["action"] = act
+    names: List[str] = []
     if act in ("click", "refresh"):
-        n = max(range(N_COUNTS), key=lambda k: decision["count_p"][k])
+        n = decision.get("count", max(range(N_COUNTS), key=lambda k: decision["count_p"][k]))
+        checks["count_p"] = round(decision["count_p"][n], 4)
         if act == "refresh":
             n = min(n, 1)
         names = [f"click{k}" for k in range(1, n + 1)]
         out["points"] = [p(s) for s in names]
     elif act == "drag":
-        n = 1 + max(range(N_DRAG_COUNTS), key=lambda k: decision["drag_count_p"][k])
+        k = decision.get("drag_count", max(range(N_DRAG_COUNTS), key=lambda k: decision["drag_count_p"][k]))
+        checks["count_p"] = round(decision["drag_count_p"][k], 4)
         drags = []
-        for k in range(1, n + 1):
-            drags.append({"from": p(f"drag{k} from"), "to": p(f"drag{k} to")})
+        for j in range(1, k + 2):
+            drags.append({"from": p(f"drag{j} from"), "to": p(f"drag{j} to")})
+            names += [f"drag{j} from", f"drag{j} to"]
         out["drags"] = drags
     elif act == "slide":
+        names = ["slide handle", "slide from", "slide to"]
         out.update({"handle": p("slide handle"), "from": p("slide from"), "to": p("slide to")})
     elif act == "hold":
+        names = ["hold press", "hold from", "hold to"]
         out.update({"press": p("hold press"), "from": p("hold from"), "to": p("hold to")})
     else:
         out["text"] = text or ""
+    checks["slots"] = [{"slot": s, "p_point": round(decision["slots"][s]["p_point"], 4),
+                        "element": decision["slots"][s]["element"] or None,
+                        "p_element": round(decision["slots"][s]["p_element"], 4)} for s in names]
+    if decision.get("retry"):
+        checks["retry"] = decision["retry"]
+    out["checks"] = checks
     return out
+
+
+def _argmax(p: Sequence[float]) -> int:
+    return max(range(len(p)), key=lambda k: p[k])
+
+
+def _chosen(decision: Dict) -> Tuple[str, List[str]]:
+    """(the action `answer` takes, the slots its answer reads), as `answer` picks them."""
+    act = ACTIONS[decision.get("action", _argmax(decision["action_p"]))]
+    if act in ("click", "refresh"):
+        n = decision.get("count", _argmax(decision["count_p"]))
+        return act, [f"click{k}" for k in range(1, (min(n, 1) if act == "refresh" else n) + 1)]
+    if act == "drag":
+        k = decision.get("drag_count", _argmax(decision["drag_count_p"]))
+        return act, [f"drag{j} {end}" for j in range(1, k + 2) for end in ("from", "to")]
+    if act in ("slide", "hold"):
+        return act, [n for n, _ in SLOTS if n.startswith(act)]
+    return act, []
+
+
+def variants(decision: Dict, stop_id: Optional[int] = None) -> List[Dict]:
+    """`decision`, then each one-place change to it, likeliest first: another action,
+    another count, one slot's point moved to its runner-up token, or one typed
+    character swapped for its runner-up. A change costs log(p_chosen / p_runner_up),
+    so the first is the place the model was least sure of.
+
+    The heads' scores are a distribution, so a refused answer is a fact about the
+    board: the next try is the next-likeliest answer, not the same one asked again.
+    Each variant names its change in `retry`. `stop_id` ends the typed text: markers
+    after it are not read, but the stop itself can be swapped (a longer answer)."""
+    def cost(p_top, p_alt):
+        return math.log(max(p_top, 1e-9)) - math.log(max(p_alt, 1e-9))
+
+    act, names = _chosen(decision)
+    changes = []
+    a = _argmax(decision["action_p"])
+    for k, p in enumerate(decision["action_p"]):
+        if k != a:
+            changes.append((cost(decision["action_p"][a], p), {"action": k}, f"action {ACTIONS[k]}"))
+    for key, probs in (("count", "count_p"), ("drag_count", "drag_count_p")):
+        if (key == "count") != (act == "click") or (key == "drag_count") != (act == "drag"):
+            continue
+        n = _argmax(decision[probs])
+        for k, p in enumerate(decision[probs]):
+            if k != n:
+                changes.append((cost(decision[probs][n], p), {key: k}, f"{key} {k + (key == 'drag_count')}"))
+    for name in names:
+        slot = decision["slots"][name]
+        for j, alt in enumerate(slot.get("alts") or [], 2):
+            changes.append((cost(slot["p_point"], alt["p_point"]), {"slot": (name, alt)}, f"{name} place {j}"))
+    if act == "type" and decision.get("text_alt_ids"):
+        ids = decision["text_ids"]
+        end = ids.index(stop_id) + 1 if stop_id is not None and stop_id in ids else len(ids)
+        for i in range(end):
+            changes.append((cost(decision["text_p"][i], decision["text_alt_p"][i]), {"text": i}, f"text{i + 1} place 2"))
+    out = [decision]
+    for _c, change, what in sorted(changes, key=lambda c: c[0]):
+        v = copy.deepcopy(decision)
+        if "slot" in change:
+            name, alt = change["slot"]
+            v["slots"][name].update({k: alt[k] for k in ("token", "dx", "dy", "p_point")})
+        elif "text" in change:
+            i = change["text"]
+            v["text_ids"][i] = v["text_alt_ids"][i]
+        else:
+            v.update(change)
+        v["retry"] = what
+        out.append(v)
+    return out
+
+
+def slot_point(ans: Dict, slot: str) -> Optional[List[int]]:
+    """Where `answer`'s `slot` put its point (after any later move of it), or None."""
+    if slot.startswith("click"):
+        pts = ans.get("points") or []
+        k = int(slot[5:]) - 1
+        return pts[k] if k < len(pts) else None
+    if slot.startswith("drag"):
+        k, end = slot[4:].split()
+        drags = ans.get("drags") or []
+        return drags[int(k) - 1][end] if int(k) <= len(drags) else None
+    return ans.get(slot.split()[1])

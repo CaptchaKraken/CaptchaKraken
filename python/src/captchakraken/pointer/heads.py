@@ -8,10 +8,21 @@ Option vectors, all from the last hidden layer:
     token    each vision token: where a point can land
     moment   each `<|vision_end|>`: one per frame pair of a video (one for a still)
 and one query vector per question, at its `<|quad_end|>`. The element a point
-names is not decided here: it is the one under the point (`elements.ids_for`).
+names is the one under the point (`elements.ids_for`). Each slot ALSO reads the
+number drawn on its element, 1..MAX_ELEMENTS or 0 for none, from its query alone:
+a second answer to "which element", decided apart from the point, so the two can
+check each other. On a plain board there are no numbers and it answers 0.
+
+Each point also carries its runner-up tokens and each typed character its
+runner-up, with their probabilities (`layout.variants`): a retry after a refused
+answer takes the next-likeliest one instead of asking the same question again.
 
 A point is a softmax over the chosen moment's tokens plus an offset inside the
-winning token, so a coordinate is never decoded digit by digit. A typed answer
+winning token, so a coordinate is never decoded digit by digit. The offset head
+normalises its input and answers linearly, clamped to the token only when
+deciding: the hidden states it reads are large, and behind a final tanh a single
+optimiser step could saturate it for good, leaving every point at its token's
+centre. A typed answer
 reads each `textK` marker through the language model's own head, one token per
 marker, in parallel.
 """
@@ -74,7 +85,9 @@ class Heads(nn.Module):
         self.pq = nn.ModuleDict({k: nn.Linear(d, dp) for k in L.KINDS})
         self.pk = nn.Linear(d, dp)
         self.mq, self.mk = nn.Linear(d, dp), nn.Linear(d, dp)
-        self.offset = nn.Sequential(nn.Linear(2 * d, 512), nn.GELU(), nn.Linear(512, 2))
+        self.offset = nn.Sequential(nn.LayerNorm(2 * d), nn.Linear(2 * d, 512), nn.GELU(), nn.Linear(512, 2))
+        self.elem = nn.ModuleDict({k: nn.Sequential(nn.LayerNorm(d), nn.Linear(d, L.MAX_ELEMENTS + 1))
+                                   for k in L.KINDS})
         # A low-rank nudge before the language model's head, zero at the start, so
         # a `textK` marker begins as the model's own next-token guess.
         self.text_down = nn.Linear(d, text_rank, bias=False)
@@ -89,8 +102,11 @@ class Heads(nn.Module):
     def moment(self, hq, hm):                             # [d], [M,d] -> [M]
         return (self.mk(hm) @ self.mq(hq)) * self.scale
 
-    def off(self, hq, htok):                              # [d], [d] -> [2], in tokens
-        return torch.tanh(self.offset(torch.cat([hq, htok], -1))) * 0.5
+    def off(self, hq, htok):                              # [d], [d] -> [2], in tokens, unclamped
+        return self.offset(torch.cat([hq, htok], -1))
+
+    def element(self, kind: str, hq):                     # [d] -> [MAX_ELEMENTS + 1]; 0 is none
+        return self.elem[kind](hq)
 
     def text(self, hq, lm_weight: torch.Tensor):          # [T,d], [V,d] -> [T,V]
         z = hq.float() + self.text_up(self.text_down(hq.float()))
@@ -117,17 +133,31 @@ class Heads(nn.Module):
         pm = F.softmax(self.moment(q["moment"], v["moment"]), -1)
         m = int(pm.argmax())
         tok = v["tok"][m]
+        alts: List[torch.Tensor] = []
         for name, kind in L.SLOTS:
             pp = F.softmax(self.point(kind, q[name], tok), -1)
-            t = int(pp.argmax())
-            dx, dy = self.off(q[name], tok[t])
-            parts.append(torch.stack([torch.tensor(float(t), device=h.device), dx, dy, pp[t]]))
+            top = pp.topk(min(1 + L.ALTS, pp.numel())).indices.tolist()
+            t = top[0]
+            dx, dy = self.off(q[name], tok[t]).clamp(-0.5, 0.5)
+            pe = F.softmax(self.element(kind, q[name]), -1)
+            e = int(pe.argmax())
+            parts.append(torch.stack([torch.tensor(float(t), device=h.device), dx, dy, pp[t],
+                                      torch.tensor(float(e), device=h.device), pe[e]]))
+            for k in range(1, 1 + L.ALTS):
+                if k < len(top):
+                    a = top[k]
+                    adx, ady = self.off(q[name], tok[a]).clamp(-0.5, 0.5)
+                    alts.append(torch.stack([torch.tensor(float(a), device=h.device), adx, ady, pp[a]]))
+                else:      # a board of one token has no runner-up: p 0 is never chosen
+                    alts.append(torch.tensor([float(t), 0.0, 0.0, 0.0], device=h.device))
         if lm_weight is not None:
             hq = torch.stack([q[n] for n in L.TEXT])
-            ids = self.text(hq, lm_weight).float().argmax(-1).float()
+            pt, it = F.softmax(self.text(hq, lm_weight).float(), -1).topk(2, -1)
+            ids, text_alts = it[:, 0].float(), [pt[:, 0], it[:, 1].float(), pt[:, 1]]
         else:
             ids = torch.full((L.MAX_TEXT,), -1.0, device=h.device)
-        parts += [ids, torch.tensor([float(m), float(pm[m])], device=h.device)]
+            text_alts = [torch.zeros(L.MAX_TEXT, device=h.device), ids, torch.zeros(L.MAX_TEXT, device=h.device)]
+        parts += [ids, torch.tensor([float(m), float(pm[m])], device=h.device), *alts, *text_alts]
         out = torch.cat([p.float().flatten() for p in parts])
         assert out.numel() == L.PACKED, (out.numel(), L.PACKED)
         return out

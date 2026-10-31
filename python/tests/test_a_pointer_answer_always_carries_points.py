@@ -16,12 +16,18 @@ def packed(action="click", count=0, drags=1, slots=None, text=(), moment=0):
     v += [1.0 if k == drags - 1 else 0.0 for k in range(L.N_DRAG_COUNTS)]
     slots = slots or {}
     for name, _ in L.SLOTS:
-        tok, dx, dy = slots.get(name, (0, 0.0, 0.0))
-        v += [tok, dx, dy, 0.9]
+        tok, dx, dy, *el = slots.get(name, (0, 0.0, 0.0))
+        v += [tok, dx, dy, 0.9, el[0] if el else 0, 0.8]
     ids = list(text) + [-1] * (L.MAX_TEXT - len(text))
     v += ids + [moment, 0.7]
+    v += [0.0] * (L.ALTS * L.ALT_WIDTH * len(L.SLOTS) + 3 * L.MAX_TEXT)   # no runner-ups
     assert len(v) == L.PACKED
     return v
+
+
+def shape(ans):
+    """The generation-3 answer without its `checks`."""
+    return {k: v for k, v in ans.items() if k != "checks"}
 
 
 def test_every_question_has_its_own_marker():
@@ -50,33 +56,33 @@ def test_a_click_is_its_points():
     """Element numbers are added after, from what is under each point
     (`elements.ids_for`, tests/test_every_captcha_is_asked_the_same_prompt.py)."""
     v = packed("click", count=2, slots={"click1": (21, 0.0, 0.0), "click2": (22, 0.0, 0.0)})
-    assert L.answer(L.unpack(v), (20, 24)) == {"action": "click", "points": [[75, 62], [125, 62]]}
+    assert shape(L.answer(L.unpack(v), (20, 24))) == {"action": "click", "points": [[75, 62], [125, 62]]}
 
 
 def test_nothing_matching_is_an_empty_click():
-    assert L.answer(L.unpack(packed("click", count=0)), (20, 24)) == {"action": "click", "points": []}
+    assert shape(L.answer(L.unpack(packed("click", count=0)), (20, 24))) == {"action": "click", "points": []}
 
 
 def test_a_drag_gives_both_ends():
     v = packed("drag", drags=1, slots={"drag1 from": (0, 0.0, 0.0), "drag1 to": (21, 0.0, 0.0)})
-    ans = L.answer(L.unpack(v), (20, 24))
+    ans = shape(L.answer(L.unpack(v), (20, 24)))
     assert ans == {"action": "drag", "drags": [{"from": [25, 21], "to": [75, 62]}]}
 
 
 def test_a_slide_gives_handle_piece_and_slot():
     v = packed("slide", slots={"slide handle": (460, 0, 0), "slide from": (61, 0, 0), "slide to": (75, 0, 0)})
-    ans = L.answer(L.unpack(v), (20, 24))
+    ans = shape(L.answer(L.unpack(v), (20, 24)))
     assert set(ans) == {"action", "handle", "from", "to"}
 
 
 def test_a_hold_is_its_press_and_the_fills_line():
     v = packed("hold", count=3, slots={"hold press": (21, 0, 0), "hold from": (22, 0, 0), "hold to": (25, 0, 0)})
-    assert L.answer(L.unpack(v), (20, 24)) == {"action": "hold", "press": [75, 62], "from": [125, 62],
-                                                "to": [275, 62]}
+    assert shape(L.answer(L.unpack(v), (20, 24))) == {"action": "hold", "press": [75, 62], "from": [125, 62],
+                                                       "to": [275, 62]}
 
 
 def test_a_typed_answer_is_its_text():
-    assert L.answer(L.unpack(packed("type")), (20, 24), text="QN5K") == {"action": "type", "text": "QN5K"}
+    assert shape(L.answer(L.unpack(packed("type")), (20, 24), text="QN5K")) == {"action": "type", "text": "QN5K"}
 
 
 def test_a_video_answer_names_the_moment_by_its_label():
@@ -88,3 +94,24 @@ def test_a_video_answer_names_the_moment_by_its_label():
 def test_a_vector_of_the_wrong_length_is_refused():
     with pytest.raises(ValueError):
         L.unpack([0.0] * (L.PACKED - 1))
+
+
+def test_every_decision_says_how_sure_it_was():
+    v = packed("click", count=2, slots={"click1": (21, 0.0, 0.0, 7), "click2": (22, 0.0, 0.0)})
+    checks = L.answer(L.unpack(v), (20, 24))["checks"]
+    assert checks["action_p"] == 1.0 and checks["count_p"] == 1.0
+    assert checks["slots"] == [{"slot": "click1", "p_point": 0.9, "element": 7, "p_element": 0.8},
+                               {"slot": "click2", "p_point": 0.9, "element": None, "p_element": 0.8}]
+
+
+def test_a_drags_checks_follow_its_ends_in_order():
+    v = packed("drag", drags=2)
+    names = [s["slot"] for s in L.answer(L.unpack(v), (20, 24))["checks"]["slots"]]
+    assert names == ["drag1 from", "drag1 to", "drag2 from", "drag2 to"]
+
+
+def test_a_slot_finds_its_point_in_the_answer():
+    ans = {"action": "drag", "drags": [{"from": [1, 2], "to": [3, 4]}], "handle": [5, 6], "points": [[7, 8]]}
+    assert L.slot_point(ans, "drag1 to") == [3, 4] and L.slot_point(ans, "drag2 from") is None
+    assert L.slot_point(ans, "slide handle") == [5, 6] and L.slot_point(ans, "click1") == [7, 8]
+    assert L.slot_point(ans, "click2") is None

@@ -194,6 +194,40 @@ class SolveResult:
     verdicts: List[RoundVerdict] = field(default_factory=list)
 
 
+#: A typed captcha's text box widens the shot only when it sits by the image: the union may be at most this many
+#: times the image's area. A vendor-named box found in the enclosing form can be a whole login form away.
+ANSWER_BOX_MAX_GROWTH = 4.0
+
+
+class _WithAnswerBox:
+    """A typed captcha's image and its text box, photographed and pointed into as one element.
+
+    BotDetect's widget element is a 280x50 strip holding only the image; its text box is a sibling. Every
+    training board and every real capture of a typed captcha shows the box under the image, and on the bare
+    strip the pointer read the image as a click puzzle (p(type) 0.46) or doubled a glyph, where the same frame
+    with its box read R9VK at p >= 0.89 per character. The answer's points are taken in this union's frame, so
+    `bounding_box` is the union everywhere the round reads it; everything else is the element's own.
+    """
+
+    def __init__(self, element: Any, box: Any):
+        self._element, self._box = element, box
+
+    def bounding_box(self) -> Optional[Dict[str, float]]:
+        a = self._element.bounding_box()
+        b = self._box.bounding_box() if a else None
+        if not a or not b:
+            return a
+        x0, y0 = min(a["x"], b["x"]), min(a["y"], b["y"])
+        x1 = max(a["x"] + a["width"], b["x"] + b["width"])
+        y1 = max(a["y"] + a["height"], b["y"] + b["height"])
+        if (x1 - x0) * (y1 - y0) > ANSWER_BOX_MAX_GROWTH * max(a["width"] * a["height"], 1.0):
+            return a
+        return {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._element, name)
+
+
 @dataclass
 class _GridSession:
     grid_boxes: List[Sequence[int]]
@@ -551,6 +585,11 @@ class PageSolver:
         if target is None:
             return
         target.sampling = sampling = planner.sampling_for_level(self._resample_level)
+        # A pointer model is an argmax and samples nothing. Once an answer has come back unchanged and refused,
+        # every ask on this board names the answers already tried, and the pointer returns its likeliest other one.
+        target.avoid_refused = self._resample_level > 0
+        if not self._resample_level and hasattr(target, "pointer_answers"):
+            target.pointer_answers.clear()
         if sampling:
             _log(f"[resample] temperature {sampling['temperature']}, seed {sampling['seed']}")
 
@@ -1950,6 +1989,10 @@ class PageSolver:
             clicked_this_round: List[int] = []
             for bbox in bboxes:
                 cell = self._bbox_to_cell(bbox, session.grid_boxes, session.screenshot_w, session.screenshot_h)
+                if cell is not None and cell in clicked_this_round:
+                    # Two points in one tile: a second press deselects what the first selected.
+                    _log(f"[recaptcha-grid] round {round_index}: cell {cell} is already clicked; not pressing it again.")
+                    continue
                 self._execute_click(page, {"target_bounding_box": bbox}, element_box)
                 if cell is not None:
                     clicked_order.append(cell)
@@ -2013,9 +2056,11 @@ class PageSolver:
                 self._wait_for_board_painted(element)
 
         # Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
-        text_mode = puzzle_source not in VENDORS_WITH_BESPOKE_HANDLING and self._answer_box(scope, widget.at) is not None
+        answer_box = None if puzzle_source in VENDORS_WITH_BESPOKE_HANDLING else self._answer_box(scope, widget.at)
+        text_mode = answer_box is not None
         if text_mode:
             _log("widget has a text box; solving as a distorted-text captcha")
+            element = _WithAnswerBox(element, answer_box)
 
         # A reCAPTCHA board is read by its grid below, not filmed.
         filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode
