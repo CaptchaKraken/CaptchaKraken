@@ -105,12 +105,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, help="an exported pointer checkpoint")
     ap.add_argument("--detector", default=None, help="the element detector; without it every board goes plain")
+    ap.add_argument("--letters", default=None,
+                    help="the letter detector: a typed code is the one it and the model read together")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8001)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.45)
     a = ap.parse_args()
     from .service import PointerService
-    svc = PointerService(a.model, detector=a.detector, gpu_memory_utilization=a.gpu_memory_utilization)
+    svc = PointerService(a.model, detector=a.detector, letters=a.letters,
+                         gpu_memory_utilization=a.gpu_memory_utilization)
     ThreadingHTTPServer((a.host, a.port), make_handler(svc)).serve_forever()
 
 
