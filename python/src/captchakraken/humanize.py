@@ -41,10 +41,57 @@ def _same_point(a: Point, b: Point) -> bool:
     return abs(float(a[0]) - float(b[0])) < 1e-6 and abs(float(a[1]) - float(b[1])) < 1e-6
 
 
+# What one mouse event may cover. cursory's samples are up to 250 ms and 560 px apart, which the page sees as a
+# cursor that vanishes and reappears: a teleport. A real mouse reports every 8 ms (125 Hz).
+MAX_EVENT_GAP_MS = 8.0
+MAX_EVENT_STEP_PX = 16.0
+# How far a reach may swing off the straight line between its endpoints: a fraction of its length, at least a few
+# pixels. cursory morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px wide and a
+# 140 px one 300 px.
+MAX_DEVIATION = 0.15
+MIN_DEVIATION_PX = 3.0
+
+
+def _nearest_on_segment(p: Point, a: Point, b: Point) -> Point:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    if length2 == 0.0:
+        return a
+    k = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2))
+    return a[0] + k * dx, a[1] + k * dy
+
+
+def _tame(points: List[Point], start: Point, end: Point) -> List[Point]:
+    """Shrink the path's swing off the segment, shape kept, until it stays within MAX_DEVIATION of it."""
+    limit = max(MIN_DEVIATION_PX, MAX_DEVIATION * ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5)
+    near = [_nearest_on_segment(p, start, end) for p in points]
+    worst = max((((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5 for p, q in zip(points, near)), default=0.0)
+    if worst <= limit:
+        return points
+    k = limit / worst
+    return [(q[0] + (p[0] - q[0]) * k, q[1] + (p[1] - q[1]) * k) for p, q in zip(points, near)]
+
+
+def _densify(points: List[Point], timings: List[float]) -> Tuple[List[Point], List[float]]:
+    """Fill every gap wider than one mouse report with evenly timed samples along it."""
+    out_p, out_t = points[:1], timings[:1]
+    for (a, ta), (b, tb) in zip(zip(points, timings), zip(points[1:], timings[1:])):
+        dist = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+        n = max(1, int(-(-(tb - ta) // MAX_EVENT_GAP_MS)), int(-(-dist // MAX_EVENT_STEP_PX)))
+        for i in range(1, n + 1):
+            f = i / n
+            out_p.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+            out_t.append(ta + (tb - ta) * f)
+    return out_p, out_t
+
+
 def trajectory(start: Point, end: Point, frequency: int = 60) -> Tuple[List[Point], List[float]]:
-    """A recorded human movement morphed onto the endpoints; timings are cumulative ms."""
+    """A recorded human movement morphed onto the endpoints, held near the line between them and sampled at
+    least once per mouse report; timings are cumulative ms."""
     points, timings = generate_trajectory(start, end, frequency=frequency)
-    return [(float(x), float(y)) for x, y in points], [float(t) for t in timings]
+    start, end = (float(start[0]), float(start[1])), (float(end[0]), float(end[1]))
+    pts = _tame([(float(x), float(y)) for x, y in points], start, end)
+    return _densify(pts, [float(t) for t in timings])
 
 
 class Humanizer:

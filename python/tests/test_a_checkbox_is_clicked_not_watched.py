@@ -161,3 +161,13 @@ def test_a_turnstile_widget_that_passes_without_drawing_a_box_is_not_clicked() -
 
     assert page.mouse.pressed_at == [], "clicked a widget that had already passed"
     assert seen["asks"] == 0
+
+
+def test_an_in_page_button_with_no_tick_box_is_clicked_where_it_is() -> None:
+    """GeeTest v4's "Click to verify" bar draws no tick box: OpenCV found none, and the puzzle never opened."""
+    performed, usage, page, seen = _round(Vendor.GEETEST, None)
+
+    assert seen["captures"] == 0, f"{seen['captures']} capture(s) of a button the DOM already names"
+    assert seen["asks"] == 0 and usage == []
+    assert performed and len(page.mouse.pressed_at) == 1
+    assert _inside(page.mouse.pressed_at[0], WIDGET_BOX), f"clicked {page.mouse.pressed_at[0]}, off the button"

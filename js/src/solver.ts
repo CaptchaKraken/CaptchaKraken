@@ -11,7 +11,7 @@ import {
   ViewportSize,
 } from './playwright-types';
 import { watchPage, CaptchaWatcher, WatchOptions } from './watcher';
-import { Humanizer, hold, resolveHumanizer } from './humanize.js';
+import { Humanizer, gauss, hold, resolveHumanizer } from './humanize.js';
 import { execFile, spawn, spawnSync, ChildProcessWithoutNullStreams } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -185,6 +185,12 @@ const NOT_THIS_BOARD_POLLS = 3;
 // How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read inside
 // this window is wearing our own feedback, which is not a screen it ever showed by itself.
 export const INPUT_SETTLE_MS = 400;
+// While a reCAPTCHA tile reloads the hand rests on it, drifting a few pixels every second or two. Reaching for a
+// different reloading tile on every 250 ms poll read as a cursor darting about the board.
+export const IDLE_DRIFT_EVERY_MS: readonly [number, number] = [1200, 2800];
+export const IDLE_DRIFT_PX = 3;
+// How much longer than gridLoadTimeoutMs a reCAPTCHA tile that is still painting is waited on.
+export const GRID_LOAD_CAP_FACTOR = 3;
 // A press-and-hold is released once the widget's picture has stopped changing for this long after its fill
 // moved, and at HOLD_MAX_MS whatever it shows. Press & Hold widgets ask for seconds, not tens of seconds.
 export const HOLD_SETTLE_MS = 900;
@@ -1021,7 +1027,7 @@ export class CaptchaKrakenSolver {
    * checkbox picture with a drag.
    */
   private async clickCheckbox(page: Page, widget: Widget, frame: Frame | null): Promise<void> {
-    const box = await this.checkboxBox(frame, widget.vendor);
+    const box = frame ? await this.checkboxBox(frame, widget.vendor) : (SELECTORS[widget.vendor].box?.length ? widget.el : null);
     if (box) await this.move(page, box);
     else {
       const at = await this.findCheckboxOnScreen(page, widget.el);
@@ -1458,16 +1464,27 @@ export class CaptchaKrakenSolver {
     }
   }
 
+  /**
+   * Hold the next ask until every tile has painted: a model asked about a half-loaded board answers it.
+   *
+   * Past the timeout a blank tile that has stopped changing is taken as painted (a pale photo, or a tile whose
+   * image never came), and a board with no grid to read is let through. A tile still painting is waited on until
+   * GRID_LOAD_CAP_FACTOR times that, or the solve's deadline.
+   */
   private async waitForGridCellsLoaded(captchaElement: ElementHandle, opts?: { intervalMs?: number; timeoutMs?: number }): Promise<boolean> {
     const interval = opts?.intervalMs ?? this.config.gridLoadPollIntervalMs ?? 250;
     const timeout = opts?.timeoutMs ?? this.config.gridLoadTimeoutMs ?? 8000;
-    return (await this.pollFrames(captchaElement, timeout, interval, async (frames) => {
+    const start = Date.now();
+    const verdict = await this.pollFrames(captchaElement, timeout * GRID_LOAD_CAP_FACTOR, interval, async (frames) => {
       if (frames.length < 2) return undefined;
+      const late = Date.now() - start >= timeout;
       const res = await this.runCvTool('grid-cell-states', { a: frames[0], b: frames[1] }, ['grid-cell-states', frames[0], frames[1]]);
-      const ok = res && res.grid !== null && Array.isArray(res.loaded) && res.loaded.length > 0
-        && Array.isArray(res.empty) && res.empty.length === 0 && Array.isArray(res.changing) && res.changing.length === 0;
-      return ok ? true : undefined;
-    })) === true;
+      if (!res || res.grid === null) return late ? false : undefined;
+      if (!Array.isArray(res.loaded) || !res.loaded.length || !Array.isArray(res.changing) || res.changing.length) return undefined;
+      return !Array.isArray(res.empty) || !res.empty.length || late ? true : undefined;
+    });
+    if (verdict !== true) console.log('[captchakraken] [recaptcha-grid] the board never finished loading; asking about it as it stands');
+    return verdict === true;
   }
 
   private async getGridBoxes(captchaElement: ElementHandle): Promise<{ boxes: number[][]; size: 3 | 4; screenshotW: number; screenshotH: number } | null> {
@@ -1497,13 +1514,25 @@ export class CaptchaKrakenSolver {
     return { x: session.elementBox.x + (x1 + x2) / 2 * session.scaleX, y: session.elementBox.y + (y1 + y2) / 2 * session.scaleY };
   }
 
+  /** Rest the hand on a tile: reach it once, then drift a few pixels inside it. */
   private async hoverCell(page: Page, session: GridSession, cell: number): Promise<void> {
     if (!this.human.hovers) return;
-    const [x1, y1, x2, y2] = session.gridBoxes[0];
-    const center = this.cellCenterPage(cell, session);
+    const [x1, y1, x2, y2] = session.gridBoxes[cell - 1];
+    const left = session.elementBox.x + x1 * session.scaleX, top = session.elementBox.y + y1 * session.scaleY;
+    const right = session.elementBox.x + x2 * session.scaleX, bottom = session.elementBox.y + y2 * session.scaleY;
+    let [x, y] = this.human.at;
+    if (x >= left && x <= right && y >= top && y <= bottom) {
+      x += gauss(IDLE_DRIFT_PX);
+      y += gauss(IDLE_DRIFT_PX);
+    } else {
+      const center = this.cellCenterPage(cell, session);
+      x = center.x + (Math.random() - 0.5) * (right - left) * 0.4;
+      y = center.y + (Math.random() - 0.5) * (bottom - top) * 0.4;
+    }
+    const inset = Math.min(4, (right - left) / 4, (bottom - top) / 4);
     await this.performSmoothMove(page,
-      center.x + (Math.random() - 0.5) * (x2 - x1) * session.scaleX * 0.4,
-      center.y + (Math.random() - 0.5) * (y2 - y1) * session.scaleY * 0.4);
+      Math.min(Math.max(x, left + inset), right - inset),
+      Math.min(Math.max(y, top + inset), bottom - inset));
   }
 
   /** Per-cell state with the session's cached boxes: a blank mid-refresh frame has no lattice to detect. */
@@ -1522,8 +1551,12 @@ export class CaptchaKrakenSolver {
 
   private hoverLoop(page: Page, session: GridSession, cells: number[]): (() => Promise<void>) | undefined {
     if (!cells.length) return undefined;
-    let i = 0;
-    return async () => { await this.hoverCell(page, session, cells[i++ % cells.length]).catch(() => {}); };
+    let due = 0;
+    return async () => {
+      if (Date.now() < due) return;
+      due = Date.now() + IDLE_DRIFT_EVERY_MS[0] + Math.random() * (IDLE_DRIFT_EVERY_MS[1] - IDLE_DRIFT_EVERY_MS[0]);
+      await this.hoverCell(page, session, cells[0]).catch(() => {});
+    };
   }
 
   /**
