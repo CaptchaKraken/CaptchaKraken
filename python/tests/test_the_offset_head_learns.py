@@ -7,8 +7,10 @@ head on inputs of that scale, and it must beat a constant zero."""
 import os
 import sys
 
-import torch
-import torch.nn.functional as F
+import pytest
+
+torch = pytest.importorskip("torch")
+import torch.nn.functional as F  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
