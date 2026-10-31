@@ -183,6 +183,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/hosted-default.test.ts` | Against our own endpoint the client asks for the hosted-only model by its routing alias; against anyone else's it asks for the downloadable default. |
 | `js/src/no-progress.test.ts` | A solve that repeats itself stops instead of running the clock out. |
 | `js/src/repeated-answer.test.ts` | A board that cycles was being solved as a still, forever. |
+| `js/src/a-typed-captcha-is-shown-with-its-box.test.ts` | A typed captcha is photographed with its text box, as every training board shows it. |
 | `js/src/second-look-believes-the-recording.test.ts` | The second look at a board that failed once is a question, and the clip it records answers it: a board that never moved goes back to the still expert. |
 | `js/src/animated-budget.test.ts` | Escalating to a recording has to fit inside the overall solve budget, which was sized for rounds only. |
 | `js/src/one-inference-per-animated-board.test.ts` | A cycling board is asked about once per distinct answer: reused across rounds, dropped when the widget refuses it. |
@@ -402,6 +403,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_refused_clip_is_not_re_asked.py` | A recording with no steady screen cannot answer differently, so a refusal must throw the frames away rather than re-ask them. |
 | `python/tests/test_a_repeated_answer_is_not_re_performed.py` | An answer the widget already refused is not pressed again; the round re-asks instead. |
 | `python/tests/test_a_refused_pointer_answer_moves_to_the_next.py` | A pointer retry gets the likeliest answer the board has not already refused, read from the heads' runner-ups. |
+| `python/tests/test_a_typed_captcha_is_shown_with_its_box.py` | A typed captcha is photographed with its text box, as every training board shows it. |
 | `python/tests/test_a_hold_is_held_until_the_widget_completes.py` | A `hold` answer survives parsing as a hold with its press and fill line, the fill tracker finds a drawn bar's leading edge, and the press lasts until the fill reaches the model's mark or the widget finishes, never longer than the cap. |
 | `python/tests/test_one_prompt_answers_every_puzzle.py` | Prompt generation 3: one prompt sent to one unrouted model, one parser for its answer, a grid read by ids or by where the points land, refresh performed and never counted as a repeat, an animated board asked the one prompt over a video, and both ports' refresh and press-and-hold selectors equal. |
 | `python/tests/test_a_burst_cannot_trip_its_own_deadline.py` | The burst plans its frames from the ceiling, so it must not be able to exceed the deadline it was given. |

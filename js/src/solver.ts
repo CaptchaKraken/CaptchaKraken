@@ -119,6 +119,38 @@ const VENDORS_WITH_BESPOKE_HANDLING: ReadonlySet<Vendor> = new Set<Vendor>([Vend
 
 // Long enough to resolve a locator `all()` just returned, short enough that a widget gone in between reads as stale, not hung.
 const HANDLE_TIMEOUT_MS = 1000;
+/**
+ * A typed captcha's text box widens the shot only when it sits by the image: the union may be at most this many
+ * times the image's area. A vendor-named box found in the enclosing form can be a whole login form away.
+ */
+const ANSWER_BOX_MAX_GROWTH = 4;
+
+/**
+ * A typed captcha's image and its text box, photographed and pointed into as one element.
+ *
+ * BotDetect's widget element is a 280x50 strip holding only the image; its text box is a sibling. Every training
+ * board and every real capture of a typed captcha shows the box under the image, and on the bare strip the pointer
+ * read the image as a click puzzle or doubled a glyph. The answer's points are taken in this union's frame, so
+ * `boundingBox` is the union everywhere the round reads it; everything else is the element's own.
+ */
+export function withAnswerBox(el: ElementHandle, box: ElementHandle): ElementHandle {
+  const union = async () => {
+    const a = await el.boundingBox();
+    const b = a ? await box.boundingBox() : null;
+    if (!a || !b) return a;
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x + a.width, b.x + b.width), y1 = Math.max(a.y + a.height, b.y + b.height);
+    if ((x1 - x0) * (y1 - y0) > ANSWER_BOX_MAX_GROWTH * Math.max(a.width * a.height, 1)) return a;
+    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  };
+  return new Proxy(el, {
+    get(target, key) {
+      if (key === 'boundingBox') return union;
+      const v = Reflect.get(target, key, target);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+}
 
 /** Every visible match of `selectors`, in selector order, queried at once. A selector this adapter can't parse is skipped, not fatal. */
 const visible = async (scope: Scope, selectors: readonly string[]): Promise<Locator[]> =>
@@ -725,7 +757,8 @@ export class CaptchaKrakenSolver {
 
   private async solveSingle(page: Page, widget: Widget, attempt: number, retryMode: RetryMode | null = null): Promise<{ didInteract: boolean, tokenUsage: TokenUsage[] }> {
     const cfg = this.config;
-    const { el: captchaElement, vendor: puzzleSource, role: frameRole } = widget;
+    const { vendor: puzzleSource, role: frameRole } = widget;
+    let captchaElement = widget.el;
     this.solveVendor = puzzleSource;
     const frame = await captchaElement.contentFrame();
     this.solveWidgetHost = frame ? hostname(frame) : null;
@@ -755,8 +788,12 @@ export class CaptchaKrakenSolver {
       : await this.ph(Phase.BOARD_PAINT, () => this.waitForBoardPainted(captchaElement));
 
     // Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
-    const textMode = !VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) && (await this.answerBox(scope, widget.at)) !== null;
-    if (textMode) console.log('Widget has a text box; solving as a distorted-text captcha.');
+    const answerBox = VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) ? null : await this.answerBox(scope, widget.at);
+    const textMode = answerBox !== null;
+    if (textMode) {
+      console.log('Widget has a text box; solving as a distorted-text captcha.');
+      captchaElement = withAnswerBox(captchaElement, answerBox);
+    }
 
     // A reCAPTCHA board is read by its grid below, not filmed.
     const filmable = puzzleSource !== Vendor.RECAPTCHA && !textMode;
