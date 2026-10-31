@@ -421,4 +421,20 @@ def write_keyframes(
     return paths
 
 
+def number_for_source_index(kfset: KeyframeSet, source_index: int) -> int:
+    """The keyframe a given source frame belongs to (1-based), by POSITION.
+
+    Exact in cycle mode (the frame's own state), else the nearest keyframe in time. A transition
+    frame (state -1) has no state of its own, so where the pixels are at hand, matching by
+    appearance around the action point is the better question.
+    """
+    if not kfset.keyframes:
+        raise ValueError("keyframe set is empty")
+    if kfset.mode == KeyframeMode.CYCLE and 0 <= source_index < len(kfset.frame_states):
+        state = kfset.frame_states[source_index]
+        if state >= 0:
+            return state + 1
+    return min(kfset.keyframes, key=lambda k: abs(k.source_index - source_index)).number
+
+
 

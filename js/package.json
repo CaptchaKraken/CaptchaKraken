@@ -1,6 +1,6 @@
 {
   "name": "captchakraken",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "description": "Captcha solver for Playwright and Puppeteer. Finds the captcha, reads the puzzle with a fine-tuned Qwen3.5-9B vision model, and clicks, drags, slides or types through to a token \u2014 reCAPTCHA, GeeTest, NetEase Yidun, Tencent, Lemin, Prosopo, Turnstile and distorted text. Hosted API or self-hosted.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -53,7 +53,7 @@
   },
   "homepage": "https://github.com/CaptchaKraken/CaptchaKraken#readme",
   "dependencies": {
-    "cursory-js": "2.0.1"
+    "cursory-js": "2.1.0"
   },
   "devDependencies": {
     "@types/node": "24.10.2",

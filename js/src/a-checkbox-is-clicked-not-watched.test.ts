@@ -30,7 +30,8 @@ function checkboxFrame(box: any | null) {
   };
 }
 
-async function round(vendor: Vendor, frame: any) {
+/** `drawn`: what each capture finds, the last repeating; `solved`: whether the widget has passed, per look. */
+async function round(vendor: Vendor, frame: any, drawn: Array<number[] | null> = [[16, 23, 30, 30]], solved: () => boolean = () => false) {
   const solver: any = new CaptchaKrakenSolver({ humanization: 'none', postSolveOutcomePollMs: 1 });
   const pressedAt: Array<[number, number]> = [];
   let at: [number, number] = [0, 0];
@@ -47,7 +48,7 @@ async function round(vendor: Vendor, frame: any) {
   solver.shot = async () => { seen.captures++; };
   solver.runCvTool = async (cmd: string) => {
     assert.equal(cmd, 'find-checkbox');
-    return [16, 23, 30, 30];
+    return drawn[Math.min(seen.captures, drawn.length) - 1];
   };
   solver.shotScale = () => 1;
   solver.getSolution = async () => { seen.asks++; throw new Error('the model was asked about a checkbox'); };
@@ -56,7 +57,7 @@ async function round(vendor: Vendor, frame: any) {
   solver.classifyByRecording = boardPath;
   solver.startKeyframeBurst = () => { throw new Error('a checkbox was filmed'); };
   solver.detectCaptcha = async () => (++seen.detects < 3 ? checkbox : challenge);
-  solver.isCaptchaSolved = async () => false;
+  solver.isCaptchaSolved = async () => solved();
   const result = await solver.solveSingle(page, checkbox, 1);
   return { result, pressedAt, seen };
 }
@@ -88,3 +89,27 @@ for (const [name, vendor, frame] of [['no DOM selector', Vendor.TURNSTILE, null]
     assert.ok(inside(pressedAt[0], { x: 33 + 16, y: 237 + 23, width: 30, height: 30 }), `clicked ${pressedAt[0]}, outside the tick box OpenCV found`);
   });
 }
+
+test('a Turnstile box drawn after "Verifying…" is waited for, not reported missing', async () => {
+  const { pressedAt, seen } = await round(Vendor.TURNSTILE, null, [null, null, [16, 23, 30, 30]]);
+  assert.equal(seen.captures, 3);
+  assert.equal(pressedAt.length, 1);
+  assert.ok(inside(pressedAt[0], { x: 33 + 16, y: 237 + 23, width: 30, height: 30 }), `clicked ${pressedAt[0]}`);
+});
+
+test('a Turnstile widget that passes without drawing a box is not clicked', async () => {
+  let looks = 0;
+  const { pressedAt, seen } = await round(Vendor.TURNSTILE, null, [null], () => ++looks > 1);
+  assert.equal(pressedAt.length, 0, 'clicked a widget that had already passed');
+  assert.equal(seen.asks, 0);
+});
+
+// GeeTest v4's "Click to verify" bar draws no tick box: OpenCV found none, and the puzzle never opened.
+test('an in-page button with no tick box is clicked where it is', async () => {
+  const { result, pressedAt, seen } = await round(Vendor.GEETEST, null);
+  assert.equal(seen.captures, 0, `${seen.captures} capture(s) of a button the DOM already names`);
+  assert.equal(seen.asks, 0);
+  assert.deepEqual(result.tokenUsage, []);
+  assert.equal(pressedAt.length, 1);
+  assert.ok(inside(pressedAt[0], WIDGET_BOX), `clicked ${pressedAt[0]}, off the button`);
+});

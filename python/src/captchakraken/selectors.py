@@ -30,6 +30,7 @@ class VendorSelectors:
     # Inside the checkbox frame: the box shows accepted. Demo pages do not always fill `response`.
     checked: Optional[str] = None
     # Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph.
+    # An in-page checkbox that names one is a button with no tick box to find, and is clicked where it is.
     box: Sequence[str] = ()
     # On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).
     accepted: Optional[str] = None
@@ -51,18 +52,26 @@ class VendorSelectors:
     slider_handle: Sequence[str] = ()
     # Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.
     piece: Sequence[str] = ()
+    # Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.
+    refresh: Sequence[str] = ()
+    # A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching
+    # the answer's `to` is not a release, and the hold lasts until the widget says it is done.
+    hold_completes: bool = False
 
 
 SELECTORS: Mapping[Vendor, VendorSelectors] = {
+    # An Enterprise sitekey serves the same widget from /recaptcha/enterprise/ instead of /recaptcha/api2/.
     Vendor.RECAPTCHA: VendorSelectors(
         hosts=("google.com/recaptcha", "recaptcha.net"),
-        challenge=('iframe[src*="recaptcha/api2/bframe"]',),
-        checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',),
+        challenge=('iframe[src*="recaptcha/api2/bframe"]', 'iframe[src*="recaptcha/enterprise/bframe"]'),
+        checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',
+                  'iframe[src*="recaptcha/enterprise/anchor"]:not([src*="size=invisible"])'),
         response='[name="g-recaptcha-response"]',
         checked=".recaptcha-checkbox-checked",
         box=("#recaptcha-anchor",),
         fresh=".rc-imageselect-instructions, #rc-imageselect",
         submit=("#recaptcha-verify-button",),
+        refresh=("#recaptcha-reload-button",),
         banners=(
             (".rc-imageselect-error-select-more", RecaptchaBanner.SELECT_MORE),
             (".rc-imageselect-error-dynamic-more", RecaptchaBanner.DYNAMIC_MORE),
@@ -84,6 +93,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         fresh=".prompt-text",
         images=(".task-image .image", ".task .image", ".challenge-example img", ".image-wrapper img"),
         submit=(".button-submit",),
+        refresh=(".refresh.button",),
         passive=('iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'),
     ),
     Vendor.TURNSTILE: VendorSelectors(
@@ -91,12 +101,19 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         checkbox=('iframe[src*="challenges.cloudflare.com"]', ".cf-turnstile"),
         response='[name="cf-turnstile-response"]',
     ),
+    # v4's "Click to verify" bar opens the puzzle. Its container wears `geetest_freeze_wait` while the puzzle is open
+    # (`geetest_boxShow` only until a first wrong answer, after which the box stays up dealing a new one) and
+    # `geetest_success` once passed, so the checkbox matches only a bar that has not been clicked yet.
     Vendor.GEETEST: VendorSelectors(
         hosts=("geetest.com",),
+        checkbox=(".geetest_captcha:not(.geetest_boxShow):not(.geetest_freeze_wait):not(.geetest_success):not(.geetest_lock_success) "
+                  ".geetest_btn_click",),
+        box=(".geetest_btn_click",),
         widget=(".geetest_box", ".geetest_panel_box", ".geetest_popup_window", ".geetest_widget"),
         accepted=(".geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, "
                   ".geetest_captcha.geetest_lock_success"),
         submit=(".geetest_submit",),
+        refresh=(".geetest_refresh", ".geetest_refresh_1"),
         slider_handle=(".geetest_slider_button", ".geetest_btn", ".geetest_slider .geetest_arrow"),
         piece=(".geetest_slice",),
     ),
@@ -108,12 +125,14 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
                 'iframe[id^="tcaptcha"]', 'iframe[src*="captcha.gtimg.com"]', 'iframe[src*="captcha.qq.com"]'),
         slider_handle=(".tencent-captcha-dy__slider-block", "#tcaptcha_drag_thumb", ".tc-slider-normal", "[id*=slideBlock]"),
         piece=(".tencent-captcha-dy__fg-item",),
+        refresh=(".tencent-captcha-dy__footer-icon--refresh",),
     ),
     Vendor.YIDUN: VendorSelectors(
         hosts=("dun.163.com", "cstaticdun.126.net", "necaptcha.nosdn.127.net"),
         widget=(".yidun_panel", ".yidun"),
         slider_handle=(".yidun_slider", ".yidun_jigsaw"),
         piece=(".yidun_jigsaw",),
+        refresh=(".yidun_refresh",),
     ),
     Vendor.YANDEX: VendorSelectors(
         hosts=("smartcaptcha.yandexcloud.net",),
@@ -135,41 +154,57 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         hosts=("mtcaptcha.com",),
         widget=('iframe[src*="service.mtcaptcha.com"]', 'iframe[id^="mtcaptcha-iframe"]', ".mtcaptcha", ".mtcap"),
         text_input=("input.mtcap-inputtext", ".mtcap input[type=text]"),
+        refresh=(".mtcap-refresh",),
     ),
     Vendor.BOTDETECT: VendorSelectors(
         hosts=(),
         widget=(".BDC_CaptchaDiv",),
         text_input=("input[id*=captchaCode]", "input#captchaCode", "input[id*=validateCaptcha]",
                     ".BDC_CaptchaDiv input[type=text]"),
+        refresh=('a[id*="ReloadLink"]', ".BDC_ReloadIcon"),
+    ),
+    # The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's
+    # iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.
+    Vendor.HUMAN: VendorSelectors(
+        hosts=(),
+        widget=("#px-captcha",),
+        hold_completes=True,
+    ),
+    # The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.
+    Vendor.AWSWAF: VendorSelectors(
+        hosts=("awswaf.com",),
+        widget=(".amzn-captcha-modal",),
+    ),
+    # The puzzle opens in a modal over the "I am human" box, which stays on screen, so the modal is a challenge: a
+    # widget would be outranked by the box and the box clicked again.
+    Vendor.CAPTCHAFOX: VendorSelectors(
+        hosts=("captchafox.com",),
+        challenge=(".cf-modal__challenge",),
+        checkbox=('div[id^="cf-widget-"]',),
+        response='[name="cf-captcha-response"]',
+        slider_handle=(".cf-slider__button",),
+    ),
+    # Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.
+    Vendor.DINGXIANG: VendorSelectors(
+        hosts=("cdn.dingxiang-inc.com/ctu-group/captcha", "cap.dingxiang-inc.com"),
+        widget=(".dx_captcha_oneclick_one-step",),
+        slider_handle=(".dx_captcha_basic_slider", ".dx_captcha_rotate_slider"),
+    ),
+    # The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside
+    # it; the game frame's own path is listed so a page that frames the game directly is found too.
+    Vendor.FUNCAPTCHA: VendorSelectors(
+        hosts=("arkoselabs.com",),
+        widget=('iframe[src*="arkoselabs.com"]', 'iframe[src*="ec-game-core/game-core"]'),
+        hold_completes=True,
+    ),
+    # Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.
+    Vendor.PROTON: VendorSelectors(
+        hosts=("/core/v4/captcha",),
+        widget=('iframe[src*="/core/v4/captcha"]',),
     ),
     Vendor.UNKNOWN: VendorSelectors(hosts=()),
 }
 assert set(SELECTORS) == set(Vendor), "every vendor names its selectors"
-
-VENDORS: Sequence[Tuple[Vendor, VendorSelectors]] = tuple(SELECTORS.items())
-
-
-def _of_every_vendor(key: str) -> Sequence[str]:
-    assert key in {f.name for f in fields(VendorSelectors)}
-    return tuple(s for _, v in VENDORS for s in getattr(v, key))
-
-
-class WidgetProbe(NamedTuple):
-    vendor: Vendor
-    role: FrameRole
-    selector: str
-
-
-# Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then inline widgets.
-WIDGET_PROBES: Sequence[WidgetProbe] = tuple(
-    WidgetProbe(vendor, role, selector)
-    for role, key in ((FrameRole.CHALLENGE, "challenge"), (FrameRole.CHECKBOX, "checkbox"), (FrameRole.UNKNOWN, "widget"))
-    for vendor, s in VENDORS
-    for selector in getattr(s, key))
-
-ENCLAVE_SELECTORS: Sequence[str] = _of_every_vendor("enclave")
-RESPONSE_SELECTORS: Sequence[str] = tuple(s.response for _, s in VENDORS if s.response)
-ACCEPTED_SELECTORS: Sequence[str] = tuple(s.accepted for _, s in VENDORS if s.accepted)
 
 _LOWER = "translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
 
@@ -179,23 +214,76 @@ def submit_by_text(text: str) -> str:
     return f"xpath=.//button[contains({_LOWER}, '{text}')] | .//div[@role=\"button\" and contains({_LOWER}, '{text}')]"
 
 
-# A real Verify/Next/Submit/Skip first; the vendor-named controls are fallbacks.
-SUBMIT_SELECTORS: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip")), *_of_every_vendor("submit"))
+class WidgetProbe(NamedTuple):
+    vendor: Vendor
+    role: FrameRole
+    selector: str
 
-# Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
-# reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
-TEXT_INPUT_VENDOR_SELECTORS: Sequence[str] = _of_every_vendor("text_input")
-TEXT_INPUT_SELECTORS: Sequence[str] = (
-    *TEXT_INPUT_VENDOR_SELECTORS,
-    'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
-    'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
-    "input[type=text]", "input:not([type])", "input[type=tel]", "textarea",
-)
-# `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove.
-SLIDER_HANDLE_SELECTORS: Sequence[str] = (
-    *_of_every_vendor("slider_handle"),
-    '[role="slider"]', "[aria-valuenow]",
-    '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
-    '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
-)
-PIECE_SELECTORS: Sequence[str] = (*_of_every_vendor("piece"), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]')
+
+_DETECTED_BY = ("challenge", "checkbox", "widget")
+
+
+class SelectorTable:
+    """The table one solver detects and drives with: the built-in vendors, plus the caller's own entry when given.
+
+    A custom entry is reported as `Vendor.UNKNOWN` and searched before the built-in vendors, because the caller
+    wrote it for the page in front of them.
+    """
+
+    def __init__(self, custom: Optional[VendorSelectors] = None) -> None:
+        if custom is not None and not any(getattr(custom, key) for key in _DETECTED_BY):
+            raise ValueError("custom_selectors names nothing to detect: give it a `widget`, `challenge` or `checkbox`")
+        self.selectors: Mapping[Vendor, VendorSelectors] = (
+            {Vendor.UNKNOWN: custom, **{v: s for v, s in SELECTORS.items() if v != Vendor.UNKNOWN}}
+            if custom is not None else SELECTORS)
+        self.vendors: Sequence[Tuple[Vendor, VendorSelectors]] = tuple(self.selectors.items())
+        # Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then
+        # inline widgets.
+        self.widget_probes: Sequence[WidgetProbe] = tuple(
+            WidgetProbe(vendor, role, selector)
+            for role, key in zip((FrameRole.CHALLENGE, FrameRole.CHECKBOX, FrameRole.UNKNOWN), _DETECTED_BY)
+            for vendor, s in self.vendors
+            for selector in getattr(s, key))
+        self.enclave: Sequence[str] = self._of_every_vendor("enclave")
+        self.response: Sequence[str] = tuple(s.response for _, s in self.vendors if s.response)
+        self.accepted: Sequence[str] = tuple(s.accepted for _, s in self.vendors if s.accepted)
+        # A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
+        self.submit: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip", "confirm")),
+                                      *self._of_every_vendor("submit"))
+        # Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
+        # reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
+        self.text_input_vendor: Sequence[str] = self._of_every_vendor("text_input")
+        self.text_input: Sequence[str] = (
+            *self.text_input_vendor,
+            'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
+            'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
+            "input[type=text]", "input:not([type])", "input[type=tel]", "textarea",
+        )
+        # `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove.
+        self.slider_handle: Sequence[str] = (
+            *self._of_every_vendor("slider_handle"),
+            '[role="slider"]', "[aria-valuenow]",
+            '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
+            '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
+        )
+        self.refresh: Sequence[str] = self._of_every_vendor("refresh")
+        self.piece: Sequence[str] = (*self._of_every_vendor("piece"), '[class*="puzzle"][class*="piece"]',
+                                     '[class*="jigsaw"]')
+
+    def _of_every_vendor(self, key: str) -> Sequence[str]:
+        assert key in {f.name for f in fields(VendorSelectors)}
+        return tuple(s for _, v in self.vendors for s in getattr(v, key))
+
+
+DEFAULT_TABLE = SelectorTable()
+VENDORS = DEFAULT_TABLE.vendors
+WIDGET_PROBES = DEFAULT_TABLE.widget_probes
+ENCLAVE_SELECTORS = DEFAULT_TABLE.enclave
+RESPONSE_SELECTORS = DEFAULT_TABLE.response
+ACCEPTED_SELECTORS = DEFAULT_TABLE.accepted
+SUBMIT_SELECTORS = DEFAULT_TABLE.submit
+TEXT_INPUT_VENDOR_SELECTORS = DEFAULT_TABLE.text_input_vendor
+TEXT_INPUT_SELECTORS = DEFAULT_TABLE.text_input
+SLIDER_HANDLE_SELECTORS = DEFAULT_TABLE.slider_handle
+REFRESH_SELECTORS = DEFAULT_TABLE.refresh
+PIECE_SELECTORS = DEFAULT_TABLE.piece

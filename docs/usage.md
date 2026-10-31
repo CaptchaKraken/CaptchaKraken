@@ -110,6 +110,7 @@ side has:
 | `slide_tolerance_px` | `idleMouseWander` |
 | `slide_max_corrections` | `repoPath`, `pythonCommand` — where the bundled engine lives |
 | | `model`, `apiKey` — Python takes these on `PageSolver(...)` itself |
+| | `baseUrl` — Python reads `VLLM_BASE_URL` |
 
 Everything that decides **accuracy** — the prompts, the CV, the pixel budget,
 the model — lives in the shared Python half and is identical by construction.
@@ -272,7 +273,7 @@ desktop solve to touch dispatch would break every one of them silently.
 
 | Mode | What it dispatches | Use it when |
 |---|---|---|
-| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised (Cursory) | Default. Desktop pages. |
+| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised (Cursory); one move per gesture when the browser humanises its own pointer | Default. Desktop pages. |
 | `mobile` | Real touch events with finger kinematics — see below | The page is a mobile site, or you are driving a phone |
 | `none` | One move, one press, one release. No dwell, no jitter | Your own fixtures, or your stack humanises elsewhere |
 | custom | Whatever you write | You already model your users' input |
@@ -403,11 +404,59 @@ class HardwareMouse extends NullHumanizer implements Humanizer {
 new CaptchaKrakenSolver({ humanizer: new HardwareMouse() });
 ```
 
-This is also the right answer when your **browser already humanises**. Camoufox's
-`humanize` juggler re-humanises every `mouse.move()` it is handed, so running it
-against `mouse` mode composes two models: measured **82.1 s against 13.4 s** on
-one geetest slide, because each of the 60 trajectory points became its own
-humanised sub-trajectory. Use `none` there, and let camoufox do it.
+When your **browser already humanises**, `mouse` mode notices and steps aside.
+Camoufox's `humanize` juggler re-humanises every `mouse.move()` it is handed, so
+running both composes two models: measured **82.1 s against 13.4 s** on one
+geetest slide, because each of the 60 trajectory points became its own
+humanised sub-trajectory. The first move of each solve times a 3 px step against
+a zero-length move; when the step is more than 100 ms slower, every later
+gesture is a single `mouse.move()` and the browser draws the path. Pauses and
+per-key typing stay on. A slow remote browser is not mistaken for one, because
+the zero-length move pays the same round trip.
+
+## A captcha the solver does not know
+
+The solver finds a widget through its table of vendor selectors. For a captcha
+that table does not know — a site's own image-and-code box, say — hand it an
+entry of your own in the same shape. It is searched before every built-in
+vendor and reported as vendor `unknown`, and its controls are tried before the
+generic ones.
+
+```typescript
+new CaptchaKrakenSolver({
+  customSelectors: {
+    widget: ['#signup-captcha'],      // what to photograph and answer
+    textInput: ['#signup-code'],      // where a typed answer goes
+    submit: ['#signup-check'],        // the button that sends it
+    refresh: ['#signup-new-image'],   // the control that deals a new one
+  },
+});
+```
+
+```python
+from captchakraken import PageSolver, VendorSelectors
+from captchakraken.page_solver import PageSolverConfig
+
+PageSolver(config=PageSolverConfig(custom_selectors=VendorSelectors(
+    hosts=(),
+    widget=("#signup-captcha",),
+    text_input=("#signup-code",),
+    submit=("#signup-check",),
+    refresh=("#signup-new-image",),
+)))
+```
+
+Every field of the built-in entries is available (`challenge`, `checkbox`,
+`response`, `accepted`, `sliderHandle` / `slider_handle`, `piece`, …); the
+entry must name at least one of `widget`, `challenge` or `checkbox`, or the
+solver refuses it at construction. `response` or `accepted` tells the solver the
+captcha passed; without either, it judges by the widget going away.
+
+A press-and-hold is let go where the answer says the fill should stop, which is
+right for a gauge read at a mark. A button that completes on its own once full,
+and starts over when let go early, wants `holdCompletes: true` /
+`hold_completes=True` instead: the solver then holds until the widget says it
+is done.
 
 ## Solve captchas as they appear
 

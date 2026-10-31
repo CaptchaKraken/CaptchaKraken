@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +50,20 @@ class RecordingPage:
     def __init__(self) -> None:
         self.mouse = RecordingMouse()
         self.viewport_size = {"width": 800, "height": 600}
+
+
+class SlowMouse(RecordingMouse):
+    """A browser that answers each move after `latency_s`, plus `path_s` when the move goes anywhere."""
+
+    def __init__(self, latency_s: float, path_s: float) -> None:
+        super().__init__()
+        self.latency_s, self.path_s, self.last = latency_s, path_s, None
+
+    def move(self, x: float, y: float) -> None:
+        travels = self.last != (x, y)
+        self.last = (x, y)
+        time.sleep(self.latency_s + (self.path_s if travels else 0.0))
+        super().move(x, y)
 
 
 class RecordingTouch(TouchBackend):
@@ -313,3 +328,51 @@ class TestAppiumScaleIsNotGuessed:
         backend = humanize.touch_backend_for(RatioPage(3.0), RecordingDriver())
         with pytest.raises(RuntimeError):
             backend.down(0.0, 0.0)
+
+
+def test_a_browser_that_draws_its_own_path_gets_one_move_per_gesture():
+    """camoufox's humanize re-draws every mouse.move(); our trajectory on top of it is drawn twice."""
+    page, human = RecordingPage(), MouseHumanizer(start=(10.0, 10.0))
+    page.mouse = SlowMouse(0.0, 0.15)
+    human.click(page, (400.0, 300.0))
+    human.drag(page, (400.0, 300.0), (150.0, 120.0))
+
+    # the solve's seed, then sync, round trip and the timed step; then one move per destination
+    kinds = [e[0] for e in page.mouse.events]
+    assert kinds == ["move"] * 5 + ["down", "up", "down", "move", "up"]
+    assert page.mouse.events[4][1:] == (400.0, 300.0)
+    assert human.at == (150.0, 120.0)
+
+
+def test_a_slow_round_trip_alone_is_not_taken_for_a_browser_that_draws_its_own_path():
+    page, human = RecordingPage(), MouseHumanizer(start=(10.0, 10.0))
+    page.mouse = SlowMouse(0.12, 0.0)
+    human.move(page, (30.0, 22.0))
+    assert len(page.mouse.events) > 6, f"{len(page.mouse.events)} moves; a remote browser lost its trajectory"
+
+
+class TestNoTeleport:
+    """cursory's samples were up to 250 ms and 560 px apart, and a 5 px reach swung 61 px wide: a cursor that
+    vanished and reappeared, and darted about while it waited."""
+
+    REACHES = [((100.0, 100.0), (104.0, 103.0)), ((100.0, 100.0), (130.0, 110.0)),
+               ((300.0, 300.0), (420.0, 380.0)), ((50.0, 50.0), (700.0, 500.0))]
+
+    @pytest.mark.parametrize("start,end", REACHES)
+    def test_every_event_is_one_mouse_report_from_the_last(self, start, end):
+        for _ in range(50):
+            points, timings = humanize.trajectory(start, end)
+            assert points[0] == start and points[-1] == end
+            for (a, ta), (b, tb) in zip(zip(points, timings), zip(points[1:], timings[1:])):
+                assert tb - ta <= humanize.MAX_EVENT_GAP_MS + 1e-9
+                assert ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5 <= humanize.MAX_EVENT_STEP_PX + 1e-9
+
+    @pytest.mark.parametrize("start,end", REACHES)
+    def test_a_reach_stays_near_the_line_between_its_ends(self, start, end):
+        length = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
+        limit = max(humanize.MIN_DEVIATION_PX, humanize.MAX_DEVIATION * length)
+        for _ in range(50):
+            points, _ = humanize.trajectory(start, end)
+            for p in points:
+                q = humanize._nearest_on_segment(p, start, end)
+                assert ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5 <= limit + 1e-6

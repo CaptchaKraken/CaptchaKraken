@@ -1,6 +1,6 @@
 {
   "python": {
-    "version": "3.2.1",
+    "version": "3.3.0",
     "exports": [
       "ActionKind",
       "ActionPlanner",
@@ -45,6 +45,7 @@
       "CaptchaSolver.__init__": "(self, model=None, provider='captchaKrakenApi', api_key=None, expert=None)",
       "CaptchaSolver.solve": "(self, media_path, instruction='', puzzle_source=<Vendor.UNKNOWN: 'unknown'>, retry_mode=None, text_mode=False)",
       "CaptchaSolver.solve_keyframes": "(self, keyframe_paths)",
+      "CaptchaSolver.solve_animated": "(self, recording)",
       "PageSolver.__init__": "(self, config=None, solver=None, **solver_kwargs)",
       "PageSolver.solve": "(self, page)",
       "PageSolver.watch": "(self, page, **options)",
@@ -60,6 +61,7 @@
       "board_paint_floor",
       "board_paint_poll_ms",
       "board_paint_timeout_ms",
+      "custom_selectors",
       "detection_timeout_ms",
       "element_screenshot_timeout_ms",
       "expert",
@@ -154,6 +156,7 @@
       "check-movement",
       "detect-selected",
       "fetch",
+      "fill-step",
       "find-checkbox",
       "find-grid",
       "get-numbered-grid",
@@ -163,8 +166,8 @@
       "report-outcome",
       "serve",
       "server",
+      "slide-step",
       "solve-animated",
-      "track-piece",
       "update"
     ],
     "solve_parser": [
@@ -391,6 +394,7 @@
     ],
     "js_only_config": [
       "apiKey",
+      "baseUrl",
       "idleMouseWander",
       "maxStaleFrameReSolves",
       "maxUnsupportedReSolves",
@@ -464,9 +468,11 @@
       "animatedChallengeAfterMs",
       "animatedMotionStreak",
       "apiKey",
+      "baseUrl",
       "boardPaintFloor",
       "boardPaintPollMs",
       "boardPaintTimeoutMs",
+      "customSelectors",
       "detectionTimeoutMs",
       "elementScreenshotTimeoutMs",
       "expert",
