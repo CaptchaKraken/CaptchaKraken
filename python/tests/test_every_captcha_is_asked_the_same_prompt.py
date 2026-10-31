@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from captchakraken.pointer import elements as E
 from captchakraken.pointer import layout as L
+from captchakraken.pointer import service as S
 
 
 class Template:
@@ -82,3 +83,22 @@ def test_a_cell_filled_by_a_piece_is_numbered_once_as_the_piece():
             {"class": "drop_target", "box": [50, 0, 90, 40], "score": 1.0, "mask": sq(50, 0)},
             {"class": "cell", "box": [100, 0, 140, 40], "score": 1.0, "mask": sq(100, 0)}]
     assert [e["class"] for e in E.number(dets)] == ["draggable", "drop_target", "cell"]
+
+
+def _checked(slots):
+    return {"action": "click", "points": [p for _, p, _ in slots],
+            "checks": {"slots": [{"slot": f"click{k}", "element": e} for k, (_, _, e) in enumerate(slots, 1)]}}
+
+
+def test_the_element_under_a_point_is_checked_against_the_one_the_model_read():
+    """Two answers to "which element", decided apart: agreeing, they back each other; differing, the board was misread."""
+    els = [_el("cell", 0, 0, 50, 50), _el("cell", 50, 0, 100, 50)]
+    agree = S.cross_check(_checked([("a", [250, 500], 1), ("b", [750, 500], 2)]), (100, 50), els)
+    assert [s["under"] for s in agree["checks"]["slots"]] == [1, 2] and agree["checks"]["agree"] is True
+    differ = S.cross_check(_checked([("a", [250, 500], 2)]), (100, 50), els)
+    assert differ["checks"]["slots"][0]["under"] == 1 and differ["checks"]["agree"] is False
+
+
+def test_a_plain_board_has_nothing_to_cross_check():
+    ans = S.cross_check(_checked([("a", [250, 500], None)]), (100, 50), [])
+    assert ans["checks"]["agree"] is None and ans["checks"]["slots"][0]["under"] is None

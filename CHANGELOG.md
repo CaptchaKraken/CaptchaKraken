@@ -16,6 +16,15 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Changed
 
+- **A pointer answer carries both the point and the element id, and how sure
+  each is.** Every slot now also reads the number drawn on its element, decided
+  apart from the point. `checks` in the answer gives the action's, count's and
+  moment's probabilities, and per slot its point's probability, the element it
+  read with that read's probability, and `under`: the element its point lands
+  on. `checks.agree` says whether the two name the same element on every slot
+  (None on a plain board). The packed decision vector grows to six values per
+  slot, so a checkpoint must be trained with this head to be served.
+
 - **`mouse` mode hands a browser that humanises its own pointer one move per
   gesture.** The first move of each solve times one 3 px step against a
   zero-length move; under camoufox's `humanize` the step takes hundreds of
@@ -124,8 +133,19 @@ semantic versioning; v2 is a major, **breaking** release.
   different servers with different keys without one environment variable
   routing them all. Nothing changes when the option is absent.
 
+### Changed
+
+- **The pointer overlay's numbers are drawn at 3x.** Each tag's digits are
+  15x21 px with 3 px strokes, so a digit spans more than one vision patch. The
+  look is part of a pointer model's input: models trained on the old overlay
+  must be retrained.
+
 ### Fixed
 
+- **The pointer's point offset head learns.** It normalises its input and
+  answers linearly, clamped to the token when deciding, instead of passing raw
+  hidden states through a tanh that one optimiser step could saturate. Its
+  weights change shape (`offset.0` is now a LayerNorm): retrain, then re-export.
 - **A board the model has no answer for is skipped.** Both ports pressed on
   re-asking the same board until the loop cap (~30 s); they now press Skip for
   a new one, as the empty-plan path already did. An unread text captcha is

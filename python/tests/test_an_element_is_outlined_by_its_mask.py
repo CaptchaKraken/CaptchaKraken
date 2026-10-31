@@ -53,6 +53,28 @@ def test_a_point_in_the_box_but_off_the_mask_names_nothing():
     assert E.element_at([150 / 400 * 1000, 115 / 400 * 1000], size, els) is None
 
 
+def test_an_answer_in_an_open_letters_hole_moves_to_the_nearest_letter_pixel():
+    letter = square(30)
+    letter[9:21, 9:] = False
+    letter[:9, 9:21] = False
+    letter[21:, 9:21] = False
+    els = [el("item", 35, 35, letter)]
+
+    ans = E.ids_for({"action": "click", "points": [[500, 500]]}, (100, 100), els)
+
+    assert ans["ids"] == [1]
+    assert ans["points"][0] != [500, 500]
+    x, y = ans["points"][0]
+    px, py = round(x / 1000 * 100), round(y / 1000 * 100)
+    assert letter[py - 35, px - 35]
+    yy, xx = np.nonzero(letter)
+    expected = np.min((xx + 35 - 50) ** 2 + (yy + 35 - 50) ** 2)
+    assert (px - 50) ** 2 + (py - 50) ** 2 == expected
+
+    empty = E.ids_for({"action": "click", "points": [[100, 100]]}, (100, 100), els)
+    assert empty == {"action": "click", "points": [[100, 100]], "ids": [None]}
+
+
 def test_a_ring_holds_its_own_centre_and_an_edge_holds_a_near_miss():
     ring = square(40)
     ring[10:30, 10:30] = False
@@ -87,13 +109,14 @@ def test_the_outline_is_one_pixel_wide():
     assert line[90].sum() == 2
 
 
-def test_every_element_gets_a_small_numbered_tag_in_its_colour():
+def test_every_element_gets_a_numbered_tag_in_its_colour_big_enough_to_read():
     img = Image.new("RGB", (300, 300), (255, 255, 255))
     els = [el("cell", 20 + 90 * c, 40, square(80)) for c in range(3)]
     out = np.array(M.draw(img, els))
     for n in (1, 2, 3):
         tw, th = M.tag_size(n)
-        assert th <= 9 and tw <= 7
+        # A digit's 7 font rows at SCALE span more than one 16 px ViT patch.
+        assert th >= 16 + 2 * M.PAD and tw <= 5 * M.SCALE + 2 * M.PAD
         assert (out == M.colour(n)).all(-1).sum() > 4 * 80
 
 
@@ -116,4 +139,4 @@ def test_the_look_is_frozen():
     assert digest == FROZEN
 
 
-FROZEN = "95713ddb569868b43786f070eb2d579ea4f0ac226ae88004c041d22bc717be72"
+FROZEN = "f597cbc52c7442b96bdd314a4efbf65760c7670e10b42775afb472ebdaf87992"
