@@ -172,6 +172,52 @@ def element_at(pt: Sequence[float], size: Tuple[int, int], els: Sequence[Dict]) 
     return best
 
 
+def _on_mask(pt: Sequence[float], size: Tuple[int, int],
+             els: Sequence[Optional[Dict]]) -> List[int]:
+    point = [int(round(v)) for v in pt]
+    if element_at(point, size, els) is not None:
+        return point
+    x = int(round(point[0] * size[0] / 1000.0))
+    y = int(round(point[1] * size[1] / 1000.0))
+    best = None
+    for i, e in enumerate(els):
+        if e is None or not e["mask"][1].size:
+            continue
+        x0, y0, x1, y1 = e["box"]
+        if not x0 <= x < x1 or not y0 <= y < y1:
+            continue
+        (mx, my), mask = e["mask"]
+        yy, xx = np.nonzero(mask)
+        if not len(xx):
+            continue
+        distances = (xx + mx - x) ** 2 + (yy + my - y) ** 2
+        k = int(np.argmin(distances))
+        candidate = (int(distances[k]), int(mask.sum()), i,
+                     [round((xx[k] + mx) * 1000 / size[0]), round((yy[k] + my) * 1000 / size[1])])
+        if best is None or candidate[:3] < best[:3]:
+            best = candidate
+    return best[3] if best is not None else point
+
+
+def snap_to_elements(answer: Dict, size: Tuple[int, int],
+                     els: Sequence[Optional[Dict]]) -> Dict:
+    """Move a point that misses its element's mask to the nearest mask pixel.
+
+    Only a point inside an element's box can move, so intentional empty-space
+    points stay put. This keeps clicks on open shapes such as letters off their holes.
+    """
+    out = dict(answer)
+    if out.get("points") is not None:
+        out["points"] = [_on_mask(p, size, els) for p in out["points"]]
+    if out.get("drags") is not None:
+        out["drags"] = [{**d, "from": _on_mask(d["from"], size, els),
+                         "to": _on_mask(d["to"], size, els)} for d in out["drags"]]
+    for key in ("handle", "from", "to", "press"):
+        if out.get(key) is not None:
+            out[key] = _on_mask(out[key], size, els)
+    return out
+
+
 def ids_for(answer: Dict, size: Tuple[int, int], els: Sequence[Optional[Dict]]) -> Dict:
     """`answer` (generation 3's shape, 0-1000 points) with the 1-based number of
     the element under each point beside it: `ids` for clicks, `from_id`/`to_id`
@@ -183,7 +229,7 @@ def ids_for(answer: Dict, size: Tuple[int, int], els: Sequence[Optional[Dict]]) 
     def n(p):
         i = element_at(p, size, els)
         return None if i is None else i + 1
-    out = dict(answer)
+    out = snap_to_elements(answer, size, els)
     if out.get("points") is not None:
         out["ids"] = [n(p) for p in out["points"]]
     if out.get("drags") is not None:
