@@ -10,7 +10,9 @@ by one, linked across the clip (`elements.track`, so an element keeps one number
 and drawn on every frame. With no detector, or `marked=False`, the board goes
 plain. The prompt text is the same for every board (`layout.chat`). The answer is
 generation 3's shape, plus the 1-based number of the element under each point
-(`elements.ids_for`) when the board was marked.
+(`elements.ids_for`) when the board was marked, and `checks`: how sure each
+decision was, and whether each point's element is the one the model read off
+the marks (`cross_check`).
 
 Needs the `serve` extra (vLLM, torch, torchvision).
 """
@@ -27,6 +29,24 @@ from . import elements as E
 from . import layout as L
 from . import marks as M
 from . import vllm_plugin
+
+
+def cross_check(ans: Dict, size, els: Sequence[Optional[Dict]]) -> Dict:
+    """Put the element under each point beside the one the model read off the marks.
+
+    Each `checks` slot gains `under`: the 1-based element its (final) point lands on, or None. `checks["agree"]`
+    is whether every slot's two answers name the same element, or None on a board with no elements, where there
+    is nothing to read. Two answers decided apart that differ mean the board was misread."""
+    checks = ans.get("checks")
+    if checks is None:
+        return ans
+    has_elements = any(e is not None for e in els)
+    for s in checks["slots"]:
+        at = L.slot_point(ans, s["slot"])
+        i = E.element_at(at, size, els) if has_elements and at is not None else None
+        s["under"] = None if i is None else i + 1
+    checks["agree"] = all(s["under"] == s["element"] for s in checks["slots"]) if has_elements else None
+    return ans
 
 
 class PointerService:
@@ -105,7 +125,7 @@ class PointerService:
         els = prep["elements"]
         if prep["timestamps"] is not None and els:
             els = E.on_frame(els, E.moment_frame(d["moment"], len(els[0]["frames"])))
-        return E.ids_for(ans, prep["size"], els)
+        return cross_check(E.ids_for(ans, prep["size"], els), prep["size"], els)
 
     def solve(self, image: Optional[Image.Image] = None, frames: Optional[Sequence[np.ndarray]] = None,
               marked: bool = True, history: Sequence[Image.Image] = ()) -> Dict:

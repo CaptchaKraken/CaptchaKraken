@@ -7,6 +7,15 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Changed
 
+- **A pointer answer carries both the point and the element id, and how sure
+  each is.** Every slot now also reads the number drawn on its element, decided
+  apart from the point. `checks` in the answer gives the action's, count's and
+  moment's probabilities, and per slot its point's probability, the element it
+  read with that read's probability, and `under`: the element its point lands
+  on. `checks.agree` says whether the two name the same element on every slot
+  (None on a plain board). The packed decision vector grows to six values per
+  slot, so a checkpoint must be trained with this head to be served.
+
 - **`mouse` mode hands a browser that humanises its own pointer one move per
   gesture.** The first move of each solve times one 3 px step against a
   zero-length move; under camoufox's `humanize` the step takes hundreds of

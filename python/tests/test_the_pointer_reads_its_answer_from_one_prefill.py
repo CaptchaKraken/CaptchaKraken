@@ -63,6 +63,7 @@ def test_the_decision_is_the_heads_own_argmax():
     assert got["action_p"].index(max(got["action_p"])) == int(heads.action(q["action"]).argmax())
     tok = h[pos.vis]
     assert got["slots"]["click1"]["token"] == int(heads.point("click", q["click1"], tok).argmax())
+    assert got["slots"]["drag1 from"]["element"] == int(heads.element("pick", q["drag1 from"]).argmax())
     want = heads.text(torch.stack([q[n] for n in L.TEXT]), lm).argmax(-1).tolist()
     assert got["text_ids"] == want
 

@@ -8,7 +8,10 @@ Option vectors, all from the last hidden layer:
     token    each vision token: where a point can land
     moment   each `<|vision_end|>`: one per frame pair of a video (one for a still)
 and one query vector per question, at its `<|quad_end|>`. The element a point
-names is not decided here: it is the one under the point (`elements.ids_for`).
+names is the one under the point (`elements.ids_for`). Each slot ALSO reads the
+number drawn on its element, 1..MAX_ELEMENTS or 0 for none, from its query alone:
+a second answer to "which element", decided apart from the point, so the two can
+check each other. On a plain board there are no numbers and it answers 0.
 
 A point is a softmax over the chosen moment's tokens plus an offset inside the
 winning token, so a coordinate is never decoded digit by digit. The offset head
@@ -79,6 +82,8 @@ class Heads(nn.Module):
         self.pk = nn.Linear(d, dp)
         self.mq, self.mk = nn.Linear(d, dp), nn.Linear(d, dp)
         self.offset = nn.Sequential(nn.LayerNorm(2 * d), nn.Linear(2 * d, 512), nn.GELU(), nn.Linear(512, 2))
+        self.elem = nn.ModuleDict({k: nn.Sequential(nn.LayerNorm(d), nn.Linear(d, L.MAX_ELEMENTS + 1))
+                                   for k in L.KINDS})
         # A low-rank nudge before the language model's head, zero at the start, so
         # a `textK` marker begins as the model's own next-token guess.
         self.text_down = nn.Linear(d, text_rank, bias=False)
@@ -95,6 +100,9 @@ class Heads(nn.Module):
 
     def off(self, hq, htok):                              # [d], [d] -> [2], in tokens, unclamped
         return self.offset(torch.cat([hq, htok], -1))
+
+    def element(self, kind: str, hq):                     # [d] -> [MAX_ELEMENTS + 1]; 0 is none
+        return self.elem[kind](hq)
 
     def text(self, hq, lm_weight: torch.Tensor):          # [T,d], [V,d] -> [T,V]
         z = hq.float() + self.text_up(self.text_down(hq.float()))
@@ -125,7 +133,10 @@ class Heads(nn.Module):
             pp = F.softmax(self.point(kind, q[name], tok), -1)
             t = int(pp.argmax())
             dx, dy = self.off(q[name], tok[t]).clamp(-0.5, 0.5)
-            parts.append(torch.stack([torch.tensor(float(t), device=h.device), dx, dy, pp[t]]))
+            pe = F.softmax(self.element(kind, q[name]), -1)
+            e = int(pe.argmax())
+            parts.append(torch.stack([torch.tensor(float(t), device=h.device), dx, dy, pp[t],
+                                      torch.tensor(float(e), device=h.device), pe[e]]))
         if lm_weight is not None:
             hq = torch.stack([q[n] for n in L.TEXT])
             ids = self.text(hq, lm_weight).float().argmax(-1).float()
