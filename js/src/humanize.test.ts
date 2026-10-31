@@ -10,6 +10,11 @@ import {
   NullHumanizer,
   PAUSE_KINDS,
   resolveHumanizer,
+  trajectory,
+  MAX_EVENT_GAP_MS,
+  MAX_EVENT_STEP_PX,
+  MAX_DEVIATION,
+  MIN_DEVIATION_PX,
   type TouchBackend,
   type TouchSample,
 } from './humanize.js';
@@ -354,4 +359,29 @@ test('a known viewport clamps to one pixel inside its edge', async () => {
   await new MouseHumanizer([10, 10], 1000).move(page.asPage(), [3000, 50]);
   const moves = page.events.filter((e) => e[0] === 'move'); const last = moves[moves.length - 1];
   assert.deepEqual([last[1], last[2]], [799, 50]);
+});
+
+// cursory's samples were up to 250 ms and 560 px apart, and a 5 px reach swung 61 px wide: a cursor that vanished
+// and reappeared, and darted about while it waited.
+test('a reach never teleports and stays near the line between its ends', () => {
+  const reaches: [[number, number], [number, number]][] = [
+    [[100, 100], [104, 103]], [[100, 100], [130, 110]], [[300, 300], [420, 380]], [[50, 50], [700, 500]],
+  ];
+  for (const [s, e] of reaches) {
+    const limit = Math.max(MIN_DEVIATION_PX, MAX_DEVIATION * Math.hypot(e[0] - s[0], e[1] - s[1]));
+    for (let k = 0; k < 50; k++) {
+      const [points, timings] = trajectory(s, e, 60);
+      assert.deepEqual(points[0], s);
+      assert.deepEqual(points[points.length - 1], e);
+      for (let i = 1; i < points.length; i++) {
+        assert.ok(timings[i] - timings[i - 1] <= MAX_EVENT_GAP_MS + 1e-9, `gap ${timings[i] - timings[i - 1]}ms`);
+        assert.ok(Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]) <= MAX_EVENT_STEP_PX + 1e-9);
+      }
+      const dx = e[0] - s[0], dy = e[1] - s[1], len2 = dx * dx + dy * dy;
+      for (const p of points) {
+        const t = Math.max(0, Math.min(1, ((p[0] - s[0]) * dx + (p[1] - s[1]) * dy) / len2));
+        assert.ok(Math.hypot(p[0] - s[0] - t * dx, p[1] - s[1] - t * dy) <= limit + 1e-6);
+      }
+    }
+  }
 });

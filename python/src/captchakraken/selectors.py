@@ -30,6 +30,7 @@ class VendorSelectors:
     # Inside the checkbox frame: the box shows accepted. Demo pages do not always fill `response`.
     checked: Optional[str] = None
     # Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph.
+    # An in-page checkbox that names one is a button with no tick box to find, and is clicked where it is.
     box: Sequence[str] = ()
     # On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).
     accepted: Optional[str] = None
@@ -97,8 +98,14 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
         checkbox=('iframe[src*="challenges.cloudflare.com"]', ".cf-turnstile"),
         response='[name="cf-turnstile-response"]',
     ),
+    # v4's "Click to verify" bar opens the puzzle. Its container wears `geetest_freeze_wait` while the puzzle is open
+    # (`geetest_boxShow` only until a first wrong answer, after which the box stays up dealing a new one) and
+    # `geetest_success` once passed, so the checkbox matches only a bar that has not been clicked yet.
     Vendor.GEETEST: VendorSelectors(
         hosts=("geetest.com",),
+        checkbox=(".geetest_captcha:not(.geetest_boxShow):not(.geetest_freeze_wait):not(.geetest_success):not(.geetest_lock_success) "
+                  ".geetest_btn_click",),
+        box=(".geetest_btn_click",),
         widget=(".geetest_box", ".geetest_panel_box", ".geetest_popup_window", ".geetest_widget"),
         accepted=(".geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, "
                   ".geetest_captcha.geetest_lock_success"),

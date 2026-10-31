@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import itertools
 import json
 import math
 import os
@@ -250,6 +249,12 @@ _NOT_THIS_BOARD_POLLS = 3
 # How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read
 # inside this window is wearing our own feedback, which is not a screen it ever showed by itself.
 INPUT_SETTLE_MS = 400
+# While a reCAPTCHA tile reloads the hand rests on it, drifting a few pixels every second or two. Reaching for a
+# different reloading tile on every 250 ms poll read as a cursor darting about the board.
+IDLE_DRIFT_EVERY_MS = (1200.0, 2800.0)
+IDLE_DRIFT_PX = 3.0
+# How much longer than `grid_load_timeout_ms` a reCAPTCHA tile that is still painting is waited on.
+GRID_LOAD_CAP_FACTOR = 3
 # A press-and-hold is released once the widget's picture has stopped changing for this long after its fill
 # moved, and at HOLD_MAX_MS whatever it shows. Press & Hold widgets ask for seconds, not tens of seconds.
 HOLD_SETTLE_MS = 900
@@ -1125,7 +1130,8 @@ class PageSolver:
         Treated as a board it cost 70 screenshots and three model calls in one measured solve, two of them answering
         the checkbox picture with a drag.
         """
-        box = self._checkbox_box(frame, widget.vendor)
+        box = self._checkbox_box(frame, widget.vendor) if frame is not None else (
+            widget.element if SELECTORS[widget.vendor].box else None)
         if box is not None:
             self._move_to_element(page, box)
         else:
@@ -1323,17 +1329,32 @@ class PageSolver:
                           "waiting for the challenge to settle") or SettleVerdict.TIMEOUT
 
     def _wait_for_grid_cells_loaded(self, element: Any) -> bool:
+        """Hold the next ask until every tile has painted: a model asked about a half-loaded board answers it.
+
+        Past `grid_load_timeout_ms` a blank tile that has stopped changing is taken as painted (a pale photo,
+        or a tile whose image never came), and a board with no grid to read is let through. A tile still
+        painting is waited on until GRID_LOAD_CAP_FACTOR times that, or the solve's deadline.
+        """
         cfg = self.config
 
-        def judge(frames, _elapsed):
+        def judge(frames, elapsed):
             if len(frames) < 2:
                 return None
             boxes = self._find_grid(frames[1])
-            states = boxes and self._grid_cell_states(frames[0], frames[1], boxes)
-            return True if states and not states["empty"] and not states["changing"] and states["loaded"] else None
+            if not boxes:
+                return False if elapsed >= cfg.grid_load_timeout_ms else None
+            states = self._grid_cell_states(frames[0], frames[1], boxes)
+            if not states or states["changing"] or not states["loaded"]:
+                return None
+            if not states["empty"] or elapsed >= cfg.grid_load_timeout_ms:
+                return True
+            return None
 
-        return bool(self._poll(element, cfg.grid_load_timeout_ms, cfg.grid_load_poll_interval_ms,
-                               judge, "waiting for grid cells to load"))
+        verdict = self._poll(element, cfg.grid_load_timeout_ms * GRID_LOAD_CAP_FACTOR, cfg.grid_load_poll_interval_ms,
+                             judge, "waiting for grid cells to load")
+        if verdict is not True:
+            _log("[recaptcha-grid] the board never finished loading; asking about it as it stands")
+        return verdict is True
 
     def _wait_for_board_painted(self, element: Any) -> int:
         """A still board is not a loaded board: hold until the panel's centre carries structure."""
@@ -1778,13 +1799,20 @@ class PageSolver:
                 session.element_box["y"] + (y1 + y2) / 2 * session.scale_y)
 
     def _hover_cell(self, page: Any, session: _GridSession, cell: int) -> None:
+        """Rest the hand on a tile: reach it once, then drift a few pixels inside it."""
         if not self._human.hovers:
             return
-        first = session.grid_boxes[0]
-        cx, cy = self._cell_center_page(cell, session)
-        self._smooth_move(page,
-                          cx + (random.random() - 0.5) * (first[2] - first[0]) * session.scale_x * 0.4,
-                          cy + (random.random() - 0.5) * (first[3] - first[1]) * session.scale_y * 0.4)
+        x1, y1, x2, y2 = session.grid_boxes[cell - 1]
+        left, top = session.element_box["x"] + x1 * session.scale_x, session.element_box["y"] + y1 * session.scale_y
+        right, bottom = session.element_box["x"] + x2 * session.scale_x, session.element_box["y"] + y2 * session.scale_y
+        x, y = self._last_mouse
+        if left <= x <= right and top <= y <= bottom:
+            x, y = x + random.gauss(0.0, IDLE_DRIFT_PX), y + random.gauss(0.0, IDLE_DRIFT_PX)
+        else:
+            cx, cy = self._cell_center_page(cell, session)
+            x, y = cx + (random.random() - 0.5) * (right - left) * 0.4, cy + (random.random() - 0.5) * (bottom - top) * 0.4
+        inset = min(4.0, (right - left) / 4, (bottom - top) / 4)
+        self._smooth_move(page, min(max(x, left + inset), right - inset), min(max(y, top + inset), bottom - inset))
 
     @staticmethod
     def _bbox_to_cell(bbox: Sequence[float], grid_boxes: Sequence[Sequence[int]],
@@ -1805,11 +1833,14 @@ class PageSolver:
     def _hover_loop(self, page: Any, session: _GridSession, cells: Sequence[int]) -> Optional[Callable[[], None]]:
         if not cells:
             return None
-        cycle = itertools.cycle(cells)
+        due = [0.0]
 
         def hover():
+            if _now() < due[0]:
+                return
+            due[0] = _now() + random.uniform(*IDLE_DRIFT_EVERY_MS)
             try:
-                self._hover_cell(page, session, next(cycle))
+                self._hover_cell(page, session, cells[0])
             except Exception:
                 pass
 

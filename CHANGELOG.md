@@ -22,6 +22,24 @@ semantic versioning; v2 is a major, **breaking** release.
   reads both themes. And a widget still showing "Verifying…" is looked at again
   until `detectionTimeoutMs` instead of failing on the first capture; one that
   passes without drawing a box is not clicked.
+- **The mouse never jumps.** The recorded movements a reach is drawn from were
+  sampled up to 250 ms and 560 px apart, so the page saw the cursor vanish and
+  reappear, and a short reach swung far off its line (a 5 px move went 61 px
+  wide). Both drivers now send an event at least every 8 ms and 16 px, and keep
+  a reach within 15% of its length of the straight line.
+- **Waiting on a reCAPTCHA tile is calm.** The driver reached for a different
+  reloading tile on every 250 ms poll. It now rests on one tile and drifts a few
+  pixels every second or two.
+- **A reCAPTCHA board is asked about once it has loaded.** The grid gate gave up
+  after `gridLoadTimeoutMs` and asked about a half-painted board. A tile still
+  painting is now waited on up to three times that, or the solve's deadline; a
+  blank tile that has stopped changing counts as loaded.
+- **A pointer click is never sent twice.** Two of the pointer's click slots
+  picking one token answer one point, and on a tile board the second click
+  deselected the first. Repeated points are dropped (Python).
+- **GeeTest v4 opens its own puzzle.** The "Click to verify" bar is clicked as a
+  checkbox, where it is, and only while no puzzle is open; it was not detected,
+  and the puzzle waited for a person to open it.
 
 ## [3.3.0] - 2026-10-27
 

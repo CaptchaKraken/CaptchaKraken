@@ -129,3 +129,19 @@ def test_a_reply_without_an_answer_is_an_error_not_an_empty_solve(registry, wire
     monkeypatch.setattr(P.requests.Session, "post", lambda *a, **k: _Bad())
     with pytest.raises(RuntimeError):
         CaptchaSolver(model="Acme/Pointer").planner.get_pixel_actions(grid_board(tmp_path / "b.png"))
+
+
+def test_a_point_the_pointer_repeats_is_clicked_once(registry, wire, tmp_path):
+    """Two click slots on one token answer one point, and a second click on a tile deselects it: a live reCAPTCHA
+    board was answered [611, 643] twice and [333, 643] three times."""
+    path = grid_board(tmp_path / "board.png")
+    wire["answer"] = {"action": "click", "points": [[333, 500], [611, 643], [611, 643], [333, 643], [333, 645]]}
+    pointer = CaptchaSolver(model="Acme/Pointer").planner.get_pixel_actions(path)
+    assert pointer[0]["points"] == [(0.333, 0.5), (0.611, 0.643), (0.333, 0.643)]
+
+
+def test_two_targets_closer_than_any_tile_are_both_clicked(registry, wire, tmp_path):
+    path = grid_board(tmp_path / "board.png")
+    wire["answer"] = {"action": "click", "points": [[400, 400], [406, 400]], "ids": [2, 3]}
+    pointer = CaptchaSolver(model="Acme/Pointer").planner.get_pixel_actions(path)
+    assert pointer[0]["points"] == [(0.4, 0.4), (0.406, 0.4)] and pointer[0]["ids"] == [2, 3]
