@@ -414,6 +414,44 @@ gesture is a single `mouse.move()` and the browser draws the path. Pauses and
 per-key typing stay on. A slow remote browser is not mistaken for one, because
 the zero-length move pays the same round trip.
 
+## A captcha the solver does not know
+
+The solver finds a widget through its table of vendor selectors. For a captcha
+that table does not know — a site's own image-and-code box, say — hand it an
+entry of your own in the same shape. It is searched before every built-in
+vendor and reported as vendor `unknown`, and its controls are tried before the
+generic ones.
+
+```typescript
+new CaptchaKrakenSolver({
+  customSelectors: {
+    widget: ['#signup-captcha'],      // what to photograph and answer
+    textInput: ['#signup-code'],      // where a typed answer goes
+    submit: ['#signup-check'],        // the button that sends it
+    refresh: ['#signup-new-image'],   // the control that deals a new one
+  },
+});
+```
+
+```python
+from captchakraken import PageSolver, VendorSelectors
+from captchakraken.page_solver import PageSolverConfig
+
+PageSolver(config=PageSolverConfig(custom_selectors=VendorSelectors(
+    hosts=(),
+    widget=("#signup-captcha",),
+    text_input=("#signup-code",),
+    submit=("#signup-check",),
+    refresh=("#signup-new-image",),
+)))
+```
+
+Every field of the built-in entries is available (`challenge`, `checkbox`,
+`response`, `accepted`, `sliderHandle` / `slider_handle`, `piece`, …); the
+entry must name at least one of `widget`, `challenge` or `checkbox`, or the
+solver refuses it at construction. `response` or `accepted` tells the solver the
+captcha passed; without either, it judges by the widget going away.
+
 ## Solve captchas as they appear
 
 `solve(page)` is a one-shot: it solves whatever challenge is on the page right

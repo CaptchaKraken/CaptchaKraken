@@ -1,5 +1,6 @@
 import type { RoundVerdict } from './verdicts';
 import type { Humanizer, TouchTransform } from './humanize.js';
+import type { CustomSelectors } from './selectors';
 import type { ActionKind, FrameRole, HumanizationMode, PromptFamily, SolveStage, Vendor } from './kinds';
 
 /** One intermediate stage of a solve, handed to `CaptchaKrakenConfig.onStep`. */
@@ -23,6 +24,8 @@ export interface CaptchaKrakenConfig {
   humanization?: HumanizationMode;
   /** Your own gesture implementation; overrides `humanization`. */
   humanizer?: Humanizer;
+  /** Your own vendor entry, for a captcha the built-in table does not know. Detected before every built-in vendor. */
+  customSelectors?: CustomSelectors;
   /** Mobile only: an Appium / WebdriverIO driver on a real handset. Unset dispatches CDP touch at the page. */
   touchDriver?: any;
   /** Mobile only: CSS-pixel to device-pixel transform for `touchDriver`. */

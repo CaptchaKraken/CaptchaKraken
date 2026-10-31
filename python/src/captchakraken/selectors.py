@@ -201,31 +201,6 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
 }
 assert set(SELECTORS) == set(Vendor), "every vendor names its selectors"
 
-VENDORS: Sequence[Tuple[Vendor, VendorSelectors]] = tuple(SELECTORS.items())
-
-
-def _of_every_vendor(key: str) -> Sequence[str]:
-    assert key in {f.name for f in fields(VendorSelectors)}
-    return tuple(s for _, v in VENDORS for s in getattr(v, key))
-
-
-class WidgetProbe(NamedTuple):
-    vendor: Vendor
-    role: FrameRole
-    selector: str
-
-
-# Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then inline widgets.
-WIDGET_PROBES: Sequence[WidgetProbe] = tuple(
-    WidgetProbe(vendor, role, selector)
-    for role, key in ((FrameRole.CHALLENGE, "challenge"), (FrameRole.CHECKBOX, "checkbox"), (FrameRole.UNKNOWN, "widget"))
-    for vendor, s in VENDORS
-    for selector in getattr(s, key))
-
-ENCLAVE_SELECTORS: Sequence[str] = _of_every_vendor("enclave")
-RESPONSE_SELECTORS: Sequence[str] = tuple(s.response for _, s in VENDORS if s.response)
-ACCEPTED_SELECTORS: Sequence[str] = tuple(s.accepted for _, s in VENDORS if s.accepted)
-
 _LOWER = "translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
 
 
@@ -234,25 +209,76 @@ def submit_by_text(text: str) -> str:
     return f"xpath=.//button[contains({_LOWER}, '{text}')] | .//div[@role=\"button\" and contains({_LOWER}, '{text}')]"
 
 
-# A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
-SUBMIT_SELECTORS: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip", "confirm")),
-                                   *_of_every_vendor("submit"))
+class WidgetProbe(NamedTuple):
+    vendor: Vendor
+    role: FrameRole
+    selector: str
 
-# Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
-# reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
-TEXT_INPUT_VENDOR_SELECTORS: Sequence[str] = _of_every_vendor("text_input")
-TEXT_INPUT_SELECTORS: Sequence[str] = (
-    *TEXT_INPUT_VENDOR_SELECTORS,
-    'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
-    'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
-    "input[type=text]", "input:not([type])", "input[type=tel]", "textarea",
-)
-# `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove.
-SLIDER_HANDLE_SELECTORS: Sequence[str] = (
-    *_of_every_vendor("slider_handle"),
-    '[role="slider"]', "[aria-valuenow]",
-    '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
-    '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
-)
-REFRESH_SELECTORS: Sequence[str] = _of_every_vendor("refresh")
-PIECE_SELECTORS: Sequence[str] = (*_of_every_vendor("piece"), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]')
+
+_DETECTED_BY = ("challenge", "checkbox", "widget")
+
+
+class SelectorTable:
+    """The table one solver detects and drives with: the built-in vendors, plus the caller's own entry when given.
+
+    A custom entry is reported as `Vendor.UNKNOWN` and searched before the built-in vendors, because the caller
+    wrote it for the page in front of them.
+    """
+
+    def __init__(self, custom: Optional[VendorSelectors] = None) -> None:
+        if custom is not None and not any(getattr(custom, key) for key in _DETECTED_BY):
+            raise ValueError("custom_selectors names nothing to detect: give it a `widget`, `challenge` or `checkbox`")
+        self.selectors: Mapping[Vendor, VendorSelectors] = (
+            {Vendor.UNKNOWN: custom, **{v: s for v, s in SELECTORS.items() if v != Vendor.UNKNOWN}}
+            if custom is not None else SELECTORS)
+        self.vendors: Sequence[Tuple[Vendor, VendorSelectors]] = tuple(self.selectors.items())
+        # Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then
+        # inline widgets.
+        self.widget_probes: Sequence[WidgetProbe] = tuple(
+            WidgetProbe(vendor, role, selector)
+            for role, key in zip((FrameRole.CHALLENGE, FrameRole.CHECKBOX, FrameRole.UNKNOWN), _DETECTED_BY)
+            for vendor, s in self.vendors
+            for selector in getattr(s, key))
+        self.enclave: Sequence[str] = self._of_every_vendor("enclave")
+        self.response: Sequence[str] = tuple(s.response for _, s in self.vendors if s.response)
+        self.accepted: Sequence[str] = tuple(s.accepted for _, s in self.vendors if s.accepted)
+        # A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
+        self.submit: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip", "confirm")),
+                                      *self._of_every_vendor("submit"))
+        # Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
+        # reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
+        self.text_input_vendor: Sequence[str] = self._of_every_vendor("text_input")
+        self.text_input: Sequence[str] = (
+            *self.text_input_vendor,
+            'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
+            'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
+            "input[type=text]", "input:not([type])", "input[type=tel]", "textarea",
+        )
+        # `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove.
+        self.slider_handle: Sequence[str] = (
+            *self._of_every_vendor("slider_handle"),
+            '[role="slider"]', "[aria-valuenow]",
+            '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
+            '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
+        )
+        self.refresh: Sequence[str] = self._of_every_vendor("refresh")
+        self.piece: Sequence[str] = (*self._of_every_vendor("piece"), '[class*="puzzle"][class*="piece"]',
+                                     '[class*="jigsaw"]')
+
+    def _of_every_vendor(self, key: str) -> Sequence[str]:
+        assert key in {f.name for f in fields(VendorSelectors)}
+        return tuple(s for _, v in self.vendors for s in getattr(v, key))
+
+
+DEFAULT_TABLE = SelectorTable()
+VENDORS = DEFAULT_TABLE.vendors
+WIDGET_PROBES = DEFAULT_TABLE.widget_probes
+ENCLAVE_SELECTORS = DEFAULT_TABLE.enclave
+RESPONSE_SELECTORS = DEFAULT_TABLE.response
+ACCEPTED_SELECTORS = DEFAULT_TABLE.accepted
+SUBMIT_SELECTORS = DEFAULT_TABLE.submit
+TEXT_INPUT_VENDOR_SELECTORS = DEFAULT_TABLE.text_input_vendor
+TEXT_INPUT_SELECTORS = DEFAULT_TABLE.text_input
+SLIDER_HANDLE_SELECTORS = DEFAULT_TABLE.slider_handle
+REFRESH_SELECTORS = DEFAULT_TABLE.refresh
+PIECE_SELECTORS = DEFAULT_TABLE.piece

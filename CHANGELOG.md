@@ -5,6 +5,15 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ## [Unreleased]
 
+### Added
+
+- **Your own selectors.** `customSelectors` (`custom_selectors=` in Python, a
+  `VendorSelectors`) is one vendor entry of your own, in the built-in table's
+  shape, for a captcha the table does not know. It is detected before every
+  built-in vendor, reported as `unknown`, and its submit, text box, refresh and
+  slider controls are tried before the generic ones. An entry that names no
+  `widget`, `challenge` or `checkbox` is refused when the solver is built.
+
 ### Changed
 
 - **`mouse` mode hands a browser that humanises its own pointer one move per
