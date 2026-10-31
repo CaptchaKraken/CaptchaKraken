@@ -548,6 +548,11 @@ class PageSolver:
         if target is None:
             return
         target.sampling = sampling = planner.sampling_for_level(self._resample_level)
+        # A pointer model is an argmax and samples nothing. Once an answer has come back unchanged and refused,
+        # every ask on this board names the answers already tried, and the pointer returns its likeliest other one.
+        target.avoid_refused = self._resample_level > 0
+        if not self._resample_level and hasattr(target, "pointer_answers"):
+            target.pointer_answers.clear()
         if sampling:
             _log(f"[resample] temperature {sampling['temperature']}, seed {sampling['seed']}")
 
@@ -1944,6 +1949,10 @@ class PageSolver:
             clicked_this_round: List[int] = []
             for bbox in bboxes:
                 cell = self._bbox_to_cell(bbox, session.grid_boxes, session.screenshot_w, session.screenshot_h)
+                if cell is not None and cell in clicked_this_round:
+                    # Two points in one tile: a second press deselects what the first selected.
+                    _log(f"[recaptcha-grid] round {round_index}: cell {cell} is already clicked; not pressing it again.")
+                    continue
                 self._execute_click(page, {"target_bounding_box": bbox}, element_box)
                 if cell is not None:
                     clicked_order.append(cell)

@@ -7,6 +7,8 @@ POST /v1/pointer
     {"image": "<base64 PNG/JPEG>"}                    a still, as captured
     {"frames": ["<base64 JPEG>", ...], "fps": 5.0}    a video, `clipvideo`-cut
     {"marked": false}                                 optional: skip the detector
+    {"avoid": [answer, ...]}                          optional: answers already refused on this
+                                                      board; the likeliest other one comes back
 -> {"answer": {...}, "elements": [{"id", "class", "box", "score"}], "size": [W, H]}
 
 `elements` are in the pixels of the board as the model saw it (`size`), numbered
@@ -28,6 +30,8 @@ from PIL import Image
 from . import layout as L
 
 PATH = "/v1/pointer"
+#: Refused answers one request may name: more than a solve's loops ever perform on one board.
+MAX_AVOID = 32
 
 
 def _image(b64: str) -> Image.Image:
@@ -39,11 +43,16 @@ def parse(body: Dict) -> Dict:
     if ("image" in body) == ("frames" in body):
         raise ValueError("send exactly one of image or frames")
     marked = bool(body.get("marked", True))
+    avoid = body.get("avoid") or []
+    if not isinstance(avoid, list) or not all(isinstance(a, dict) for a in avoid):
+        raise ValueError("avoid is a list of earlier answers")
+    if len(avoid) > MAX_AVOID:
+        raise ValueError(f"{len(avoid)} answers to avoid; at most {MAX_AVOID}")
     history = body.get("history") or []
     if "image" in body:
         if len(history) > L.MAX_HISTORY:
             raise ValueError(f"{len(history)} earlier screens; at most {L.MAX_HISTORY}")
-        return {"image": _image(body["image"]), "marked": marked,
+        return {"image": _image(body["image"]), "marked": marked, "avoid": avoid,
                 "history": [_image(h) for h in history]}
     if history:
         raise ValueError("a video board carries no earlier screens")
@@ -53,7 +62,7 @@ def parse(body: Dict) -> Dict:
     frames = [np.asarray(Image.open(io.BytesIO(base64.b64decode(f))).convert("RGB")) for f in body["frames"]]
     if len(frames) < 2:
         raise ValueError("a video needs at least two frames")
-    return {"frames": frames, "marked": False}
+    return {"frames": frames, "marked": False, "avoid": avoid}
 
 
 def reply(result: Dict) -> Dict:

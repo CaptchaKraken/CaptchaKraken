@@ -1654,6 +1654,11 @@ export class CaptchaKrakenSolver {
       const clickedThisRound: number[] = [];
       for (const bbox of bboxes) {
         const cell = this.bboxToCell(bbox, session.gridBoxes, session.screenshotW, session.screenshotH);
+        if (cell != null && clickedThisRound.includes(cell)) {
+          // Two points in one tile: a second press deselects what the first selected.
+          console.log(`[recaptcha-grid] round ${round}: cell ${cell} is already clicked; not pressing it again.`);
+          continue;
+        }
         await this.executeClick(page, captchaElement, { action: ActionKind.CLICK, target_bounding_box: bbox } as ClickAction, elementBox);
         if (cell != null) { clickedOrder.push(cell); clickedThisRound.push(cell); }
         await this.human.pause(PauseKind.BETWEEN);
