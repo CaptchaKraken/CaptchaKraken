@@ -189,46 +189,90 @@ export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
   [Vendor.UNKNOWN]: { hosts: [] },
 };
 
-export const VENDORS = Object.entries(SELECTORS) as ReadonlyArray<readonly [Vendor, VendorSelectors]>;
-
-type ListKey = { [K in keyof VendorSelectors]-?: VendorSelectors[K] extends readonly string[] | undefined ? K : never }[keyof VendorSelectors];
-const ofEveryVendor = (key: ListKey): readonly string[] => VENDORS.flatMap(([, s]) => s[key] ?? []);
-
 export interface WidgetProbe {
   readonly vendor: Vendor;
   readonly role: FrameRole;
   readonly selector: string;
 }
 
-/** Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then inline widgets. */
-export const WIDGET_PROBES: ReadonlyArray<WidgetProbe> = ([
-  [FrameRole.CHALLENGE, 'challenge'], [FrameRole.CHECKBOX, 'checkbox'], [FrameRole.UNKNOWN, 'widget'],
-] as const).flatMap(([role, key]) => VENDORS.flatMap(([vendor, s]) => (s[key] ?? []).map((selector) => ({ vendor, role, selector }))));
-
-export const ENCLAVE_SELECTORS: readonly string[] = ofEveryVendor('enclave');
-export const RESPONSE_SELECTORS: readonly string[] = VENDORS.flatMap(([, s]) => s.response ?? []);
-export const ACCEPTED_SELECTORS: readonly string[] = VENDORS.flatMap(([, s]) => s.accepted ?? []);
-
 const lower = "translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";
 /** `.//` keeps the xpath relative so a host-page widget cannot reach the form's own submit. */
 export const submitByText = (text: string): string =>
   `xpath=.//button[contains(${lower}, '${text}')] | .//div[@role="button" and contains(${lower}, '${text}')]`;
-/** A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks. */
-export const SUBMIT_SELECTORS: readonly string[] = [...['verify', 'next', 'submit', 'skip', 'confirm'].map(submitByText), ...ofEveryVendor('submit')];
 
-// Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
-// reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
-export const TEXT_INPUT_VENDOR_SELECTORS: readonly string[] = ofEveryVendor('textInput');
-export const TEXT_INPUT_SELECTORS: readonly string[] = [...TEXT_INPUT_VENDOR_SELECTORS,
-  'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
-  'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
-  'input[type=text]', 'input:not([type])', 'input[type=tel]', 'textarea',
-];
-// `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove.
-export const SLIDER_HANDLE_SELECTORS: readonly string[] = [...ofEveryVendor('sliderHandle'),
-  '[role="slider"]', '[aria-valuenow]',
-  '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
-  '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
-];
-export const REFRESH_SELECTORS: readonly string[] = ofEveryVendor('refresh');
-export const PIECE_SELECTORS: readonly string[] = [...ofEveryVendor('piece'), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]'];
+/** Your own vendor entry: the built-in schema, with `hosts` optional. */
+export type CustomSelectors = Omit<VendorSelectors, 'hosts'> & { readonly hosts?: readonly string[] };
+
+type ListKey = { [K in keyof VendorSelectors]-?: VendorSelectors[K] extends readonly string[] | undefined ? K : never }[keyof VendorSelectors];
+const DETECTED_BY = [[FrameRole.CHALLENGE, 'challenge'], [FrameRole.CHECKBOX, 'checkbox'], [FrameRole.UNKNOWN, 'widget']] as const;
+
+/**
+ * The table one solver detects and drives with: the built-in vendors, plus the caller's own entry when given. A custom
+ * entry is reported as `Vendor.UNKNOWN` and searched before the built-in vendors, because the caller wrote it for the
+ * page in front of them.
+ */
+export class SelectorTable {
+  readonly selectors: Readonly<Record<Vendor, VendorSelectors>>;
+  readonly vendors: ReadonlyArray<readonly [Vendor, VendorSelectors]>;
+  /** Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then inline widgets. */
+  readonly widgetProbes: ReadonlyArray<WidgetProbe>;
+  readonly enclave: readonly string[];
+  readonly response: readonly string[];
+  readonly accepted: readonly string[];
+  /** A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks. */
+  readonly submit: readonly string[];
+  readonly textInputVendor: readonly string[];
+  /**
+   * Vendor-named first, generic last: the driver takes the first visible match, and a generic selector reached before
+   * the vendor's own is how a captcha's answer ends up in a login form's username box.
+   */
+  readonly textInput: readonly string[];
+  /** `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove. */
+  readonly sliderHandle: readonly string[];
+  readonly refresh: readonly string[];
+  readonly piece: readonly string[];
+
+  constructor(custom?: CustomSelectors) {
+    if (custom && !DETECTED_BY.some(([, key]) => custom[key]?.length)) {
+      throw new Error('customSelectors names nothing to detect: give it a `widget`, `challenge` or `checkbox`');
+    }
+    const builtIn = Object.entries(SELECTORS) as Array<[Vendor, VendorSelectors]>;
+    this.vendors = custom
+      ? [[Vendor.UNKNOWN, { hosts: [], ...custom }], ...builtIn.filter(([v]) => v !== Vendor.UNKNOWN)]
+      : builtIn;
+    this.selectors = Object.fromEntries(this.vendors) as Record<Vendor, VendorSelectors>;
+    const every = (key: ListKey): readonly string[] => this.vendors.flatMap(([, s]) => s[key] ?? []);
+    this.widgetProbes = DETECTED_BY.flatMap(([role, key]) =>
+      this.vendors.flatMap(([vendor, s]) => (s[key] ?? []).map((selector) => ({ vendor, role, selector }))));
+    this.enclave = every('enclave');
+    this.response = this.vendors.flatMap(([, s]) => s.response ?? []);
+    this.accepted = this.vendors.flatMap(([, s]) => s.accepted ?? []);
+    this.submit = [...['verify', 'next', 'submit', 'skip', 'confirm'].map(submitByText), ...every('submit')];
+    this.textInputVendor = every('textInput');
+    this.textInput = [...this.textInputVendor,
+      'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
+      'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
+      'input[type=text]', 'input:not([type])', 'input[type=tel]', 'textarea',
+    ];
+    this.sliderHandle = [...every('sliderHandle'),
+      '[role="slider"]', '[aria-valuenow]',
+      '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
+      '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
+    ];
+    this.refresh = every('refresh');
+    this.piece = [...every('piece'), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]'];
+  }
+}
+
+export const DEFAULT_TABLE = new SelectorTable();
+export const VENDORS = DEFAULT_TABLE.vendors;
+export const WIDGET_PROBES = DEFAULT_TABLE.widgetProbes;
+export const ENCLAVE_SELECTORS = DEFAULT_TABLE.enclave;
+export const RESPONSE_SELECTORS = DEFAULT_TABLE.response;
+export const ACCEPTED_SELECTORS = DEFAULT_TABLE.accepted;
+export const SUBMIT_SELECTORS = DEFAULT_TABLE.submit;
+export const TEXT_INPUT_VENDOR_SELECTORS = DEFAULT_TABLE.textInputVendor;
+export const TEXT_INPUT_SELECTORS = DEFAULT_TABLE.textInput;
+export const SLIDER_HANDLE_SELECTORS = DEFAULT_TABLE.sliderHandle;
+export const REFRESH_SELECTORS = DEFAULT_TABLE.refresh;
+export const PIECE_SELECTORS = DEFAULT_TABLE.piece;

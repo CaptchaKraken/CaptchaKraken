@@ -24,9 +24,7 @@ from .action_types import CaptchaAction
 from .humanize import Humanizer, hold, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
                     RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
-from .selectors import (ACCEPTED_SELECTORS, ENCLAVE_SELECTORS, PIECE_SELECTORS, REFRESH_SELECTORS, RESPONSE_SELECTORS,
-                        SELECTORS, SLIDER_HANDLE_SELECTORS, SUBMIT_SELECTORS, TEXT_INPUT_SELECTORS,
-                        TEXT_INPUT_VENDOR_SELECTORS, VENDORS, WIDGET_PROBES, VendorSelectors, WidgetProbe)
+from .selectors import DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe
 from .solver import AnimatedRecording, CaptchaSolver, UnsupportedCaptchaError, cut_recording
 from .timing import PhaseBudget, timings_enabled
 from .verdicts import RoundVerdict, VerdictLog
@@ -265,6 +263,8 @@ HOLD_MAX_MS = 12000
 class PageSolverConfig:
     humanization: Optional[HumanizationMode] = None
     humanizer: Optional[Humanizer] = None
+    # Your own vendor entry, for a captcha the built-in table does not know. Detected before every built-in vendor.
+    custom_selectors: Optional[VendorSelectors] = None
     touch_driver: Optional[Any] = None
     touch_transform: Optional[Dict[str, Any]] = None
     starting_mouse_position: Optional[Tuple[float, float]] = None
@@ -375,10 +375,10 @@ def _frame_of(at: Any) -> Optional[Any]:
         return None
 
 
-def _host_scopes(page: Any) -> List[Any]:
+def _host_scopes(page: Any, enclaves: Sequence[str]) -> List[Any]:
     """Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave
     is skipped because Playwright judges an element visible within its own document, whatever its frame's visibility."""
-    return [page, *(f for f in map(_frame_of, _visible(page, ENCLAVE_SELECTORS)) if f is not None)]
+    return [page, *(f for f in map(_frame_of, _visible(page, enclaves)) if f is not None)]
 
 
 def _visible_in(scopes: Sequence[Any], selectors: Sequence[str]) -> List[Any]:
@@ -429,6 +429,8 @@ _RESOURCES_JS = """() => {
 class PageSolver:
     """Drives one Playwright-compatible `page` through a captcha. Reusable across solves."""
 
+    _sel: SelectorTable = DEFAULT_TABLE
+
     def __init__(self, config: Optional[PageSolverConfig] = None,
                  solver: Optional[CaptchaSolver] = None, **solver_kwargs: Any) -> None:
         self.config = config or PageSolverConfig()
@@ -436,6 +438,7 @@ class PageSolver:
             solver_kwargs.setdefault("expert", self.config.expert)
         self._solver = solver or CaptchaSolver(**solver_kwargs)
         self._human: Humanizer = resolve_humanizer(self.config)
+        self._sel = SelectorTable(self.config.custom_selectors)
         self._last_submit_frame_hash: Optional[str] = None
         self._deadline_ms: Optional[float] = None
         self._budget: Optional[PhaseBudget] = None
@@ -814,7 +817,7 @@ class PageSolver:
     def _execute_refresh(self, page: Any, scope: Any, action: Dict[str, Any],
                          element_box: Optional[Dict[str, float]]) -> bool:
         """Deal a new puzzle: the vendor's own control, else the model's point on one. False when there is neither."""
-        control = self._find_control(scope, REFRESH_SELECTORS)
+        control = self._find_control(scope, self._sel.refresh)
         if control is not None:
             self._acted_on_board = True
             self._move_and_click(page, control)
@@ -846,10 +849,10 @@ class PageSolver:
         Only vendor-named selectors widen: BotDetect's `.BDC_CaptchaDiv` is 280x50 and holds only the image,
         with `#captchaCode` in a sibling div. The generic tail there would take a login form's own box.
         """
-        inside = self._find_control(scope, TEXT_INPUT_SELECTORS)
+        inside = self._find_control(scope, self._sel.text_input)
         if inside is not None or at is None:
             return inside
-        around = (self._find_control(at.locator(f"xpath={axis}"), TEXT_INPUT_VENDOR_SELECTORS)
+        around = (self._find_control(at.locator(f"xpath={axis}"), self._sel.text_input_vendor)
                   for axis in ("ancestor::fieldset[1]", "ancestor::form[1]"))
         return next((found for found in around if found is not None), None)
 
@@ -893,8 +896,8 @@ class PageSolver:
         if action.get("handle_bounding_box"):
             handle, seed = at(action["handle_bounding_box"]), at(action["source_bounding_box"])
         else:
-            slider = self._find_control(scope, SLIDER_HANDLE_SELECTORS)
-            piece = None if slider is not None else self._find_control(scope, PIECE_SELECTORS)
+            slider = self._find_control(scope, self._sel.slider_handle)
+            piece = None if slider is not None else self._find_control(scope, self._sel.piece)
             box = (slider or piece).bounding_box() if (slider or piece) is not None else None
             if not box:
                 _log("slide action, but the widget has neither a slider nor a draggable piece")
@@ -982,12 +985,12 @@ class PageSolver:
             except Exception:
                 return 0
 
-        return any(count(p.selector) > 0 for p in WIDGET_PROBES)
+        return any(count(p.selector) > 0 for p in self._sel.widget_probes)
 
     def detect_captcha(self, page: Any) -> Optional[Widget]:
         """Open challenges first, then unsolved checkboxes, then the inline vendors."""
-        scopes = _host_scopes(page)
-        for probe in WIDGET_PROBES:
+        scopes = _host_scopes(page, self._sel.enclave)
+        for probe in self._sel.widget_probes:
             at = next(iter(_visible_in(scopes, (probe.selector,))), None)
             if at is None or self._already_accepted(scopes, at, probe):
                 continue
@@ -997,7 +1000,7 @@ class PageSolver:
 
     def _already_accepted(self, scopes: Sequence[Any], at: Any, probe: WidgetProbe) -> bool:
         """A checkbox the vendor has already accepted is not a captcha to solve."""
-        s = SELECTORS[probe.vendor]
+        s = self._sel.selectors[probe.vendor]
         if probe.role != FrameRole.CHECKBOX:
             return False
         return bool(s.response and self._has_value(scopes, s.response)) or bool(s.checked and self._checked_in(at, s.checked))
@@ -1009,13 +1012,13 @@ class PageSolver:
         except Exception:
             return []
         blob = " ".join(str(n) for n in (names or []))
-        return [vendor for vendor, s in VENDORS if any(h in blob for h in s.hosts)]
+        return [vendor for vendor, s in self._sel.vendors if any(h in blob for h in s.hosts)]
 
     def _unmatched_vendor_frames(self, page: Any) -> List[Vendor]:
         """Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame
         (an invisible badge, an enclave) is not a widget, so what is left is markup the table no longer matches."""
-        scopes = _host_scopes(page)
-        return [vendor for vendor, s in VENDORS if s.hosts and len(_visible_in(scopes, [f'iframe[src*="{h}"]' for h in s.hosts]))
+        scopes = _host_scopes(page, self._sel.enclave)
+        return [vendor for vendor, s in self._sel.vendors if s.hosts and len(_visible_in(scopes, [f'iframe[src*="{h}"]' for h in s.hosts]))
                 > len(_visible_in(scopes, s.passive))]
 
     def _no_widget_message(self, page: Any) -> str:
@@ -1047,9 +1050,9 @@ class PageSolver:
 
     def _is_blocked(self, page: Any) -> bool:
         """The vendor showing its refusal screen: rate-limited or flagged, with no board to answer."""
-        scopes = _host_scopes(page)
-        for probe in WIDGET_PROBES:
-            blocked = SELECTORS[probe.vendor].blocked
+        scopes = _host_scopes(page, self._sel.enclave)
+        for probe in self._sel.widget_probes:
+            blocked = self._sel.selectors[probe.vendor].blocked
             if probe.role != FrameRole.CHALLENGE or not blocked:
                 continue
             at = next(iter(_visible_in(scopes, (probe.selector,))), None)
@@ -1066,11 +1069,11 @@ class PageSolver:
     def is_captcha_solved(self, page: Any) -> bool:
         """The vendor's own done signal: a response token, a painted success state, or a checked box."""
         try:
-            scopes = _host_scopes(page)
-            if any(self._has_value(scopes, s) for s in RESPONSE_SELECTORS) or _visible_in(scopes, ACCEPTED_SELECTORS):
+            scopes = _host_scopes(page, self._sel.enclave)
+            if any(self._has_value(scopes, s) for s in self._sel.response) or _visible_in(scopes, self._sel.accepted):
                 return True
-            for probe in WIDGET_PROBES:
-                checked = SELECTORS[probe.vendor].checked
+            for probe in self._sel.widget_probes:
+                checked = self._sel.selectors[probe.vendor].checked
                 if probe.role != FrameRole.CHECKBOX or not checked:
                     continue
                 at = next(iter(_visible_in(scopes, (probe.selector,))), None)
@@ -1083,9 +1086,9 @@ class PageSolver:
     def _is_challenge_freshly_rendered(self, page: Any) -> bool:
         """A next round has painted, as opposed to the answered frame animating closed."""
         try:
-            scopes = _host_scopes(page)
-            for probe in WIDGET_PROBES:
-                fresh = SELECTORS[probe.vendor].fresh
+            scopes = _host_scopes(page, self._sel.enclave)
+            for probe in self._sel.widget_probes:
+                fresh = self._sel.selectors[probe.vendor].fresh
                 if probe.role != FrameRole.CHALLENGE or not fresh:
                     continue
                 at = next(iter(_visible_in(scopes, (probe.selector,))), None)
@@ -1108,9 +1111,9 @@ class PageSolver:
     def _banner_kind(self, page: Any) -> Optional[RecaptchaBanner]:
         """Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error."""
         try:
-            scopes = _host_scopes(page)
-            for probe in WIDGET_PROBES:
-                banners = SELECTORS[probe.vendor].banners
+            scopes = _host_scopes(page, self._sel.enclave)
+            for probe in self._sel.widget_probes:
+                banners = self._sel.selectors[probe.vendor].banners
                 if probe.role != FrameRole.CHALLENGE or not banners:
                     continue
                 at = next(iter(_visible_in(scopes, (probe.selector,))), None)
@@ -1131,7 +1134,7 @@ class PageSolver:
         the checkbox picture with a drag.
         """
         box = self._checkbox_box(frame, widget.vendor) if frame is not None else (
-            widget.element if SELECTORS[widget.vendor].box else None)
+            widget.element if self._sel.selectors[widget.vendor].box else None)
         if box is not None:
             self._move_to_element(page, box)
         else:
@@ -1149,7 +1152,7 @@ class PageSolver:
 
         Turnstile's box is in a closed shadow root, and a frame can refuse access; both are found on screen instead.
         """
-        box = SELECTORS[vendor].box
+        box = self._sel.selectors[vendor].box
         if frame is None or not box:
             return None
         try:
@@ -1209,7 +1212,7 @@ class PageSolver:
                 _delay(self.config.post_solve_outcome_poll_ms)
 
     def _get_verify_button(self, scope: Any) -> Optional[Any]:
-        return self._find_control(scope, SUBMIT_SELECTORS)
+        return self._find_control(scope, self._sel.submit)
 
     # ── frames and polling ───────────────────────────────────────────────
 
@@ -1987,13 +1990,13 @@ class PageSolver:
             self._click_checkbox(page, widget, frame)
             return True, []
 
-        if frame and role == FrameRole.CHALLENGE and SELECTORS[puzzle_source].images:
+        if frame and role == FrameRole.CHALLENGE and self._sel.selectors[puzzle_source].images:
             if self._last_submit_frame_hash:
                 with self._phase(Phase.AWAIT_NEXT_ROUND):
                     self._wait_for_change_since(element, self._last_submit_frame_hash)
                 self._last_submit_frame_hash = None
             with self._phase(Phase.HCAPTCHA_IMAGES):
-                self._wait_for_board_images(frame, SELECTORS[puzzle_source])
+                self._wait_for_board_images(frame, self._sel.selectors[puzzle_source])
 
         # THE TWO QUESTIONS BELOW ARE PUT TO A PAINTED BOARD. Which expert answers the round is read out of
         # the DOM and whether the board cycles is read off its motion, and a widget that has not drawn yet

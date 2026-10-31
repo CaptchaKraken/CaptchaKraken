@@ -29,8 +29,7 @@ import { DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS } from './limits';
 import { resolvePythonCommand } from './python-command';
 import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
 import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
-import { SELECTORS, VENDORS, VendorSelectors, WIDGET_PROBES, WidgetProbe, ENCLAVE_SELECTORS, RESPONSE_SELECTORS, ACCEPTED_SELECTORS, SUBMIT_SELECTORS,
-  TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS, REFRESH_SELECTORS } from './selectors';
+import { DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe } from './selectors';
 
 const execFileAsync = promisify(execFile);
 /** The ceiling on one ask, matching the Python planner's own default. */
@@ -130,8 +129,8 @@ const frameOf = async (at: Locator): Promise<Frame | null> => (await (await hand
  * Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave is
  * skipped because Playwright judges an element visible within its own document, whatever its frame's visibility.
  */
-const hostScopes = async (page: Page): Promise<Scope[]> =>
-  [page, ...(await Promise.all((await visible(page, ENCLAVE_SELECTORS)).map(frameOf))).filter((f): f is Frame => f !== null)];
+const hostScopes = async (page: Page, enclaves: readonly string[]): Promise<Scope[]> =>
+  [page, ...(await Promise.all((await visible(page, enclaves)).map(frameOf))).filter((f): f is Frame => f !== null)];
 const visibleIn = async (scopes: readonly Scope[], selectors: readonly string[]): Promise<Locator[]> =>
   (await Promise.all(scopes.map((scope) => visible(scope, selectors)))).flat();
 const hasText = async (el: ElementHandle): Promise<boolean> => !!((await el.textContent().catch(() => null)) ?? '').trim();
@@ -261,6 +260,7 @@ export class CaptchaKrakenSolver {
   private videoBudgetMs = 0;
   private videoBudgetGranted = false;
   private human: Humanizer;
+  private sel: SelectorTable = DEFAULT_TABLE;
   private stepIndex = 0;
   private solveStartMs = 0;
   private cvWorker: ChildProcessWithoutNullStreams | null = null;
@@ -323,6 +323,7 @@ export class CaptchaKrakenSolver {
 
   constructor(config: CaptchaKrakenConfig = {}) {
     this.config = config;
+    if (config.customSelectors) this.sel = new SelectorTable(config.customSelectors);
     this.human = resolveHumanizer({ ...config, startingMousePosition: config.startingMousePosition ?? { x: 100, y: 100 } });
   }
 
@@ -667,12 +668,12 @@ export class CaptchaKrakenSolver {
   /** The vendor showing its refusal screen: rate-limited or flagged, with no board to answer. */
   private async isBlocked(page: Page): Promise<boolean> {
     try {
-      const probes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHALLENGE && SELECTORS[p.vendor].blocked);
-      const scopes = await hostScopes(page);
+      const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].blocked);
+      const scopes = await hostScopes(page, this.sel.enclave);
       const shown = await Promise.all(probes.map(async (p) => {
         const [at] = await visibleIn(scopes, [p.selector]);
         const frame = at && await frameOf(at);
-        return !!frame && (await Promise.all((SELECTORS[p.vendor].blocked ?? []).map((sel) => this.visibleWithText(frame, sel)))).some(Boolean);
+        return !!frame && (await Promise.all((this.sel.selectors[p.vendor].blocked ?? []).map((sel) => this.visibleWithText(frame, sel)))).some(Boolean);
       }));
       return shown.some(Boolean);
     } catch {
@@ -736,12 +737,12 @@ export class CaptchaKrakenSolver {
       return { didInteract: true, tokenUsage: [] };
     }
 
-    if (frame && frameRole === FrameRole.CHALLENGE && SELECTORS[puzzleSource].images) {
+    if (frame && frameRole === FrameRole.CHALLENGE && this.sel.selectors[puzzleSource].images) {
       if (this.lastSubmitFrameHash) {
         await this.ph(Phase.AWAIT_NEXT_ROUND, () => this.waitForChangeSince(captchaElement, this.lastSubmitFrameHash as string));
         this.lastSubmitFrameHash = null;
       }
-      await this.ph(Phase.HCAPTCHA_IMAGES, () => this.waitForBoardImages(frame, SELECTORS[puzzleSource]));
+      await this.ph(Phase.HCAPTCHA_IMAGES, () => this.waitForBoardImages(frame, this.sel.selectors[puzzleSource]));
     }
 
     // THE TWO QUESTIONS BELOW ARE PUT TO A PAINTED BOARD. Which expert answers the round is read out of the
@@ -1027,7 +1028,7 @@ export class CaptchaKrakenSolver {
    * checkbox picture with a drag.
    */
   private async clickCheckbox(page: Page, widget: Widget, frame: Frame | null): Promise<void> {
-    const box = frame ? await this.checkboxBox(frame, widget.vendor) : (SELECTORS[widget.vendor].box?.length ? widget.el : null);
+    const box = frame ? await this.checkboxBox(frame, widget.vendor) : (this.sel.selectors[widget.vendor].box?.length ? widget.el : null);
     if (box) await this.move(page, box);
     else {
       const at = await this.findCheckboxOnScreen(page, widget.el);
@@ -1044,7 +1045,7 @@ export class CaptchaKrakenSolver {
    * a closed shadow root, and a frame can refuse access; both are found on screen instead.
    */
   private async checkboxBox(frame: Frame | null, vendor: Vendor): Promise<ElementHandle | null> {
-    const box = SELECTORS[vendor].box;
+    const box = this.sel.selectors[vendor].box;
     if (!frame || !box?.length) return null;
     try {
       return await frame.waitForSelector(box.join(', '), { state: 'visible', timeout: this.config.detectionTimeoutMs ?? SOLVE_DEFAULTS.detectionTimeoutMs });
@@ -1108,7 +1109,7 @@ export class CaptchaKrakenSolver {
   }
 
   private getVerifyButton(scope: Scope): Promise<ElementHandle | null> {
-    return this.findControl(scope, SUBMIT_SELECTORS);
+    return this.findControl(scope, this.sel.submit);
   }
 
   /** Any element at `selector` carrying a non-blank value; response fields are hidden, so no visibility filter. */
@@ -1133,13 +1134,13 @@ export class CaptchaKrakenSolver {
 
   /** Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error. */
   private async bannerKind(page: Page): Promise<RecaptchaBanner | null> {
-    const probes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHALLENGE && SELECTORS[p.vendor].banners);
-    const scopes = await hostScopes(page);
+    const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].banners);
+    const scopes = await hostScopes(page, this.sel.enclave);
     const kinds = await Promise.all(probes.map(async (p) => {
       const [at] = await visibleIn(scopes, [p.selector]);
       const frame = at && await frameOf(at);
       if (!frame) return null;
-      const shown = await Promise.all((SELECTORS[p.vendor].banners ?? []).map(async ([sel, kind]) => (await this.visibleWithText(frame, sel)) ? kind : null));
+      const shown = await Promise.all((this.sel.selectors[p.vendor].banners ?? []).map(async ([sel, kind]) => (await this.visibleWithText(frame, sel)) ? kind : null));
       return shown.find((k) => k !== null) ?? null;
     }));
     return kinds.find((k) => k !== null) ?? null;
@@ -1148,14 +1149,14 @@ export class CaptchaKrakenSolver {
   /** The vendor's own done signal: a response token, a painted success state, or a checked box. */
   private async isCaptchaSolved(page: Page): Promise<boolean> {
     try {
-      const checkboxes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHECKBOX && SELECTORS[p.vendor].checked);
-      const scopes = await hostScopes(page);
+      const checkboxes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHECKBOX && this.sel.selectors[p.vendor].checked);
+      const scopes = await hostScopes(page, this.sel.enclave);
       const signals = await Promise.all([
-        ...RESPONSE_SELECTORS.map((s) => this.hasValue(scopes, s)),
-        visibleIn(scopes, ACCEPTED_SELECTORS).then((found) => found.length > 0),
+        ...this.sel.response.map((s) => this.hasValue(scopes, s)),
+        visibleIn(scopes, this.sel.accepted).then((found) => found.length > 0),
         ...checkboxes.map(async (p) => {
           const [at] = await visibleIn(scopes, [p.selector]);
-          return !!at && this.checkedIn(at, SELECTORS[p.vendor].checked as string);
+          return !!at && this.checkedIn(at, this.sel.selectors[p.vendor].checked as string);
         }),
       ]);
       return signals.some(Boolean);
@@ -1167,14 +1168,14 @@ export class CaptchaKrakenSolver {
   /** A next round has painted, as opposed to the answered frame animating closed. */
   private async isChallengeFreshlyRendered(page: Page): Promise<boolean> {
     try {
-      const probes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHALLENGE && SELECTORS[p.vendor].fresh);
-      const scopes = await hostScopes(page);
+      const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].fresh);
+      const scopes = await hostScopes(page, this.sel.enclave);
       const fresh = await Promise.all(probes.map(async (p) => {
         const [at] = await visibleIn(scopes, [p.selector]);
         const el = at && await handleOf(at);
         if (!el || (this.lastSubmitFrameHash && (await this.elementFrameHash(el)) === this.lastSubmitFrameHash)) return false;
         const frame = await el.contentFrame();
-        return !!frame && this.visibleWithText(frame, SELECTORS[p.vendor].fresh as string);
+        return !!frame && this.visibleWithText(frame, this.sel.selectors[p.vendor].fresh as string);
       }));
       return fresh.some(Boolean);
     } catch {
@@ -1218,13 +1219,13 @@ export class CaptchaKrakenSolver {
       return [];
     }
     const blob = names.join(' ');
-    return VENDORS.filter(([, s]) => s.hosts.some((h) => blob.includes(h))).map(([vendor]) => vendor);
+    return this.sel.vendors.filter(([, s]) => s.hosts.some((h) => blob.includes(h))).map(([vendor]) => vendor);
   }
 
   /** Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame (an invisible badge, an enclave) is not a widget, so what is left is markup the table no longer matches. */
   private async unmatchedVendorFrames(page: Page): Promise<Vendor[]> {
-    const scopes = await hostScopes(page);
-    const counts = await Promise.all(VENDORS.map(async ([vendor, s]) => {
+    const scopes = await hostScopes(page, this.sel.enclave);
+    const counts = await Promise.all(this.sel.vendors.map(async ([vendor, s]) => {
       if (!s.hosts.length) return null;
       const [frames, passive] = await Promise.all([visibleIn(scopes, s.hosts.map((h) => `iframe[src*="${h}"]`)), visibleIn(scopes, s.passive ?? [])]);
       return frames.length > passive.length ? vendor : null;
@@ -1250,13 +1251,13 @@ export class CaptchaKrakenSolver {
    * count: without them this port failed fast in under a second on every GeeTest/Yidun page and disagreed with Python in Tier 3.
    */
   public async hasInteractiveWidgetInDom(page: Page): Promise<boolean> {
-    return (await Promise.all(WIDGET_PROBES.map((p) => page.locator(p.selector).count().catch(() => 0)))).some((n) => n > 0);
+    return (await Promise.all(this.sel.widgetProbes.map((p) => page.locator(p.selector).count().catch(() => 0)))).some((n) => n > 0);
   }
 
   /** Open challenges first, then unsolved checkboxes, then the inline vendors; every probe is queried at once. */
   public async detectCaptcha(page: Page): Promise<Widget | null> {
-    const scopes = await hostScopes(page);
-    const found = await Promise.all(WIDGET_PROBES.map(async (p) => {
+    const scopes = await hostScopes(page, this.sel.enclave);
+    const found = await Promise.all(this.sel.widgetProbes.map(async (p) => {
       const [at] = await visibleIn(scopes, [p.selector]);
       return at && !(await this.alreadyAccepted(scopes, at, p)) ? { ...p, at } : null;
     }));
@@ -1267,7 +1268,7 @@ export class CaptchaKrakenSolver {
 
   /** A checkbox the vendor has already accepted is not a captcha to solve. */
   private async alreadyAccepted(scopes: readonly Scope[], at: Locator, { role, vendor }: WidgetProbe): Promise<boolean> {
-    const { response, checked } = SELECTORS[vendor];
+    const { response, checked } = this.sel.selectors[vendor];
     if (role !== FrameRole.CHECKBOX) return false;
     const [token, box] = await Promise.all([!!response && this.hasValue(scopes, response), !!checked && this.checkedIn(at, checked)]);
     return token || box;
@@ -2598,7 +2599,7 @@ export class CaptchaKrakenSolver {
 
   /** Deal a new puzzle: the vendor's own control, else the model's point on one. False when there is neither. */
   private async executeRefresh(page: Page, element: ElementHandle, scope: Scope, action: RefreshAction, elementBox: Box | null): Promise<boolean> {
-    const control = await this.findControl(scope, REFRESH_SELECTORS);
+    const control = await this.findControl(scope, this.sel.refresh);
     if (control) {
       this.actedOnBoard = true;
       await this.moveAndClick(page, control);
@@ -2632,9 +2633,9 @@ export class CaptchaKrakenSolver {
    * BotDetect, whose 280x50 `.BDC_CaptchaDiv` holds only the image while `#captchaCode` sits in a sibling div.
    */
   private async answerBox(scope: Scope, at?: Locator | null): Promise<ElementHandle | null> {
-    const inside = await this.findControl(scope, TEXT_INPUT_SELECTORS);
+    const inside = await this.findControl(scope, this.sel.textInput);
     if (inside !== null || !at) return inside;
-    const around = await Promise.all(['ancestor::fieldset[1]', 'ancestor::form[1]'].map((axis) => this.findControl(at.locator(`xpath=${axis}`), TEXT_INPUT_VENDOR_SELECTORS)));
+    const around = await Promise.all(['ancestor::fieldset[1]', 'ancestor::form[1]'].map((axis) => this.findControl(at.locator(`xpath=${axis}`), this.sel.textInputVendor)));
     return around.find((h) => h !== null) ?? null;
   }
 
@@ -2687,8 +2688,8 @@ export class CaptchaKrakenSolver {
       handle = at(action.handle_bounding_box);
       seed = at(action.source_bounding_box);
     } else {
-      const slider = await this.findControl(scope, SLIDER_HANDLE_SELECTORS);
-      const piece = slider ? null : await this.findControl(scope, PIECE_SELECTORS);
+      const slider = await this.findControl(scope, this.sel.sliderHandle);
+      const piece = slider ? null : await this.findControl(scope, this.sel.piece);
       const box = await (slider ?? piece)?.boundingBox().catch(() => null);
       if (!box) {
         console.warn('Slide action, but the widget has neither a slider nor a draggable piece.');
