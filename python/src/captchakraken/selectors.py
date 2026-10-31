@@ -54,6 +54,9 @@ class VendorSelectors:
     piece: Sequence[str] = ()
     # Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.
     refresh: Sequence[str] = ()
+    # A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching
+    # the answer's `to` is not a release, and the hold lasts until the widget says it is done.
+    hold_completes: bool = False
 
 
 SELECTORS: Mapping[Vendor, VendorSelectors] = {
@@ -165,6 +168,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
     Vendor.HUMAN: VendorSelectors(
         hosts=(),
         widget=("#px-captcha",),
+        hold_completes=True,
     ),
     # The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.
     Vendor.AWSWAF: VendorSelectors(
@@ -191,6 +195,7 @@ SELECTORS: Mapping[Vendor, VendorSelectors] = {
     Vendor.FUNCAPTCHA: VendorSelectors(
         hosts=("arkoselabs.com",),
         widget=('iframe[src*="arkoselabs.com"]', 'iframe[src*="ec-game-core/game-core"]'),
+        hold_completes=True,
     ),
     # Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.
     Vendor.PROTON: VendorSelectors(

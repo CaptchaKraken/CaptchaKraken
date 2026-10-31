@@ -717,12 +717,15 @@ class PageSolver:
                                   element_box: Dict[str, float], await_keyframe: str) -> None:
         self._execute_click(page, action, element_box, element, await_keyframe)
 
-    def _execute_hold(self, page: Any, action: Dict[str, Any], element_box: Dict[str, float], element: Any) -> bool:
+    def _execute_hold(self, page: Any, action: Dict[str, Any], element_box: Dict[str, float], element: Any,
+                      completes_itself: bool = False) -> bool:
         """Press-and-hold until the widget completes: True when it did, False when the cap ran out.
 
         Complete is the vendor's done signal, the widget closing, or its picture having changed (the fill)
         and then sat still for HOLD_SETTLE_MS. A widget that draws no progress at all is held to HOLD_MAX_MS.
         When the answer names the fill's line, the fill reaching its end is complete too: see `_fill_reached`.
+        Except on a widget that `completes_itself` (HUMAN's button): it verifies only once it has shown its
+        done state, and letting go AT full resets it, so only its own signals end the hold.
         """
         self._acted_on_board = True
         rel = self._click_point_for(action, element_box)
@@ -733,7 +736,7 @@ class PageSolver:
         first = self._element_frame_hash(element)
         seen = {"hash": first, "since": time.monotonic(), "changed": False}
         line = action.get("fill_from_bounding_box") and action.get("fill_to_bounding_box")
-        shots = (_tmp_png("hold"), _tmp_png("hold")) if line else None
+        shots = (_tmp_png("hold"), _tmp_png("hold")) if line and not completes_itself else None
         looks: List[Dict[str, Any]] = []
 
         def done() -> bool:
@@ -2140,7 +2143,7 @@ class PageSolver:
                         performed = answered = True
                 elif kind == ActionKind.HOLD:
                     # The widget submits itself when the hold completes, like a slide on release.
-                    self._execute_hold(page, action, element_box, element)
+                    self._execute_hold(page, action, element_box, element, self._sel.selectors[widget.vendor].hold_completes)
                     performed = slid = True
                 elif kind == ActionKind.REFRESH:
                     # Nothing after a refresh, Verify included, belongs to the board it replaces.
