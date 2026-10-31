@@ -25,6 +25,15 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Fixed
 
+- **A HUMAN or FunCaptcha press-and-hold is held until it says it is done.**
+  These buttons complete on their own once full and verify only after drawing
+  their done state; let go at full and they reset. When the answer named the
+  fill's end, both drivers let go the moment the fill reached it, and a correct
+  answer usually failed. They now hold until the widget reports success,
+  closes, or its finished picture sits still. A hold graded on where it is let
+  go, such as a line filled to a mark, is still released at the mark; a
+  `customSelectors` / `custom_selectors` entry is that kind unless it sets
+  `holdCompletes` / `hold_completes`.
 - **Cloudflare Turnstile's tick box is found.** The on-screen finder looked only
   for a dark outline on a light panel, so a dark-theme widget (and `auto` on a
   dark-mode system) reported "no tick box to click" on every attempt. It now

@@ -4,7 +4,8 @@ import { strict as assert } from 'node:assert';
 import test from 'node:test';
 
 import { hold, NullHumanizer } from './humanize.js';
-import { ActionKind } from './kinds.js';
+import { ActionKind, Vendor } from './kinds.js';
+import { SELECTORS, SelectorTable } from './selectors.js';
 import type { Page } from './playwright-types.js';
 
 class RecordingPage {
@@ -40,4 +41,17 @@ test('the press is released at the cap, and when the completion check throws', a
   const broken = new RecordingPage();
   await assert.rejects(hold(new NullHumanizer(), broken.asPage(), [100, 100], async () => { throw new Error('page went away'); }, 60_000));
   assert.equal(broken.events[broken.events.length - 1], 'up');
+});
+
+test('the vendors whose hold completes on its own are named, so the fill reaching its mark is not a release', () => {
+  // HUMAN's button verifies only once it has drawn its done state, and resets when let go at full.
+  assert.equal(SELECTORS[Vendor.HUMAN].holdCompletes, true);
+  assert.equal(SELECTORS[Vendor.FUNCAPTCHA].holdCompletes, true);
+  // A hold graded on where it lets go (a line to fill to a mark) is released at the mark.
+  assert.ok(!SELECTORS[Vendor.UNKNOWN].holdCompletes);
+});
+
+test('your own entry is released at its mark unless it says it completes', () => {
+  assert.ok(!new SelectorTable({ widget: ['#gauge'] }).selectors[Vendor.UNKNOWN].holdCompletes);
+  assert.equal(new SelectorTable({ widget: ['#button'], holdCompletes: true }).selectors[Vendor.UNKNOWN].holdCompletes, true);
 });

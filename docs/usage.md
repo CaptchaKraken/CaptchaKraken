@@ -452,6 +452,12 @@ entry must name at least one of `widget`, `challenge` or `checkbox`, or the
 solver refuses it at construction. `response` or `accepted` tells the solver the
 captcha passed; without either, it judges by the widget going away.
 
+A press-and-hold is let go where the answer says the fill should stop, which is
+right for a gauge read at a mark. A button that completes on its own once full,
+and starts over when let go early, wants `holdCompletes: true` /
+`hold_completes=True` instead: the solver then holds until the widget says it
+is done.
+
 ## Solve captchas as they appear
 
 `solve(page)` is a one-shot: it solves whatever challenge is on the page right

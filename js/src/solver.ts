@@ -982,7 +982,8 @@ export class CaptchaKrakenSolver {
           await this.emitStep(captchaElement, SolveStage.DRAG, 'drag', puzzleSource, frameRole, attempt, { action });
         } else if (action.action === ActionKind.HOLD) {
           // The widget submits itself when the hold completes, like a slide on release.
-          const completed = await this.executeHold(page, captchaElement, action as HoldAction, requireBox());
+          const completed = await this.executeHold(page, captchaElement, action as HoldAction, requireBox(),
+            this.sel.selectors[widget.vendor].holdCompletes ?? false);
           performedAction = slid = true;
           await this.emitStep(captchaElement, SolveStage.HOLD, completed ? 'held until the widget completed' : 'released the hold at the cap', puzzleSource, frameRole, attempt, { action });
         } else if (action.action === ActionKind.TYPE) {
@@ -2521,15 +2522,19 @@ export class CaptchaKrakenSolver {
   /**
    * Press-and-hold until the widget completes: true when it did, false when the cap ran out. Complete is the vendor's
    * done signal, the widget closing, or its picture having changed (the fill) and then sat still for HOLD_SETTLE_MS.
-   * When the answer names the fill's line, the fill reaching its end is complete too: see `fillReached`.
+   * When the answer names the fill's line, the fill reaching its end is complete too: see `fillReached`. Except on a
+   * widget that `completesItself` (HUMAN's button): it verifies only once it has shown its done state, and letting go
+   * AT full resets it, so only its own signals end the hold.
    */
-  private async executeHold(page: Page, element: ElementHandle, action: HoldAction, elementBox: Box): Promise<boolean> {
+  private async executeHold(page: Page, element: ElementHandle, action: HoldAction, elementBox: Box,
+                            completesItself = false): Promise<boolean> {
     this.actedOnBoard = true;
     const rel = this.clickPointFor({ action: ActionKind.CLICK, target_bounding_box: action.target_bounding_box }, elementBox);
     if (!rel) return false;
     const first = await this.elementFrameHash(element);
     const seen = { hash: first, since: Date.now(), changed: false };
-    const shots: [string, string] | null = action.fill_from_bounding_box && action.fill_to_bounding_box ? [tmp('hold_0'), tmp('hold_1')] : null;
+    const shots: [string, string] | null =
+      action.fill_from_bounding_box && action.fill_to_bounding_box && !completesItself ? [tmp('hold_0'), tmp('hold_1')] : null;
     const looks: FillLook[] = [];
     const done = async (): Promise<boolean> => {
       if (await this.isCaptchaSolved(page)) return true;
