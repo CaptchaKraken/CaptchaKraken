@@ -4,15 +4,57 @@ a handle and filled track that move too and, by default, a badge animating elsew
 
 import math
 
-import cv2
 import numpy as np
+from scipy import ndimage
+
 
 from captchakraken.tool_calls import slide_tracker as st
 
 
+_CROSS = ndimage.generate_binary_structure(2, 1)
+
+
+def _blur(img, sigma):
+    """Gaussian smoothing of the two spatial axes, mirrored at the border."""
+    return ndimage.gaussian_filter(img, (sigma, sigma) + (0,) * (img.ndim - 2), mode="mirror")
+
+
+def _blur3(img, sigma):
+    """A 3x3 Gaussian of `sigma`, the soft edge a page rasterizer leaves."""
+    k = np.exp(-np.array([1.0, 0.0, 1.0]) / (2 * sigma * sigma))
+    k /= k.sum()
+    return ndimage.correlate1d(ndimage.correlate1d(img, k, axis=0, mode="mirror"), k, axis=1, mode="mirror")
+
+
+def _warp(img, m, mode="grid-constant"):
+    """`img` moved by the forward 2x3 matrix `m` (x, y order), bilinear, into a canvas of its own size."""
+    inv = np.linalg.inv(np.vstack([m, [0, 0, 1]]))
+    rows = np.array([[inv[1, 1], inv[1, 0]], [inv[0, 1], inv[0, 0]]])
+    matrix, offset = np.eye(img.ndim), np.zeros(img.ndim)
+    matrix[:2, :2], offset[:2] = rows, (inv[1, 2], inv[0, 2])
+    return ndimage.affine_transform(img.astype(np.float32), matrix, offset, order=1, mode=mode)
+
+
+def _disc(shape, c, r):
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    return (xx - c[0]) ** 2 + (yy - c[1]) ** 2 <= r * r
+
+
+def _stroke(img, path, color):
+    """A one-pixel `path` (boolean) drawn three pixels wide with round ends, as a 2 px browser stroke rasterizes."""
+    img[ndimage.binary_dilation(path, _CROSS)] = color
+
+
+def _box(shape, x1, y1, x2, y2):
+    """The pixels of the rectangle with corners (x1, y1) and (x2, y2), both inclusive."""
+    out = np.zeros(shape[:2], bool)
+    out[max(y1, 0):y2 + 1, max(x1, 0):x2 + 1] = True
+    return out
+
+
 def _texture(h, w, seed, blur=2.0):
     rng = np.random.RandomState(seed)
-    base = cv2.GaussianBlur(rng.rand(h, w, 3).astype(np.float32), (0, 0), blur)
+    base = _blur(rng.rand(h, w, 3).astype(np.float32), blur)
     base = (base - base.min()) / (np.ptp(base) + 1e-6)
     yy, xx = np.mgrid[0:h, 0:w]
     stripes = 0.5 + 0.5 * np.sin(xx / 7.0 + yy / 11.0)[..., None]
@@ -22,20 +64,26 @@ def _texture(h, w, seed, blur=2.0):
 def _jigsaw_mask(size, scale):
     """A square with a knob on top and on the right, the usual piece outline."""
     k = int(round(8 * scale))
-    m = np.zeros((size + 2 * k, size + 2 * k), np.uint8)
-    cv2.rectangle(m, (k, k), (k + size - 1, k + size - 1), 1, -1)
-    cv2.circle(m, (k + size // 2, k), k, 1, -1)
-    cv2.circle(m, (k + size - 1, k + size // 2), k, 1, -1)
-    return m, k
+    shape = (size + 2 * k, size + 2 * k)
+    m = _box(shape, k, k, k + size - 1, k + size - 1) | _disc(shape, (k + size // 2, k), k)
+    return (m | _disc(shape, (k + size - 1, k + size // 2), k)).astype(np.uint8), k
 
 
 def _paste(canvas, layer, alpha, x, y):
     """Composite `layer` (with `alpha` 0..1) so its top-left lands at the float point (x, y)."""
     h, w = canvas.shape[:2]
     m = np.float32([[1, 0, x], [0, 1, y]])
-    lay = cv2.warpAffine(layer, m, (w, h), flags=cv2.INTER_LINEAR)
-    al = cv2.warpAffine(alpha, m, (w, h), flags=cv2.INTER_LINEAR)[..., None]
+    lay = _warp(_onto(layer, h, w), m)
+    al = _warp(_onto(alpha, h, w), m)[..., None]
     return canvas * (1 - al) + lay * al
+
+
+def _onto(layer, h, w):
+    """`layer` at the top-left of an h x w canvas, cropped to it."""
+    out = np.zeros((h, w) + layer.shape[2:], np.float32)
+    lh, lw = min(h, layer.shape[0]), min(w, layer.shape[1])
+    out[:lh, :lw] = layer[:lh, :lw]
+    return out
 
 
 class _Board:
@@ -50,20 +98,22 @@ class _Board:
 
     def furniture(self, img, s):
         k = self.k
-        cv2.rectangle(img, (int(10 * k), int(185 * k)), (int(330 * k), int(209 * k)), (225, 225, 225), -1)
+        img[_box(img.shape, int(10 * k), int(185 * k), int(330 * k), int(209 * k))] = (225, 225, 225)
         hx = self.handle0[0] + s
-        cv2.rectangle(img, (int(10 * k), int(185 * k)), (int(hx), int(209 * k)), (230, 190, 120), -1)
-        cv2.rectangle(img, (int(hx - 18 * k), int(183 * k)), (int(hx + 18 * k), int(211 * k)), (255, 255, 255), -1)
-        cv2.rectangle(img, (int(hx - 18 * k), int(183 * k)), (int(hx + 18 * k), int(211 * k)), (90, 90, 90), 2)
+        img[_box(img.shape, int(10 * k), int(185 * k), int(hx), int(209 * k))] = (230, 190, 120)
+        knob = _box(img.shape, int(hx - 18 * k), int(183 * k), int(hx + 18 * k), int(211 * k))
+        img[knob] = (255, 255, 255)
+        _stroke(img, knob & ~ndimage.binary_erosion(knob, np.ones((3, 3))), (90, 90, 90))
         for i in (-6, 0, 6):
-            cv2.line(img, (int(hx + i * k), int(190 * k)), (int(hx + i * k), int(204 * k)), (120, 120, 120), 2)
+            x = int(hx + i * k)
+            _stroke(img, _box(img.shape, x, int(190 * k), x, int(204 * k)), (120, 120, 120))
         if self.badge:
             # A badge spinning in the top-right corner, a step every frame whatever the handle does.
             self.frames += 1
             a = self.frames * 0.9
             c = (int(310 * k + 10 * k * math.cos(a)), int(25 * k + 10 * k * math.sin(a)))
-            cv2.circle(img, c, int(7 * k), (40, 200, 40), -1)
-            cv2.circle(img, c, int(3 * k), (250, 250, 60), -1)
+            img[_disc(img.shape, c, int(7 * k))] = (40, 200, 40)
+            img[_disc(img.shape, c, int(3 * k))] = (250, 250, 60)
         return img
 
 
@@ -103,14 +153,15 @@ class JigsawBoard(_Board):
         if pale_band is not None:
             rows = slice(int(self.y0 - 10 * k), int(self.y0 + mh + 10 * k))
             self.bg[rows, int(pale_band[0]):int(pale_band[1])] = face
-        edge = cv2.dilate(self.mask, np.ones((3, 3), np.uint8)) - cv2.erode(self.mask, np.ones((3, 3), np.uint8))
-        self.piece[edge > 0] = face if blank_rim else (250, 250, 250)
+        square = np.ones((3, 3), bool)
+        edge = ndimage.binary_dilation(self.mask, square) & ~ndimage.binary_erosion(self.mask, square, border_value=1)
+        self.piece[edge] = face if blank_rim else (250, 250, 250)
         hole = self.bg.copy()
         region = hole[sy:sy + mh, sx:sx + mw]
         region[self.mask > 0] *= 0.45
         self.ground = hole
-        self.alpha = cv2.GaussianBlur(self.mask.astype(np.float32), (3, 3), 0.6)
-        self.shadow = cv2.GaussianBlur(self.mask.astype(np.float32), (0, 0), 2.5 * k) * (0.5 if shadow else 0.0)
+        self.alpha = _blur3(self.mask.astype(np.float32), 0.6)
+        self.shadow = _blur(self.mask.astype(np.float32), 2.5 * k) * (0.5 if shadow else 0.0)
         if decoy is not None:
             self.ground = _paste(self.ground, self.piece, self.alpha, sx, sy - decoy * k)
 
@@ -118,7 +169,7 @@ class JigsawBoard(_Board):
         """Where the piece, and separately its shadow, sit at rest: boolean masks in shot pixels."""
         def at(layer, dx):
             m = np.float32([[1, 0, self.x0 + dx], [0, 1, self.y0 + dx]])
-            return cv2.warpAffine(layer.astype(np.float32), m, (self.w, self.h)) > 0.05
+            return _warp(_onto(layer, self.h, self.w), m) > 0.05
         return at(self.alpha, 0.0), at(self.shadow, 3 * self.k)
 
     def centre(self, s=0.0):
@@ -153,7 +204,7 @@ class DiscBoard(_Board):
         self.pic = _texture(self.h, self.w, seed, blur=2.5)
         yy, xx = np.mgrid[0:self.h, 0:self.w]
         self.disc = (np.hypot(xx - self.c[0], yy - self.c[1]) <= self.r).astype(np.float32)
-        self.disc = cv2.GaussianBlur(self.disc, (3, 3), 0.7)
+        self.disc = _blur3(self.disc, 0.7)
 
     def angle(self, s=0.0):
         return self.start + self.rate * s
@@ -173,11 +224,15 @@ class DiscBoard(_Board):
         return self.handle0
 
     def render(self, s):
-        m = cv2.getRotationMatrix2D(self.c, -self.angle(s), 1.0)    # OpenCV turns counter-clockwise for +angle
-        turned = cv2.warpAffine(self.pic, m, (self.w, self.h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        r = math.radians(self.angle(s))
+        rot = np.array([[math.cos(r), -math.sin(r)], [math.sin(r), math.cos(r)]])
+        c = np.array(self.c)
+        turned = _warp(self.pic, np.hstack([rot, (c - rot @ c)[:, None]]), mode="reflect")
         img = self.ring * (1 - self.disc[..., None]) + turned * self.disc[..., None]
         img = np.clip(img, 0, 255).astype(np.uint8)
-        cv2.circle(img, (int(self.c[0]), int(self.c[1])), int(self.r + 2 * self.k), (245, 245, 245), 2)
+        yy, xx = np.mgrid[0:self.h, 0:self.w]
+        rim = np.abs(np.hypot(xx - int(self.c[0]), yy - int(self.c[1])) - int(self.r + 2 * self.k)) < 0.5
+        _stroke(img, rim, (245, 245, 245))
         return self.furniture(img, s)
 
 
@@ -199,6 +254,6 @@ class CarriedBoard(JigsawBoard):
         img = _paste(img, self.piece, self.alpha, x, y)
         if self.badge:
             self.frames += 1
-            cv2.circle(img, (int(310 * self.k), int(25 * self.k + 3 * (self.frames % 4))), int(7 * self.k),
-                       (40, 200, 40), -1)
+            img[_disc(img.shape, (int(310 * self.k), int(25 * self.k + 3 * (self.frames % 4))), int(7 * self.k))] = \
+                (40, 200, 40)
         return np.clip(img, 0, 255).astype(np.uint8)

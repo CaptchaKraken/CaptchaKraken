@@ -16,8 +16,9 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
-import cv2
 import numpy as np
+from PIL import Image as PILImage
+from scipy import ndimage
 
 Image = Union[str, np.ndarray]
 Point = Tuple[float, float]
@@ -49,12 +50,21 @@ class FillError(ValueError):
 
 
 def _rgb(img: Image) -> np.ndarray:
-    a = cv2.imread(img, cv2.IMREAD_COLOR) if isinstance(img, str) else np.asarray(img)
-    if a is None:
-        raise FillError(f"cannot read {img!r}")
+    """The shot's three colour channels, each softened by a 3x3 binomial blur; their order does not matter here."""
+    if isinstance(img, str):
+        try:
+            with PILImage.open(img) as f:
+                a = np.asarray(f.convert("RGB"))
+        except OSError as exc:
+            raise FillError(f"cannot read {img!r}") from exc
+    else:
+        a = np.asarray(img)
     if a.ndim == 2:
         a = np.repeat(a[..., None], 3, axis=2)
-    return cv2.GaussianBlur(a[..., :3].astype(np.float32), (3, 3), 0)
+    out = a[..., :3].astype(np.float32)
+    for axis in (0, 1):
+        out = ndimage.correlate1d(out, [0.25, 0.5, 0.25], axis=axis, mode="mirror")
+    return out
 
 
 def profile(first: Image, current: Image, start: Point, end: Point) -> Tuple[np.ndarray, float]:

@@ -59,6 +59,10 @@ dependencies = [
   # `numpy>=2`. Moved deliberately as part of the major bump.
   "numpy==2.3.5",
   "opencv-python-headless==5.0.0.93",
+  # The slide and hold trackers' image arithmetic: smoothing, morphology,
+  # labelling, distance transforms and FFT correlation. 1.17.1 is the newest
+  # release whose Requires-Python (>=3.11) covers the floor; 1.18 needs 3.12.
+  "scipy==1.17.1",
   "requests==2.34.2",
   "python-dotenv==1.2.3",
   # The mouse. LGPL-3.0-or-later, used as an ordinary installed dependency and
