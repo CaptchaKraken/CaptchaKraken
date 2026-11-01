@@ -1,6 +1,5 @@
 """Image in, actions out: the element detector plus the model, for one still or one recorded animation."""
 
-import math
 import os
 import sys
 import tempfile
@@ -39,8 +38,6 @@ _PIXEL_BOX_HALF = float(os.getenv("CAPTCHA_PIXEL_BOX_HALF", "0.012"))
 # most often are.
 GRID_CELL_SHAPES = {9: (3, 3), 16: (4, 4)}
 VENDOR_GRID_CELLS: dict[Vendor, frozenset[int]] = {Vendor.HCAPTCHA: frozenset({9}), Vendor.RECAPTCHA: frozenset({9, 16})}
-# Every true grid measures 0.000 cells out of true; the nearest false lattice measured 0.128.
-_GRID_REGULARITY_TOL = 0.02
 
 
 def _debug(message: str) -> None:
@@ -86,26 +83,6 @@ def _first_frame(path: str) -> Image.Image:
             return next(container.decode(video=0)).to_image()
     except (OSError, av.FFmpegError, StopIteration) as exc:
         raise ValueError(f"Could not read video frame from {path}") from exc
-
-
-def _lattice_irregularity(grid_boxes) -> Optional[float]:
-    """How far the cells stray from a regular lattice, in cells; None when not a square count."""
-    boxes = [tuple(b) for b in grid_boxes]
-    n = len(boxes)
-    k = int(round(math.sqrt(n))) if n else 0
-    if k < 2 or k * k != n:
-        return None
-    widths = [b[2] - b[0] for b in boxes]
-    heights = [b[3] - b[1] for b in boxes]
-    mid_w, mid_h = sorted(widths)[n // 2], sorted(heights)[n // 2]
-    if mid_w <= 0 or mid_h <= 0:
-        return None
-    rows = [boxes[i * k:(i + 1) * k] for i in range(k)]
-    cols = [[boxes[r * k + c] for r in range(k)] for c in range(k)]
-    row_skew = max(max(b[1] for b in r) - min(b[1] for b in r) for r in rows) / mid_h
-    col_skew = max(max(b[0] for b in c) - min(b[0] for b in c) for c in cols) / mid_w
-    size_spread = max((max(widths) - min(widths)) / mid_w, (max(heights) - min(heights)) / mid_h)
-    return max(row_skew, col_skew, size_spread)
 
 
 def _grid_dims(n_cells: int, puzzle_source: Vendor = Vendor.UNKNOWN):
@@ -295,11 +272,14 @@ class CaptchaSolver:
         return media_path
 
     def _is_real_grid(self, image_path: str, grid_boxes: List[Tuple[int, int, int, int]]) -> bool:
-        """Reject a lattice that is sheared, a sprite board on one background, or a flat image."""
-        irregularity = _lattice_irregularity(grid_boxes)
-        if irregularity is not None and irregularity > _GRID_REGULARITY_TOL:
-            _debug(f"_is_real_grid: cells are {irregularity:.3f} of a cell out of true → reject")
-            return False
+        """Reject a sprite board on one background, or a lattice of flat cells: icons laid out in rows are a
+        click board even where the element detector sees their rows as a grid.
+
+        Measured on the detector's cells (60 captures a family): no reCAPTCHA, hCaptcha, Prosopo or GeeTest
+        photo grid has its cells share a background, and every GeeTest iconcrush board the detector reads as
+        a grid does. The line tracer's lattice-regularity gate is gone: detector boxes sit a median 0.04 of a
+        cell out of true, so its 0.02 tolerance (set on traced lines) rejected most true grids.
+        """
         with Image.open(image_path) as im:
             img = np.asarray(im.convert("RGB"))
         rois = [img[y1:y2, x1:x2].reshape(-1, 3) for (x1, y1, x2, y2) in grid_boxes

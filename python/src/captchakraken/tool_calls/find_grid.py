@@ -45,6 +45,19 @@ def _iou(a: Sequence[float], b: Sequence[float]) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def _outermost(cells: List[List[float]]) -> List[List[float]]:
+    """Cells that are not mostly inside a larger one. A picture inside a tile can read as a cell of
+    its own (a Prosopo tile's inset photo did, at 0.998), and the row it lands in grows a column."""
+    out: List[List[float]] = []
+    for c in sorted(cells, key=lambda c: -(c[2] - c[0]) * (c[3] - c[1])):
+        area = (c[2] - c[0]) * (c[3] - c[1])
+        inside = max((max(0.0, min(c[2], k[2]) - max(c[0], k[0])) * max(0.0, min(c[3], k[3]) - max(c[1], k[1]))
+                      for k in out), default=0.0)
+        if area > 0 and inside / area < 0.5:
+            out.append(c)
+    return out
+
+
 def _with_tiles(cells: List[List[float]], tiles: List[List[float]]) -> List[List[float]]:
     """`cells` plus every tile the size of a cell that no cell (or tile already taken) overlaps."""
     if not cells:
@@ -86,7 +99,8 @@ def find_grid(image_path: str) -> Optional[List[Box]]:
     if not grids:
         return None
     grid = max(grids, key=lambda d: d["score"])["box"]
-    cells = _cells_in(grid, [d["box"] for d in dets if d["class"] == "cell" and d["score"] >= CELL_MIN_SCORE])
+    cells = _outermost(_cells_in(grid, [d["box"] for d in dets
+                                        if d["class"] == "cell" and d["score"] >= CELL_MIN_SCORE]))
     cells = _with_tiles(cells, _cells_in(grid, [d["box"] for d in dets
                                                 if d["class"] in TILE_CLASSES and d["score"] >= CELL_MIN_SCORE]))
     if len(cells) < 4:

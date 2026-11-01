@@ -376,7 +376,6 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_board_is_routed_and_watched_once_it_has_painted.py` | A widget that has not drawn yet picks the wrong expert and reads as a still; both questions wait for the paint. |
 | `python/tests/test_a_board_with_no_answer_is_skipped.py` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `python/tests/test_the_notice_travels_with_the_package.py` | The LGPL notice for Cursory has to reach both published packages, and three copies are three chances to drift. |
-| `python/tests/test_a_grid_is_a_regular_lattice.py` | Every other grid check asks what is inside the cells; a click board over a photo passes those and is not a lattice. |
 | `python/tests/test_grid_dims_must_be_possible.py` | Only the shapes the grid expert was trained on reach it, per named vendor; a count no puzzle has is never a grid. |
 | `python/tests/test_grid_never_pairs_tiles.py` | A board of tall tiles is never read as a lattice of tile pairs, which sent it to the wrong expert. |
 | `python/tests/test_hcaptcha_boards_reach_the_right_expert.py` | Two captured Tier 3 boards: a 6x3 card board is not read as a 3x3 of tile pairs, and an off-centre 3x3 photo grid is still found. |

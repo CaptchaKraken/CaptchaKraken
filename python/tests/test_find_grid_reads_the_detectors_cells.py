@@ -107,3 +107,12 @@ def test_an_object_inside_a_tile_is_not_a_tile(detected):
     detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:4] + cells[5:]]
              + [_det("item", small)])
     assert find_grid("board.png") is None
+
+
+def test_a_picture_inside_a_tile_read_as_a_cell_does_not_grow_a_column(detected):
+    """A Prosopo tile's inset photo was detected as a cell of its own (0.998); its row came back with four."""
+    cells = _lattice(3, 3)
+    t = cells[5]
+    inset = (t[0] + 60, t[1] + 2, t[2] - 2, t[1] + 80)
+    detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells] + [_det("cell", inset, 0.998)])
+    assert find_grid("board.png") == [tuple(c) for c in cells]
