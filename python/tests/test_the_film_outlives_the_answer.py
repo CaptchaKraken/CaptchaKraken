@@ -21,7 +21,6 @@ _SCREENS = [b"screen-A" + b"\x00" * 64, b"screen-B" + b"\x11" * 64, b"screen-C" 
 
 def _solver(monkeypatch):
     """A solver filming a 3-screen cycle, with the slicer stubbed: this is about WHAT is sliced, not how."""
-    import cv2
     import numpy as np
 
     install(monkeypatch, page_solver)
@@ -42,7 +41,7 @@ def _solver(monkeypatch):
 
     monkeypatch.setattr(solver, "_screenshot", fake_shot)
     monkeypatch.setattr(solver, "_slice", fake_slice)
-    monkeypatch.setattr(cv2, "imread", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
+    monkeypatch.setattr("captchakraken.keyframes.read_frame", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
     return solver, sliced
 
 
@@ -105,7 +104,6 @@ def test_the_js_port_also_keeps_filming():
 
 def _reshuffling(monkeypatch):
     """A board that deals a fresh set of screens the moment its answer is refused."""
-    import cv2
     import numpy as np
 
     install(monkeypatch, page_solver)
@@ -123,7 +121,7 @@ def _reshuffling(monkeypatch):
 
     monkeypatch.setattr(solver, "_screenshot", fake_shot)
     monkeypatch.setattr(solver, "_slice", lambda frames, ms: (sliced.append(len(frames)), (["/tmp/k.png"], "/tmp/d"))[1])
-    monkeypatch.setattr(cv2, "imread", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
+    monkeypatch.setattr("captchakraken.keyframes.read_frame", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
     return solver, sliced, state
 
 
@@ -166,7 +164,6 @@ def test_a_board_that_never_repeats_keeps_its_film_and_is_not_refilmed(monkeypat
     # back" can never be proved for them. Restarting on the ABSENCE of that proof threw the film away every
     # round and spent a full ceiling-long window rebuilding it: measured on the gate, boards at 54.6s and
     # 59.1s against a 49s ceiling. A replacement has to be PROVED, not assumed.
-    import cv2
     import numpy as np
 
     install(monkeypatch, page_solver)
@@ -185,7 +182,7 @@ def test_a_board_that_never_repeats_keeps_its_film_and_is_not_refilmed(monkeypat
     monkeypatch.setattr(solver, "_screenshot", fake_shot)
     monkeypatch.setattr(solver, "_slice",
                         lambda frames, ms: (sliced.append(len(frames)), (["/tmp/k.png"], "/tmp/d"))[1])
-    monkeypatch.setattr(cv2, "imread", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
+    monkeypatch.setattr("captchakraken.keyframes.read_frame", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
 
     solver._record_keyframes(object())
     first, first_ms = len(solver._film_frames), solver._film_ms

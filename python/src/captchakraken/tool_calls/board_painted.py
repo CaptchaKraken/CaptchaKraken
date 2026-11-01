@@ -21,12 +21,14 @@ TEXTURE_FLOOR = 0.015
 
 
 def centre_texture(path: str, box: Optional[Sequence[float]] = None) -> Optional[float]:
-    import cv2
     import numpy as np
 
-    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
+    from ..keyframes import read_frame, to_gray
+
+    frame = read_frame(path)
+    if frame is None:
         return None
+    img = to_gray(frame)
     h, w = img.shape[:2]
     b = tuple(box) if box is not None else CENTRE_BOX
     x1, y1 = int(b[0] * w), int(b[1] * h)

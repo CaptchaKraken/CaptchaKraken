@@ -11,12 +11,12 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import cv2
 import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from captchakraken.keyframes import write_frame  # noqa: E402
 from captchakraken.kinds import FrameRole, HumanizationMode, Vendor  # noqa: E402
 from captchakraken.page_solver import PageSolver, PageSolverConfig, Widget  # noqa: E402
 
@@ -75,8 +75,9 @@ class CheckboxFrame:
 def _checkbox_picture(path: str) -> None:
     """What a checkbox widget photographs as: the tick box at the left of a pale strip."""
     img = np.full((76, 302, 3), 249, dtype=np.uint8)
-    cv2.rectangle(img, (16, 23), (46, 53), (140, 140, 140), 2)
-    cv2.imwrite(path, img)
+    img[22:55, 15:48] = 140
+    img[25:52, 18:45] = 249
+    write_frame(path, img)
 
 
 def _round(vendor: Vendor, frame: Optional[CheckboxFrame], blank_captures: int = 0, solved=lambda: False):
@@ -93,7 +94,7 @@ def _round(vendor: Vendor, frame: Optional[CheckboxFrame], blank_captures: int =
         if seen["captures"] > blank_captures:
             _checkbox_picture(path)
         else:
-            cv2.imwrite(path, np.full((76, 302, 3), 249, dtype=np.uint8))
+            write_frame(path, np.full((76, 302, 3), 249, dtype=np.uint8))
 
     def ask(*_: Any, **__: Any):
         seen["asks"] += 1

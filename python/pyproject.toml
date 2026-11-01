@@ -59,6 +59,11 @@ dependencies = [
   # `numpy>=2`. Moved deliberately as part of the major bump.
   "numpy==2.3.5",
   "opencv-python-headless==5.0.0.93",
+  # Decodes the first frame of a video passed to `solve` (.mp4, .avi, .webm).
+  # 18.1.0 is the newest release whose wheels (cp311-abi3) install on the
+  # 3.11 floor; 19.x declares `Requires-Python >=3.12`. It has no runtime
+  # dependencies, so it does not constrain numpy.
+  "av==18.1.0",
   "requests==2.34.2",
   "python-dotenv==1.2.3",
   # The mouse. LGPL-3.0-or-later, used as an ordinary installed dependency and
