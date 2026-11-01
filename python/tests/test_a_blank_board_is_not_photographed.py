@@ -5,24 +5,21 @@ import sys
 import tempfile
 
 import numpy as np
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from captchakraken import page_solver
+from captchakraken.keyframes import write_frame
 from captchakraken.page_solver import PageSolver, PageSolverConfig
 from virtual_clock import install
 from captchakraken.tool_calls.board_painted import (
     TEXTURE_FLOOR, board_is_painted, centre_texture,
 )
 
-cv2 = pytest.importorskip("cv2")
-
-
 def _png(pixels) -> str:
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
-    cv2.imwrite(path, pixels)
+    write_frame(path, pixels)
     return path
 
 
@@ -77,7 +74,7 @@ class _Element:
         if self.grabs > self.blank_for:
             img[110:290, 50:290] = np.random.default_rng(0).integers(
                 0, 255, (180, 240), dtype=np.uint8)
-        cv2.imwrite(kw["path"], img)
+        write_frame(kw["path"], img)
 
 
 def _solver(**cfg):

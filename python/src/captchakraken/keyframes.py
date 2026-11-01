@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import cv2
 import numpy as np
+from PIL import Image, ImageOps
 
 from .kinds import KeyframeMode
 
@@ -37,6 +37,11 @@ DEFAULT_MIN_STEADY_COVERAGE = 0.5
 
 # The one pixel threshold shared with every other movement check in the project.
 _PIXEL_DELTA = 30
+
+# Grey = (B, G, R) . weights >> 15, rounded: OpenCV's fixed-point BGR2GRAY, which every threshold above was
+# measured through. Equal to it on all 2^24 colours. Elementwise, not a matrix product: BLAS threads on a busy
+# machine made the product 20x slower than the arithmetic.
+_GRAY_WEIGHTS = (3735, 19235, 9798)
 
 # One constant for both choosing the label's frame and the live wait: the two must ask the same question.
 MATCH_REGION_HALF = 0.06
@@ -147,14 +152,45 @@ def frame_diff_ratio(a: np.ndarray, b: np.ndarray) -> float:
         return 1.0
     if a.shape != b.shape:
         return 1.0
-    diff = cv2.absdiff(a, b)
-    if diff.ndim == 3:
-        diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    _, thr = cv2.threshold(diff, _PIXEL_DELTA, 255, cv2.THRESH_BINARY)
-    h, w = thr.shape[:2]
+    diff = np.maximum(a, b) - np.minimum(a, b)
+    h, w = diff.shape[:2]
     if h * w == 0:
         return 1.0
-    return cv2.countNonZero(thr) / float(h * w)
+    # Grey > delta, compared before the shift: the same pixels, one pass fewer over the frame.
+    moved = _scaled_luma(diff) >= (_PIXEL_DELTA + 1) << 15 if diff.ndim == 3 else diff > _PIXEL_DELTA
+    return int(np.count_nonzero(moved)) / float(h * w)
+
+
+def _scaled_luma(frame: np.ndarray) -> np.ndarray:
+    """A BGR uint8 frame's luma times 2^15, rounding offset included."""
+    luma = np.multiply(frame[..., 0], _GRAY_WEIGHTS[0], dtype=np.uint32)
+    luma += np.multiply(frame[..., 1], _GRAY_WEIGHTS[1], dtype=np.uint32)
+    luma += np.multiply(frame[..., 2], _GRAY_WEIGHTS[2], dtype=np.uint32)
+    luma += 1 << 14
+    return luma
+
+
+def to_gray(frame: np.ndarray) -> np.ndarray:
+    """A BGR uint8 frame's luma, as uint8."""
+    return (_scaled_luma(frame) >> 15).astype(np.uint8)
+
+
+def read_frame(path: str | os.PathLike) -> Optional[np.ndarray]:
+    """The image at `path` as an (H, W, 3) BGR uint8 array, or None if it cannot be decoded.
+
+    BGR because every frame in the project is: recordings, keyframes and the files they are written to.
+    """
+    try:
+        with Image.open(path) as img:
+            rgb = np.asarray(ImageOps.exif_transpose(img).convert("RGB"))
+    except OSError:
+        return None
+    return np.ascontiguousarray(rgb[..., ::-1])
+
+
+def write_frame(path: str | os.PathLike, frame: np.ndarray) -> None:
+    """Write a BGR (or single-channel) uint8 frame; the format follows the extension."""
+    Image.fromarray(frame[..., ::-1] if frame.ndim == 3 else frame).save(path)
 
 
 
@@ -412,7 +448,7 @@ def write_keyframes(
         target = out / name
         if kf.image is None:
             raise ValueError(f"keyframe {kf.number} has no image to write")
-        cv2.imwrite(str(target), kf.image)
+        write_frame(target, kf.image)
         paths.append(target)
         names.append(name)
 

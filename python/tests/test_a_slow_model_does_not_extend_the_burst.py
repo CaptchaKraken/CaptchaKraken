@@ -22,7 +22,6 @@ class _Kf:
 
 
 def _run(monkeypatch, model_seconds):
-    import cv2
     import numpy as np
 
     clock = install(monkeypatch, page_solver)
@@ -54,7 +53,7 @@ def _run(monkeypatch, model_seconds):
     monkeypatch.setattr(solver, "_screenshot", fake_shot)
     monkeypatch.setattr(solver, "_get_solution", slow_model)
     monkeypatch.setattr(solver, "_phase", recording_phase)
-    monkeypatch.setattr(cv2, "imread",
+    monkeypatch.setattr("captchakraken.keyframes.read_frame",
                         lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
     monkeypatch.setattr("captchakraken.keyframes.extract_keyframes",
                         lambda frames, fps: _Kf(len(frames)))

@@ -23,7 +23,7 @@ from .action_types import (
     WaitAction,
 )
 from .clipvideo import clip_video, time_to_index
-from .keyframes import KeyframeSet, extract_keyframes, number_for_source_index, write_keyframes
+from .keyframes import KeyframeSet, extract_keyframes, number_for_source_index, write_frame, write_keyframes
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode, Vendor
 from .planner import ActionPlanner
 from .tool_calls.find_checkbox import find_checkbox
@@ -72,6 +72,20 @@ def cut_recording(frames: Sequence[np.ndarray], fps: float, out_dir: str) -> Ani
     kfset = extract_keyframes(frames, fps=float(fps))
     paths = [str(p) for p in write_keyframes(kfset, out_dir, stem="challenge")]
     return AnimatedRecording(frames=list(frames), fps=float(fps), keyframes=kfset, keyframe_paths=paths)
+
+
+def _first_frame(path: str) -> Image.Image:
+    """The first picture of a GIF or video file, in RGB."""
+    import av
+
+    try:
+        if path.lower().endswith(".gif"):
+            with Image.open(path) as img:
+                return img.convert("RGB")
+        with av.open(path) as container:
+            return next(container.decode(video=0)).to_image()
+    except (OSError, av.FFmpegError, StopIteration) as exc:
+        raise ValueError(f"Could not read video frame from {path}") from exc
 
 
 def _lattice_irregularity(grid_boxes) -> Optional[float]:
@@ -218,8 +232,7 @@ class CaptchaSolver:
         """
         by_number = {kf.number: path for kf, path in zip(recording.keyframes.keyframes, recording.keyframe_paths)}
         path = by_number[number_for_source_index(recording.keyframes, source)]
-        if not cv2.imwrite(path, recording.frames[source]):
-            raise OSError(f"could not write the awaited frame to {path}")
+        write_frame(path, recording.frames[source])
         return path
 
     def _solve_pixel(self, image_path: str, text_mode: bool = False) -> List[CaptchaAction]:
@@ -271,16 +284,10 @@ class CaptchaSolver:
     def _materialize_image(self, media_path: str) -> str:
         """A PNG path for `media_path`; a video contributes its first frame."""
         if any(media_path.lower().endswith(ext) for ext in (".mp4", ".gif", ".avi", ".webm")):
-            import cv2
-
-            cap = cv2.VideoCapture(media_path)
-            ok, frame = cap.read()
-            cap.release()
-            if not ok:
-                raise ValueError(f"Could not read video frame from {media_path}")
-            self._image_size = (frame.shape[1], frame.shape[0])
+            frame = _first_frame(media_path)
+            self._image_size = frame.size
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
-                cv2.imwrite(tf.name, frame)
+                frame.save(tf, "PNG")
                 self._temp_files.append(tf.name)
                 return tf.name
         with Image.open(media_path) as img:

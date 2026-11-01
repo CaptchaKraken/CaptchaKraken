@@ -1546,7 +1546,7 @@ class PageSolver:
         Both bounds are wall-clock. There is no "enough screens, stop" exit: both spellings were measured on
         number_with_highest_value_video and failed every seed either way.
         """
-        import cv2
+        from .keyframes import read_frame
 
         cfg = self.config
         floor_ms = float(cfg.video_burst_duration_ms)
@@ -1572,7 +1572,7 @@ class PageSolver:
                 if _now() - self._last_input_ms >= INPUT_SETTLE_MS:
                     try:
                         self._screenshot(element, shot, animations="allow")
-                        img = cv2.imread(shot)
+                        img = read_frame(shot)
                     except Exception as exc:
                         _debug(f"burst frame failed: {exc}")
                 if img is not None:
@@ -1772,9 +1772,7 @@ class PageSolver:
 
     def _answer_region_recurs(self, keyframe_path: str, ref: Any, box: Any) -> bool:
         """Does the chosen keyframe's answer area appear in a sibling keyframe of the same clip?"""
-        import cv2
-
-        from .keyframes import MATCH_REGION_TOLERANCE, region_diff_ratio
+        from .keyframes import MATCH_REGION_TOLERANCE, read_frame, region_diff_ratio
 
         folder, base = os.path.dirname(keyframe_path), os.path.basename(keyframe_path)
         prefix = re.sub(r"_\d+\.png$", "_", base, flags=re.IGNORECASE)
@@ -1786,18 +1784,16 @@ class PageSolver:
         except OSError:
             return False
         for other in siblings:
-            img = cv2.imread(other)
+            img = read_frame(other)
             if img is not None and img.shape == ref.shape and region_diff_ratio(ref, img, box) <= MATCH_REGION_TOLERANCE:
                 return True
         return False
 
     def _wait_for_keyframe(self, element: Any, keyframe_path: str, point_norm: Tuple[float, float]) -> bool:
         """Hold until the widget looks like the keyframe around the action point, or the wait is spent."""
-        import cv2
+        from .keyframes import MATCH_REGION_TOLERANCE, read_frame, region_box, region_diff_ratio
 
-        from .keyframes import MATCH_REGION_TOLERANCE, region_box, region_diff_ratio
-
-        ref = cv2.imread(keyframe_path)
+        ref = read_frame(keyframe_path)
         if ref is None:
             return False
         box = region_box(ref.shape[1::-1], point_norm)
@@ -1815,7 +1811,7 @@ class PageSolver:
                 self._check_deadline("waiting for the challenge keyframe")
                 try:
                     self._screenshot(element, probe, animations="allow")
-                    live = cv2.imread(probe)
+                    live = read_frame(probe)
                 except Exception:
                     live = None
                 if live is not None:

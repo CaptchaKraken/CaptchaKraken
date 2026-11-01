@@ -58,12 +58,10 @@ def match_region(ref: str, live: str, cx: float, cy: float, tolerance: Optional[
 
     The neighbourhood only: a whole-frame match would need every unrelated sprite to align and would essentially never open.
     """
-    import cv2
-
-    from .keyframes import MATCH_REGION_TOLERANCE, region_box, region_diff_ratio
+    from .keyframes import MATCH_REGION_TOLERANCE, read_frame, region_box, region_diff_ratio
 
     tol = MATCH_REGION_TOLERANCE if tolerance is None else float(tolerance)
-    a, b = cv2.imread(ref), cv2.imread(live)
+    a, b = read_frame(ref), read_frame(live)
     if a is None or b is None:
         return {"match": False, "diff": 1.0, "error": "unreadable image"}
     d = region_diff_ratio(a, b, region_box(a.shape[1::-1], (cx, cy)))
@@ -295,11 +293,10 @@ def _solve_animated(args):
         _fail(f"no frames in {opts.frames_dir}")
 
     def query():
-        import cv2
-
+        from .keyframes import read_frame
         from .solver import cut_recording
 
-        imgs = [im for im in (cv2.imread(p) for p in frames) if im is not None]
+        imgs = [im for im in (read_frame(p) for p in frames) if im is not None]
         if not imgs:
             _fail("no frame decoded")
         recording = cut_recording(imgs, float(opts.fps), os.path.abspath(os.path.join(opts.frames_dir, "keyframes")))
