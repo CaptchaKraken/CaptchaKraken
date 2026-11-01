@@ -16,6 +16,23 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Changed
 
+- **Grids and checkboxes are found by a CNN, and OpenCV is gone.** `find_grid`
+  and `find_checkbox` read an element detector (a small Mask R-CNN) that runs
+  on the CPU through onnxruntime, about a quarter of a second per board. Its
+  weights (124 MB) are downloaded once on first use into the state directory
+  and checked against a pinned hash; `CAPTCHA_KRAKEN_DETECTOR` names a local
+  file instead. Image and video I/O moved to Pillow and PyAV, and the slide and
+  hold trackers to numpy and scipy, with the same measured thresholds.
+  `opencv-python-headless` is no longer a dependency; `onnxruntime`, `scipy`
+  and `av` are. onnxruntime ships no Intel-macOS wheel, so the client no longer
+  installs there.
+- **Only the grids the grid model was trained on reach it.** reCAPTCHA's 3x3
+  and 4x4 and hCaptcha's 3x3 are asked as grids; a grid from any other named
+  vendor goes to the model trained on that vendor. A caller that names no
+  vendor (the CLI, a script) keeps both shapes.
+- **Animated boards are cut faster.** Keyframe extraction measures each pair
+  of frames once; it re-compared the same screens about seven times over.
+
 - **A pointer answer carries both the point and the element id, and how sure
   each is.** Every slot now also reads the number drawn on its element, decided
   apart from the point. `checks` in the answer gives the action's, count's and

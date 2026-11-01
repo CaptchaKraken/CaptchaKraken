@@ -224,6 +224,9 @@
     "CAPTCHA_KRAKEN_CLIENT": [
       "python/src/captchakraken/planner.py"
     ],
+    "CAPTCHA_KRAKEN_DETECTOR": [
+      "python/src/captchakraken/pointer/detector.py"
+    ],
     "CAPTCHA_KRAKEN_EXTRA_HEADERS": [
       "python/src/captchakraken/planner.py"
     ],

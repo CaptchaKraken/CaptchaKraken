@@ -35,8 +35,6 @@ WEIGHTS = {
     "file": "detector.onnx",
     "sha256": "",
 }
-#: A local .onnx to run instead of the released one (self-hosting, CI, offline).
-WEIGHTS_ENV = "CAPTCHA_KRAKEN_DETECTOR"
 
 
 def build(num_classes: int, pretrained: bool = False, min_size: Sequence[int] = (512,),
@@ -126,10 +124,11 @@ class OnnxDetector:
 def weights_path() -> Path:
     """The ONNX file to run: `CAPTCHA_KRAKEN_DETECTOR` when set, else the pinned
     release, downloaded once into the state directory and checked against its hash."""
-    local = os.getenv(WEIGHTS_ENV)
+    # A local .onnx to run instead of the released one (self-hosting, CI, offline).
+    local = os.getenv("CAPTCHA_KRAKEN_DETECTOR")
     if local:
         if not Path(local).is_file():
-            raise FileNotFoundError(f"{WEIGHTS_ENV}={local} is not a file")
+            raise FileNotFoundError(f"CAPTCHA_KRAKEN_DETECTOR={local} is not a file")
         return Path(local)
     from ..config import state_dir
     path = state_dir() / "detector" / f"{WEIGHTS['sha256']}.onnx"
@@ -137,11 +136,9 @@ def weights_path() -> Path:
         return path
     import requests
     url = f"https://huggingface.co/{WEIGHTS['repo']}/resolve/{WEIGHTS['revision']}/{WEIGHTS['file']}"
-    token = os.getenv("HF_TOKEN")
     path.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
-    with requests.get(url, stream=True, timeout=60,
-                      headers={"Authorization": f"Bearer {token}"} if token else {}) as r:
+    with requests.get(url, stream=True, timeout=60) as r:
         r.raise_for_status()
         with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tf:
             for chunk in r.iter_content(1 << 20):

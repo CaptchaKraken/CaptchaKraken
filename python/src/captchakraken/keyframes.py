@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -194,6 +195,24 @@ def write_frame(path: str | os.PathLike, frame: np.ndarray) -> None:
 
 
 
+#: The diffs already measured during the extraction in progress, keyed by the two frames' identities.
+#: A 100-frame clip asks ~8,000 diffs of ~1,100 distinct pairs: the medoid, merge and dedup passes keep
+#: re-comparing the same screens. `extract_keyframes` holds every frame alive for the duration, so an
+#: id cannot be reused while it is a key.
+_PAIR_CACHE: ContextVar[Optional[Dict[Tuple[int, int], float]]] = ContextVar("_PAIR_CACHE", default=None)
+
+
+def _pair_diff(a: np.ndarray, b: np.ndarray) -> float:
+    """`frame_diff_ratio`, remembered for the extraction in progress (the diff is symmetric)."""
+    cache = _PAIR_CACHE.get()
+    if cache is None:
+        return frame_diff_ratio(a, b)
+    key = (id(a), id(b)) if id(a) <= id(b) else (id(b), id(a))
+    if key not in cache:
+        cache[key] = frame_diff_ratio(a, b)
+    return cache[key]
+
+
 def _anchor_runs(frames: Sequence[np.ndarray], steady_ratio: float) -> List[Tuple[int, int]]:
     """Anchored on the run's first frame: a slow pan has every consecutive diff under the threshold."""
     runs: List[Tuple[int, int]] = []
@@ -201,7 +220,7 @@ def _anchor_runs(frames: Sequence[np.ndarray], steady_ratio: float) -> List[Tupl
     n = len(frames)
     while i < n:
         j = i
-        while j + 1 < n and frame_diff_ratio(frames[i], frames[j + 1]) <= steady_ratio:
+        while j + 1 < n and _pair_diff(frames[i], frames[j + 1]) <= steady_ratio:
             j += 1
         runs.append((i, j))
         i = j + 1
@@ -213,7 +232,7 @@ def _medoid(frames: Sequence[np.ndarray], indices: Sequence[int]) -> int:
         return indices[0]
     best_idx, best_cost = indices[0], float("inf")
     for a in indices:
-        cost = sum(frame_diff_ratio(frames[a], frames[b]) for b in indices if b != a)
+        cost = sum(_pair_diff(frames[a], frames[b]) for b in indices if b != a)
         if cost < best_cost:
             best_idx, best_cost = a, cost
     return best_idx
@@ -244,7 +263,7 @@ def _distinct_indices(
 
     def is_new(i: int) -> bool:
         return not any(
-            frame_diff_ratio(frames[i], frames[k]) <= params.steady_ratio for k in kept
+            _pair_diff(frames[i], frames[k]) <= params.steady_ratio for k in kept
         )
 
     for i in candidates:
@@ -277,7 +296,7 @@ def _steady_screens(
     for s, e in holds:
         rep = _medoid(frames, list(range(s, e + 1)))
         for k, existing in enumerate(state_reps):
-            if frame_diff_ratio(frames[rep], frames[existing]) <= params.steady_ratio:
+            if _pair_diff(frames[rep], frames[existing]) <= params.steady_ratio:
                 hold_state.append(k)
                 break
         else:
@@ -314,7 +333,7 @@ def _detect_cycle(
 
     for a in range(len(state_reps)):
         for b in range(a + 1, len(state_reps)):
-            if frame_diff_ratio(frames[state_reps[a]], frames[state_reps[b]]) < params.distinct_ratio:
+            if _pair_diff(frames[state_reps[a]], frames[state_reps[b]]) < params.distinct_ratio:
                 return None
 
     per_frame = [-1] * n
@@ -342,7 +361,7 @@ def _drop_smeared(
     for start, end in holds:
         rep = _medoid(frames, list(range(start, end + 1)))
         for k, existing in enumerate(reps):
-            if frame_diff_ratio(frames[rep], frames[existing]) <= params.steady_ratio:
+            if _pair_diff(frames[rep], frames[existing]) <= params.steady_ratio:
                 state_of_hold.append(k)
                 break
         else:
@@ -378,8 +397,19 @@ def extract_keyframes(
     fps: float = 10.0,
     params: Optional[KeyframeParams] = None,
 ) -> KeyframeSet:
+    # A list, so each frame is one object that lives as long as the cache keyed on its id
+    # (indexing a 4-D array would make a new, collectable view per access).
+    frames = list(frames)
     if not frames:
         raise ValueError("no frames to extract keyframes from")
+    token = _PAIR_CACHE.set({})
+    try:
+        return _extract_keyframes(frames, fps, params)
+    finally:
+        _PAIR_CACHE.reset(token)
+
+
+def _extract_keyframes(frames: Sequence[np.ndarray], fps: float, params: Optional[KeyframeParams]) -> KeyframeSet:
     p = params or KeyframeParams()
     n = len(frames)
 

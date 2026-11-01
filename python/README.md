@@ -123,6 +123,7 @@ Everything model-specific lives in `captchakraken.config` and is env-overridable
 | `CAPTCHA_LORA_ADAPTER` | Captcha adapter (HF id or path) | `CaptchaKraken/CaptchaKraken-Lora-v1.2` |
 | `CAPTCHA_LORA_NAME` | Served adapter name the client requests | `captcha-v12` |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` disables local auto-start | `1` |
+| `CAPTCHA_KRAKEN_DETECTOR` | A local element-detector `.onnx` to run instead of downloading the released one | the released weights, fetched once |
 | `CAPTCHA_HUMANIZATION` | How gestures are performed: `mouse`, `mobile` or `none` | `mouse` |
 
 **How it moves** is a choice of input device, not a realism dial. `mobile`
