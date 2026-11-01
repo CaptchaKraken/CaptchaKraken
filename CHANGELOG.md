@@ -7,6 +7,16 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Added
 
+- **Every selector and URL pattern is in one config file.**
+  `captchakraken.config.json` at the repository root holds each vendor's
+  `hosts` and selectors in detection order, the generic fallbacks, and a
+  `custom` entry of your own; both ports load it by default (`selectors` in
+  `PageSolverConfig` / `CaptchaKrakenConfig`, default `DEFAULT_CONFIG_PATH`).
+  Pass the path of a file of your own, or the parsed object: it is laid over
+  the default, so it holds only what it changes. A bad key raises
+  `SelectorConfigError` naming the file and the key. `load_config` /
+  `loadConfig` load one. The table is byte-for-byte the one the code held.
+
 - **Your own selectors.** `customSelectors` (`custom_selectors=` in Python, a
   `VendorSelectors`) is one vendor entry of your own, in the built-in table's
   shape, for a captcha the table does not know. It is detected before every
@@ -32,6 +42,9 @@ semantic versioning; v2 is a major, **breaking** release.
   vendor (the CLI, a script) keeps both shapes.
 - **Animated boards are cut faster.** Keyframe extraction measures each pair
   of frames once; it re-compared the same screens about seven times over.
+- **`customSelectors` / `custom_selectors=` is deprecated** in favour of
+  `custom` in a `selectors` file. It still works, and wins over the file's
+  entry when both are given.
 
 - **A pointer answer carries both the point and the element id, and how sure
   each is.** Every slot now also reads the number drawn on its element, decided

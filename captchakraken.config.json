@@ -1,0 +1,408 @@
+{
+  "_comment": [
+    "Every URL pattern and selector the solver detects and drives a captcha with.",
+    "",
+    "This file is the default: PageSolver (Python) and CaptchaKraken (JS) load it",
+    "when no other is given. To add your own, write a file of the same shape and",
+    "pass its path (or the parsed object) as `selectors` in PageSolverConfig",
+    "(Python) or CaptchaKrakenConfig (JS). A file of your own may hold only what",
+    "it changes: `custom`, any vendor under `vendors` (it replaces that vendor's",
+    "whole entry), or any list under `generic`; the rest comes from this file.",
+    "",
+    "custom: your own entry, for a captcha the built-in vendors do not know. It",
+    "is detected before every built-in vendor and reported as `unknown`, and its",
+    "submit, text box, refresh and slider controls are tried before the generic",
+    "ones. It must name a `widget`, `challenge` or `checkbox`; `hosts` is optional.",
+    "",
+    "vendors: one entry per vendor, in detection order. Order matters: the driver",
+    "takes the first visible match in table order. `hosts` are URL substrings of",
+    "the vendor's code on the wire; every other field is a list of CSS (or",
+    "Playwright `xpath=`) selectors, except `response`, `checked`, `accepted` and",
+    "`fresh` (one selector each), `banners` ([selector, verdict] pairs) and",
+    "`hold_completes` (true or false). `note` is for people, not the solver.",
+    "",
+    "generic: the fallbacks tried after every vendor's own. `submit_text` is the",
+    "button text probed for a submit control, in order.",
+    "",
+    "Keys starting with `_` are comments. Field reference: `_fields`."
+  ],
+  "_fields": {
+    "hosts": "URL substrings of the vendor's code on the wire. A tripwire, not a detector: the host stays on the wire when a vendor renames its markup (see TRIBAL_KNOWLEDGE.md). BotDetect is self-hosted, so it has none.",
+    "challenge": "On the host page: the open challenge. Detected first.",
+    "checkbox": "On the host page: the checkbox. Detected while `response` is empty and `checked` is not showing.",
+    "enclave": "On the host page: a frame the vendor draws its other frames inside. Every host-page selector also reads the inside of a visible one.",
+    "widget": "On the host page: inline widget shapes, detected last. Iframe selectors go first; a class that lives inside the frame document (.CheckboxCaptcha, .mtcap) only ever matches an inline embed.",
+    "response": "On the host page: the field the vendor fills on success. Read first and unconditionally, because hCaptcha's overlay hides the anchor.",
+    "checked": "Inside the checkbox frame: the box shows accepted. Demo pages do not always fill `response`.",
+    "box": "Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph. An in-page checkbox that names one is a button with no tick box to find, and is clicked where it is.",
+    "accepted": "On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).",
+    "fresh": "Inside the challenge frame: a new round has painted, with text.",
+    "images": "Inside the challenge frame: the pictures a board is made of; the driver waits for each to have painted.",
+    "submit": "Inside the widget: the vendor's own submit control, tried after the generic text probes.",
+    "banners": "Inside the challenge frame: verdict banners and what each means.",
+    "blocked": "Inside the challenge frame: the vendor refusing to serve this client at all. Nothing after it can succeed.",
+    "passive": "On the host page: the vendor's frames that are never interactive, so a page showing only these has no widget.",
+    "text_input": "Inside the widget, and its enclosing fieldset/form: the answer box of a typed captcha.",
+    "slider_handle": "Inside the widget: the knob a slide must start on; a drag from the piece moves nothing.",
+    "piece": "Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.",
+    "refresh": "Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.",
+    "hold_completes": "A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching the answer's `to` is not a release, and the hold lasts until the widget says it is done."
+  },
+  "custom": null,
+  "vendors": {
+    "recaptcha": {
+      "note": "An Enterprise sitekey serves the same widget from /recaptcha/enterprise/ instead of /recaptcha/api2/.",
+      "hosts": [
+        "google.com/recaptcha",
+        "recaptcha.net"
+      ],
+      "challenge": [
+        "iframe[src*=\"recaptcha/api2/bframe\"]",
+        "iframe[src*=\"recaptcha/enterprise/bframe\"]"
+      ],
+      "checkbox": [
+        "iframe[src*=\"recaptcha/api2/anchor\"]:not([src*=\"size=invisible\"])",
+        "iframe[src*=\"recaptcha/enterprise/anchor\"]:not([src*=\"size=invisible\"])"
+      ],
+      "response": "[name=\"g-recaptcha-response\"]",
+      "checked": ".recaptcha-checkbox-checked",
+      "box": [
+        "#recaptcha-anchor"
+      ],
+      "fresh": ".rc-imageselect-instructions, #rc-imageselect",
+      "submit": [
+        "#recaptcha-verify-button"
+      ],
+      "banners": [
+        [
+          ".rc-imageselect-error-select-more",
+          "select-more"
+        ],
+        [
+          ".rc-imageselect-error-dynamic-more",
+          "dynamic-more"
+        ],
+        [
+          ".rc-imageselect-incorrect-response",
+          "rejected"
+        ]
+      ],
+      "blocked": [
+        ".rc-doscaptcha-header-text"
+      ],
+      "passive": [
+        "iframe[src*=\"size=invisible\"]"
+      ],
+      "refresh": [
+        "#recaptcha-reload-button"
+      ]
+    },
+    "hcaptcha": {
+      "note": "Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com. secure-api.js draws every frame inside a full-viewport enclave, one per render, and only a visible one holds an open challenge.",
+      "hosts": [
+        "hcaptcha.com"
+      ],
+      "challenge": [
+        "iframe[src*=\"hcaptcha\"][src*=\"frame=challenge\"]"
+      ],
+      "checkbox": [
+        "iframe[src*=\"hcaptcha\"][src*=\"frame=checkbox\"]:not([src*=\"frame=checkbox-invisible\"])"
+      ],
+      "enclave": [
+        "iframe[src*=\"hcaptcha\"][src*=\"frame=enclave\"]"
+      ],
+      "response": "[name=\"h-captcha-response\"]",
+      "checked": "#checkbox[aria-checked=\"true\"]",
+      "box": [
+        "#checkbox"
+      ],
+      "fresh": ".prompt-text",
+      "images": [
+        ".task-image .image",
+        ".task .image",
+        ".challenge-example img",
+        ".image-wrapper img"
+      ],
+      "submit": [
+        ".button-submit"
+      ],
+      "passive": [
+        "iframe[src*=\"hcaptcha\"][src*=\"frame=enclave\"]",
+        "iframe[src*=\"hcaptcha\"][src*=\"frame=checkbox-invisible\"]"
+      ],
+      "refresh": [
+        ".refresh.button"
+      ]
+    },
+    "turnstile": {
+      "hosts": [
+        "challenges.cloudflare.com"
+      ],
+      "checkbox": [
+        "iframe[src*=\"challenges.cloudflare.com\"]",
+        ".cf-turnstile"
+      ],
+      "response": "[name=\"cf-turnstile-response\"]"
+    },
+    "geetest": {
+      "note": "v4's \"Click to verify\" bar opens the puzzle. Its container wears `geetest_freeze_wait` while the puzzle is open (`geetest_boxShow` only until a first wrong answer, after which the box stays up dealing a new one) and `geetest_success` once passed, so the checkbox matches only a bar that has not been clicked yet.",
+      "hosts": [
+        "geetest.com"
+      ],
+      "checkbox": [
+        ".geetest_captcha:not(.geetest_boxShow):not(.geetest_freeze_wait):not(.geetest_success):not(.geetest_lock_success) .geetest_btn_click"
+      ],
+      "widget": [
+        ".geetest_box",
+        ".geetest_panel_box",
+        ".geetest_popup_window",
+        ".geetest_widget"
+      ],
+      "box": [
+        ".geetest_btn_click"
+      ],
+      "accepted": ".geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, .geetest_captcha.geetest_lock_success",
+      "submit": [
+        ".geetest_submit"
+      ],
+      "slider_handle": [
+        ".geetest_slider_button",
+        ".geetest_btn",
+        ".geetest_slider .geetest_arrow"
+      ],
+      "piece": [
+        ".geetest_slice"
+      ],
+      "refresh": [
+        ".geetest_refresh",
+        ".geetest_refresh_1"
+      ]
+    },
+    "tencent": {
+      "note": "Both in-page and iframe shapes stay (Tencent moved in-host on 2026-08-11; see TRIBAL_KNOWLEDGE.md), and the iframe id is prefix-anchored: `[id*=tcaptcha]` also matched MTCaptcha's iframe and hid that `.mtcap` matched nothing.",
+      "hosts": [
+        "captcha.gtimg.com",
+        "captcha.qcloud.com"
+      ],
+      "widget": [
+        "#tcaptcha_transform_dy",
+        "#tCaptchaDyContent",
+        ".tencent-captcha-dy__content",
+        "iframe#tcaptcha_iframe_dy",
+        "iframe[id^=\"tcaptcha\"]",
+        "iframe[src*=\"captcha.gtimg.com\"]",
+        "iframe[src*=\"captcha.qq.com\"]"
+      ],
+      "slider_handle": [
+        ".tencent-captcha-dy__slider-block",
+        "#tcaptcha_drag_thumb",
+        ".tc-slider-normal",
+        "[id*=slideBlock]"
+      ],
+      "piece": [
+        ".tencent-captcha-dy__fg-item"
+      ],
+      "refresh": [
+        ".tencent-captcha-dy__footer-icon--refresh"
+      ]
+    },
+    "yidun": {
+      "hosts": [
+        "dun.163.com",
+        "cstaticdun.126.net",
+        "necaptcha.nosdn.127.net"
+      ],
+      "widget": [
+        ".yidun_panel",
+        ".yidun"
+      ],
+      "slider_handle": [
+        ".yidun_slider",
+        ".yidun_jigsaw"
+      ],
+      "piece": [
+        ".yidun_jigsaw"
+      ],
+      "refresh": [
+        ".yidun_refresh"
+      ]
+    },
+    "yandex": {
+      "hosts": [
+        "smartcaptcha.yandexcloud.net"
+      ],
+      "widget": [
+        "iframe[src*=\"smartcaptcha.yandexcloud.net/advanced\"]",
+        "iframe[src*=\"smartcaptcha.yandexcloud.net\"]",
+        ".CheckboxCaptcha"
+      ],
+      "text_input": [
+        ".AdvancedCaptcha-Input input",
+        "input.Textinput-Control",
+        "input[name=\"rep\"]"
+      ]
+    },
+    "lemin": {
+      "hosts": [
+        "leminnow.com"
+      ],
+      "widget": [
+        "#lemin-cropped-captcha",
+        ".lemin-captcha-popup"
+      ],
+      "slider_handle": [
+        ".lemin-slider-handle",
+        "#lemin-cropped-captcha .slider"
+      ],
+      "piece": [
+        ".lemin-cropped-puzzle-piece",
+        "#lemin-cropped-captcha canvas + canvas"
+      ]
+    },
+    "prosopo": {
+      "hosts": [
+        "prosopo.io"
+      ],
+      "widget": [
+        ".prosopo-modalInner",
+        ".procaptcha-checkbox"
+      ]
+    },
+    "mtcaptcha": {
+      "hosts": [
+        "mtcaptcha.com"
+      ],
+      "widget": [
+        "iframe[src*=\"service.mtcaptcha.com\"]",
+        "iframe[id^=\"mtcaptcha-iframe\"]",
+        ".mtcaptcha",
+        ".mtcap"
+      ],
+      "text_input": [
+        "input.mtcap-inputtext",
+        ".mtcap input[type=text]"
+      ],
+      "refresh": [
+        ".mtcap-refresh"
+      ]
+    },
+    "botdetect": {
+      "hosts": [],
+      "widget": [
+        ".BDC_CaptchaDiv"
+      ],
+      "text_input": [
+        "input[id*=captchaCode]",
+        "input#captchaCode",
+        "input[id*=validateCaptcha]",
+        ".BDC_CaptchaDiv input[type=text]"
+      ],
+      "refresh": [
+        "a[id*=\"ReloadLink\"]",
+        ".BDC_ReloadIcon"
+      ]
+    },
+    "human": {
+      "note": "The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.",
+      "hosts": [],
+      "widget": [
+        "#px-captcha"
+      ],
+      "hold_completes": true
+    },
+    "awswaf": {
+      "note": "The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.",
+      "hosts": [
+        "awswaf.com"
+      ],
+      "widget": [
+        ".amzn-captcha-modal"
+      ]
+    },
+    "captchafox": {
+      "note": "The puzzle opens in a modal over the \"I am human\" box, which stays on screen, so the modal is a challenge: a widget would be outranked by the box and the box clicked again.",
+      "hosts": [
+        "captchafox.com"
+      ],
+      "challenge": [
+        ".cf-modal__challenge"
+      ],
+      "checkbox": [
+        "div[id^=\"cf-widget-\"]"
+      ],
+      "response": "[name=\"cf-captcha-response\"]",
+      "slider_handle": [
+        ".cf-slider__button"
+      ]
+    },
+    "dingxiang": {
+      "note": "Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.",
+      "hosts": [
+        "cdn.dingxiang-inc.com/ctu-group/captcha",
+        "cap.dingxiang-inc.com"
+      ],
+      "widget": [
+        ".dx_captcha_oneclick_one-step"
+      ],
+      "slider_handle": [
+        ".dx_captcha_basic_slider",
+        ".dx_captcha_rotate_slider"
+      ]
+    },
+    "funcaptcha": {
+      "note": "The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside it; the game frame's own path is listed so a page that frames the game directly is found too.",
+      "hosts": [
+        "arkoselabs.com"
+      ],
+      "widget": [
+        "iframe[src*=\"arkoselabs.com\"]",
+        "iframe[src*=\"ec-game-core/game-core\"]"
+      ],
+      "hold_completes": true
+    },
+    "proton": {
+      "note": "Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.",
+      "hosts": [
+        "/core/v4/captcha"
+      ],
+      "widget": [
+        "iframe[src*=\"/core/v4/captcha\"]"
+      ]
+    },
+    "unknown": {
+      "hosts": []
+    }
+  },
+  "generic": {
+    "submit_text": [
+      "verify",
+      "next",
+      "submit",
+      "skip",
+      "confirm"
+    ],
+    "text_input": [
+      "input[name*=\"captcha\" i]",
+      "input[id*=\"captcha\" i]",
+      "input[aria-label*=\"captcha\" i]",
+      "input[placeholder*=\"code\" i]",
+      "input[autocomplete=\"off\"][type=text]",
+      "input[type=text]",
+      "input:not([type])",
+      "input[type=tel]",
+      "textarea"
+    ],
+    "slider_handle": [
+      "[role=\"slider\"]",
+      "[aria-valuenow]",
+      "[class*=\"slider\"][class*=\"btn\"]",
+      "[class*=\"slider\"][class*=\"button\"]",
+      "[class*=\"slide\"][class*=\"handle\"]",
+      "[class*=\"drag\"][class*=\"thumb\"]"
+    ],
+    "piece": [
+      "[class*=\"puzzle\"][class*=\"piece\"]",
+      "[class*=\"jigsaw\"]"
+    ]
+  }
+}

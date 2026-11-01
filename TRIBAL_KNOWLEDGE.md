@@ -1014,8 +1014,8 @@ today, and the day it stops is the day the list goes blind, which is what the
 live check is for.
 
 **Every selector lives in one typed table, and the driver speaks locators.**
-`SELECTORS` (`selectors.ts` / `selectors.py`) is a `Record<Vendor, VendorSelectors>`
-with one row per vendor: hosts on the wire, challenge and checkbox iframes,
+`SELECTORS` (loaded from `captchakraken.config.json` by `selectors.ts` / `selectors.py`) is a
+`Record<Vendor, VendorSelectors>` with one row per vendor: hosts on the wire, challenge and checkbox iframes,
 inline widget shapes, the response field, the accepted and checked markers,
 submit controls, text inputs, slider handles and pieces. Detection, the solved
 test, the fresh-round test and the banner read are each one generic pass over

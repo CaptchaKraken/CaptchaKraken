@@ -29,7 +29,7 @@ import { DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS } from './limits';
 import { resolvePythonCommand } from './python-command';
 import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
 import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
-import { DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe } from './selectors';
+import { DEFAULT_CONFIG_PATH, DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe } from './selectors';
 
 const execFileAsync = promisify(execFile);
 /** The ceiling on one ask, matching the Python planner's own default. */
@@ -355,7 +355,9 @@ export class CaptchaKrakenSolver {
 
   constructor(config: CaptchaKrakenConfig = {}) {
     this.config = config;
-    if (config.customSelectors) this.sel = new SelectorTable(config.customSelectors);
+    if (config.customSelectors || config.selectors !== undefined) {
+      this.sel = new SelectorTable(config.customSelectors, config.selectors ?? DEFAULT_CONFIG_PATH);
+    }
     this.human = resolveHumanizer({ ...config, startingMousePosition: config.startingMousePosition ?? { x: 100, y: 100 } });
   }
 
