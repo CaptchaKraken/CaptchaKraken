@@ -124,6 +124,7 @@ Everything model-specific lives in `captchakraken.config` and is env-overridable
 | `CAPTCHA_LORA_NAME` | Served adapter name the client requests | `captcha-v12` |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` disables local auto-start | `1` |
 | `CAPTCHA_KRAKEN_DETECTOR` | A local element-detector `.onnx` to run instead of downloading the released one | the released weights, fetched once |
+| `CAPTCHA_KRAKEN_DETECTOR_MODEL` | Which released detector runs: `light` (MobileNetV3, for one or two CPUs), `normal` (ResNet-18), or `auto` | `auto`: `light` on two usable CPUs or fewer, a container's CPU quota included |
 | `CAPTCHA_HUMANIZATION` | How gestures are performed: `mouse`, `mobile` or `none` | `mouse` |
 
 **How it moves** is a choice of input device, not a realism dial. `mobile`

@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+import captchakraken.pointer.detector as detector
 from captchakraken.tool_calls.find_checkbox import find_checkbox
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "checkbox")
@@ -30,6 +31,19 @@ TICK_BOXES = {
 }
 #: A ticked or passed widget has nothing left to click.
 TICKED = ["recaptcha_ticked_1.5x.png", "hcaptcha_ticked.png", "turnstile_passed.png"]
+
+
+@pytest.fixture(params=sorted(detector.WEIGHTS), autouse=True)
+def model(request, monkeypatch):
+    """Both released detectors: lite runs on every small or slow machine."""
+    if os.getenv("CAPTCHA_KRAKEN_DETECTOR"):
+        pytest.skip("CAPTCHA_KRAKEN_DETECTOR pins one local file; both released models are tested without it")
+    monkeypatch.setenv("CAPTCHA_KRAKEN_DETECTOR_MODEL", request.param)
+    detector.local.cache_clear()
+    detector._detect_file.cache_clear()
+    yield request.param
+    detector.local.cache_clear()
+    detector._detect_file.cache_clear()
 
 
 def _iou(a, b):
