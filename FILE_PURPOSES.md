@@ -316,6 +316,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 |---|---|
 | `python/tests/test_a_pointer_answer_always_carries_points.py` | Every pointer answer is its points: the click, drag, slide, type, hold and moment shapes the heads decode to. |
 | `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer` and never runs find_grid; its answer is performed like generation 3's. |
+| `python/tests/test_a_photo_cut_into_tiles_is_a_grid.py` | `_is_real_grid` accepts a photo cut into nearly flat tiles and refuses icons drawn on one shared background. |
 | `python/tests/test_an_element_is_outlined_by_its_mask.py` | The overlay traces each element's mask, keeps its tags readable and off one another, and its look is frozen by a hash. |
 | `python/tests/test_the_offset_head_learns.py` | The point offset head learns from hidden states at the base model's scale instead of saturating on its first step. |
 | `python/tests/test_the_pointer_reads_its_answer_from_one_prefill.py` | The heads find their 46 questions and the video moments in one prompt, and the packed decision round-trips. |

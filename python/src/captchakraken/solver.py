@@ -272,13 +272,15 @@ class CaptchaSolver:
         return media_path
 
     def _is_real_grid(self, image_path: str, grid_boxes: List[Tuple[int, int, int, int]]) -> bool:
-        """Reject a sprite board on one background, or a lattice of flat cells: icons laid out in rows are a
-        click board even where the element detector sees their rows as a grid.
+        """Reject a sprite board on one background: icons laid out in rows are a click board even where the
+        element detector sees their rows as a grid.
 
-        Measured on the detector's cells (60 captures a family): no reCAPTCHA, hCaptcha, Prosopo or GeeTest
-        photo grid has its cells share a background, and every GeeTest iconcrush board the detector reads as
-        a grid does. The line tracer's lattice-regularity gate is gone: detector boxes sit a median 0.04 of a
-        cell out of true, so its 0.02 tolerance (set on traced lines) rejected most true grids.
+        Measured on the detector's cells over 3,809 real and generated grids and 270 non-grid 9- or 16-cell
+        lattices: no grid has its cells share a background, and every GeeTest iconcrush board the detector reads
+        as a grid does. Two of the line tracer's checks are gone. Its lattice-regularity gate (0.02 of a cell,
+        set on traced lines) rejected most true grids: detector boxes sit a median 0.04 out of true. Its
+        flat-cell gate (mean stddev < 25) caught none of the 270 and refused 24 of 343 reCAPTCHA 4x4 boards,
+        one photo cut into sixteen tiles whose sky tiles are flat once the cells stop at the white gutters.
         """
         with Image.open(image_path) as im:
             img = np.asarray(im.convert("RGB"))
@@ -289,9 +291,6 @@ class CaptchaSolver:
         # Real tiles are independent photographs; a sprite board shares one colour behind every cell.
         if len(rois) >= 4 and float(np.mean(np.std(np.array([np.median(r, axis=0) for r in rois]), axis=0))) < 6.0:
             _debug("_is_real_grid: every cell shares one background colour → reject")
-            return False
-        if float(np.mean([np.mean(np.std(r, axis=0)) for r in rois])) < 25.0:
-            _debug("_is_real_grid: overall mean stddev too low → reject")
             return False
         return True
 
