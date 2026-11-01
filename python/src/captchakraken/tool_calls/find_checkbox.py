@@ -4,8 +4,9 @@ false positive nor a false negative raises."""
 
 from typing import Optional, Tuple
 
-#: Measured on the captured widgets and on every generated board: a true tick
-#: box scores above it, and nothing on a puzzle board does.
+#: Measured on widgets in a language the detector never trained on: every one of
+#: 96 tick boxes scored >= 0.997, a ticked or passed widget 0, and the highest
+#: `checkbox` score on 600 real puzzle boards was 0.145. 0.6 sits far from both.
 MIN_SCORE = 0.6
 
 

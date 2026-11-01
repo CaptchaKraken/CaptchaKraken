@@ -83,3 +83,27 @@ def test_a_single_row_is_not_a_grid(detected):
     cells = _lattice(1, 4)
     detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells])
     assert find_grid("board.png") is None
+
+
+def test_a_tile_read_as_a_jigsaw_piece_still_fills_its_slot(detected):
+    """Flat-coloured tiles can read as `draggable`; in the grid's lattice they are cells."""
+    cells = _lattice(3, 3)
+    dets = [_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:4] + cells[5:]]
+    detected(dets + [_det("draggable", cells[4])])
+    assert find_grid("board.png") == [tuple(c) for c in cells]
+
+
+def test_a_tile_the_cells_already_cover_is_not_counted_twice(detected):
+    cells = _lattice(3, 3)
+    detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells]
+             + [_det("item", (c[0] + 3, c[1] + 3, c[2] - 3, c[3] - 3)) for c in cells])
+    assert find_grid("board.png") == [tuple(c) for c in cells]
+
+
+def test_an_object_inside_a_tile_is_not_a_tile(detected):
+    """A small item drawn on one tile is not another cell of the lattice."""
+    cells = _lattice(3, 3)
+    small = (cells[4][0] + 30, cells[4][1] + 30, cells[4][0] + 60, cells[4][1] + 60)
+    detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:4] + cells[5:]]
+             + [_det("item", small)])
+    assert find_grid("board.png") is None

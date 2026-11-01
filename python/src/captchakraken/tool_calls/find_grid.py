@@ -30,6 +30,33 @@ GRID_MIN_SCORE = 0.5
 CELL_MIN_SCORE = 0.5
 #: A row starts where a cell's top sits more than this share of a cell below the row's.
 ROW_BREAK = 0.5
+#: A tile is a cell whatever else it looks like: a flat-coloured tile can read as a
+#: jigsaw piece (`draggable`) or an `item`. Inside the grid, one the size of the
+#: cells (within this share) that no cell box already covers fills its slot.
+TILE_CLASSES = ("draggable", "item")
+TILE_SIZE_TOL = 0.25
+
+
+def _iou(a: Sequence[float], b: Sequence[float]) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _with_tiles(cells: List[List[float]], tiles: List[List[float]]) -> List[List[float]]:
+    """`cells` plus every tile the size of a cell that no cell (or tile already taken) overlaps."""
+    if not cells:
+        return cells
+    w = float(np.median([c[2] - c[0] for c in cells]))
+    h = float(np.median([c[3] - c[1] for c in cells]))
+    out = list(cells)
+    for t in tiles:
+        if abs((t[2] - t[0]) - w) <= TILE_SIZE_TOL * w and abs((t[3] - t[1]) - h) <= TILE_SIZE_TOL * h \
+                and all(_iou(t, c) < 0.3 for c in out):
+            out.append(t)
+    return out
 
 
 def _cells_in(grid: Sequence[float], cells: List[List[float]]) -> List[List[float]]:
@@ -60,6 +87,8 @@ def find_grid(image_path: str) -> Optional[List[Box]]:
         return None
     grid = max(grids, key=lambda d: d["score"])["box"]
     cells = _cells_in(grid, [d["box"] for d in dets if d["class"] == "cell" and d["score"] >= CELL_MIN_SCORE])
+    cells = _with_tiles(cells, _cells_in(grid, [d["box"] for d in dets
+                                                if d["class"] in TILE_CLASSES and d["score"] >= CELL_MIN_SCORE]))
     if len(cells) < 4:
         return None
     rows = _rows(cells)
