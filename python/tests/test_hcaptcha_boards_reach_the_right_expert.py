@@ -15,7 +15,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from captchakraken.tool_calls.find_grid import find_grid
 
-pytest.importorskip("cv2")
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "grid")
 
 

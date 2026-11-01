@@ -128,10 +128,12 @@ requirements → one agent.
 
 - **The model is Qwen3.5-9B.** Never reference Qwen2 / Qwen2.5 / Qwen-VL anywhere;
   grep before any change that touches serving or the planner.
-- **`find_grid` is the foundation.** It's pure OpenCV (no model) and the most
-  heavily gated code here: every geometry gate in
-  `python/tests/test_grid_geometry_gates.py` exists because one specific false
-  positive happened. Read the test named for a gate before you change it.
+- **`find_grid` is the foundation.** It reads the element detector (a small
+  Mask R-CNN run on the CPU through onnxruntime, no planner model): the grid and
+  its cells are boxes the network found. Every board that once reached the wrong
+  expert is a test under `python/tests/test_grid_*` and
+  `test_hcaptcha_boards_reach_the_right_expert.py`; run them before you change
+  how detections become a lattice.
 - **Locators, never `page.$()` / `page.$$()` / `query_selector()`.** The
   driver reads the page through `scope.locator(sel).filter({ visible: true })`
   (`filter(visible=True)` in Python), `.all()`, `.count()` and

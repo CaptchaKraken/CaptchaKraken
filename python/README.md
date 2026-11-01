@@ -9,7 +9,7 @@
   The Python engine and CLI behind <a href="https://github.com/CaptchaKraken/CaptchaKraken">CaptchaKraken</a>.
 </p>
 
-OpenCV tile detection plus a fine-tuned **Qwen3.5-9B** vision model. Give it a
+CPU element detection plus a fine-tuned **Qwen3.5-9B** vision model. Give it a
 screenshot of a captcha and it returns the plan to solve it — which tiles to
 select, where to click, what to drag, how far to slide, or what text to type.
 Ships the `captchakraken` command.
@@ -57,7 +57,7 @@ keyframes and answered with the frame the action belongs to.
 ## Install
 
 ```bash
-pip install captchakraken            # client: OpenCV detection + vLLM HTTP planner
+pip install captchakraken            # client: CPU element detection + vLLM HTTP planner
 pip install "captchakraken[serve]"   # + the serving stack (vLLM/torch) to self-host
 ```
 
@@ -107,7 +107,7 @@ solver = CaptchaSolver()          # connects to / auto-starts a local vLLM
 actions = solver.solve("captcha.png")
 ```
 
-Pure-OpenCV tool subcommands (no model): `find-grid`, `find-checkbox`,
+Element-detector tool subcommands (CPU only, no planner model): `find-grid`, `find-checkbox`,
 `detect-selected`, `grid-cell-states`, and a persistent `serve` worker the browser driver polls.
 
 ## Configuration (model-agnostic)

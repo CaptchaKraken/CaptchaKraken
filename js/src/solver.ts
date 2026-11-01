@@ -1112,7 +1112,7 @@ export class CaptchaKrakenSolver {
     }
   }
 
-  /** One capture and OpenCV, no model: a point inside the tick box, or null when none is drawn. */
+  /** One capture and the element detector, no model: a point inside the tick box, or null when none is drawn. */
   private async checkboxOnScreen(el: ElementHandle): Promise<[number, number] | null> {
     const box = await el.boundingBox();
     if (!box) throw new Error('Could not get bounding box of captcha element');

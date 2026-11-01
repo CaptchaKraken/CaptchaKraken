@@ -1,7 +1,5 @@
-"""A gutter that is nearly one colour is still a gutter: vendor gutters are literally constant, so any dither ended the walk.
-
-Fixed by scaling the tolerances to the measured noise floor. Bridging bad pixels collapsed real reCAPTCHA 3x3s 40/40 -> 7/40;
-flat widening to 10/8 cost one real sample and 14/12 four. Fixtures are synthesised so the test needs no private corpus.
+"""A gutter that is nearly one colour is still a gutter: vendor gutters are literally constant, and a capture's
+JPEG or scaling dither once ended the line tracer's walk. Fixtures are synthesised so the test needs no private corpus.
 """
 
 import os
@@ -10,8 +8,9 @@ import tempfile
 
 import numpy as np
 import pytest
+from scipy import ndimage
 
-cv2 = pytest.importorskip("cv2")
+from drawing import imwrite
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -44,7 +43,7 @@ def _grid_image(gutter_noise=0.0, seed=0):
 
 def _detect(img):
     path = tempfile.mktemp(suffix=".png")
-    cv2.imwrite(path, img)
+    imwrite(path, img)
     try:
         return find_grid(path)
     finally:
@@ -63,23 +62,10 @@ def test_a_dithered_gutter_is_still_detected(noise):
         f"a grid whose gutters carry {noise} L-units of dither was not detected")
 
 
-def test_a_pristine_image_keeps_the_original_tolerances():
-    """The safety property: an image with no noise detects exactly as before, so NOISE_GAIN cannot loosen pristine captchas."""
-    from captchakraken.tool_calls.find_grid import (
-        image_noise, walk_tolerances, SEED_L_TOL, STEP_L_TOL, CONT_TOL)
-    import captchakraken.tool_calls.find_grid as fg
-
-    clean = _grid_image(gutter_noise=0.0, seed=2)
-    lab = fg._to_lab(clean)
-    assert image_noise(lab) < 0.5, "a pristine render must measure ~no noise"
-    seed_tol, step_tol, cont_tol2 = walk_tolerances(0.0)
-    assert (seed_tol, step_tol, cont_tol2) == (SEED_L_TOL, STEP_L_TOL, CONT_TOL ** 2)
-
-
 def test_pure_texture_is_still_rejected():
     rng = np.random.default_rng(3)
     photo = np.clip(rng.normal(128, 45, (SIDE, SIDE, 3)), 0, 255).astype(np.uint8)
-    photo = cv2.GaussianBlur(photo, (7, 7), 0)
+    photo = ndimage.gaussian_filter(photo, sigma=(1.4, 1.4, 0))
     assert _detect(photo) is None
 
 

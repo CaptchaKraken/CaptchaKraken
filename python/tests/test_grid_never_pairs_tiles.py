@@ -19,7 +19,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from captchakraken.tool_calls.find_grid import find_grid
 
-cv2 = pytest.importorskip("cv2")
+from drawing import hsv_bgr, imwrite
 
 
 def _board(rows, cols, tile_w, tile_h, gutter=8, margin=16):
@@ -31,13 +31,13 @@ def _board(rows, cols, tile_w, tile_h, gutter=8, margin=16):
         for c in range(cols):
             y, x = margin + r * (tile_h + gutter), margin + c * (tile_w + gutter)
             hue = int((r * cols + c) * 9) % 180
-            base = cv2.cvtColor(np.uint8([[[hue, 190, 180]]]), cv2.COLOR_HSV2BGR)[0, 0]
+            base = hsv_bgr(hue, 190, 180)
             patch = np.full((tile_h, tile_w, 3), base, dtype=np.int16)
             patch += rng.integers(-20, 21, (tile_h, tile_w, 3), dtype=np.int16)
             canvas[y:y + tile_h, x:x + tile_w] = np.clip(patch, 0, 255).astype(np.uint8)
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
-    cv2.imwrite(path, canvas)
+    imwrite(path, canvas)
     return path
 
 

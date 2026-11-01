@@ -1,5 +1,6 @@
 """The vendor hint is whichever SELECTORS entry named the widget, keyed on the `hcaptcha` substring rather than the apex host
-(challenges come off newassets.hcaptcha.com), and `unknown` must stay permissive for every grid shape: the offline grader reports it."""
+(challenges come off newassets.hcaptcha.com). A named vendor the grid expert never trained on gets the pixel expert;
+`unknown` stays permissive for both grid shapes, because the CLI and the offline grader name no vendor."""
 
 from pathlib import Path
 
@@ -60,5 +61,8 @@ def test_failing_to_name_the_vendor_lets_that_same_lattice_through():
         "gate is off and find_grid's false positives reach the grid expert")
 
 
-def test_vendors_the_engine_does_not_gate_keep_every_shape():
-    assert all(_grid_dims(16, v) == (4, 4) for v in SELECTORS if v not in (Vendor.HCAPTCHA, Vendor.RECAPTCHA))
+def test_only_the_vendors_the_grid_expert_was_trained_on_reach_it():
+    for v in SELECTORS:
+        want = {Vendor.RECAPTCHA: {9, 16}, Vendor.HCAPTCHA: {9}, Vendor.UNKNOWN: {9, 16}}.get(v, set())
+        got = {n for n in (9, 16) if _grid_dims(n, v)}
+        assert got == want, f"{v.value}: grids of {sorted(got)} cells reach the grid expert, not {sorted(want)}"

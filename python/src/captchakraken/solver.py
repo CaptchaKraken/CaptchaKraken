@@ -1,4 +1,4 @@
-"""Image in, actions out: grid detection plus the model, for one still or one recorded animation."""
+"""Image in, actions out: the element detector plus the model, for one still or one recorded animation."""
 
 import math
 import os
@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-import cv2
 import numpy as np
 from PIL import Image
 
@@ -34,9 +33,10 @@ DEBUG = os.getenv("CAPTCHA_DEBUG", "0") == "1"
 # ~1.2% ≈ ±6px on a 512px challenge.
 _PIXEL_BOX_HALF = float(os.getenv("CAPTCHA_PIXEL_BOX_HALF", "0.012"))
 
-# The only cell counts a trained grid puzzle has, and which of them each named vendor ships. UNKNOWN stays
-# permissive in both directions: the driver reports it for GeeTest and Prosopo, and the offline grader defaults
-# to it, so narrowing it would silently stop scoring reCAPTCHA 4x4 in evaluation.
+# The grid expert was trained on reCAPTCHA's 3x3 and 4x4 and hCaptcha's 3x3 and nothing else, so only those
+# boards are asked as grids; every other vendor's grid goes to the pixel expert, which was trained on them. A
+# caller that names no vendor (the CLI, a script) gets the expert for any 3x3 or 4x4, which is what those boards
+# most often are.
 GRID_CELL_SHAPES = {9: (3, 3), 16: (4, 4)}
 VENDOR_GRID_CELLS: dict[Vendor, frozenset[int]] = {Vendor.HCAPTCHA: frozenset({9}), Vendor.RECAPTCHA: frozenset({9, 16})}
 # Every true grid measures 0.000 cells out of true; the nearest false lattice measured 0.128.
@@ -95,9 +95,9 @@ def _lattice_irregularity(grid_boxes) -> Optional[float]:
 
 
 def _grid_dims(n_cells: int, puzzle_source: Vendor = Vendor.UNKNOWN):
-    shape = GRID_CELL_SHAPES.get(n_cells)
-    allowed = VENDOR_GRID_CELLS.get(Vendor(puzzle_source))
-    return None if shape is None or (allowed is not None and n_cells not in allowed) else shape
+    vendor = Vendor(puzzle_source)
+    allowed = frozenset(GRID_CELL_SHAPES) if vendor == Vendor.UNKNOWN else VENDOR_GRID_CELLS.get(vendor, frozenset())
+    return GRID_CELL_SHAPES[n_cells] if n_cells in allowed else None
 
 
 class CaptchaSolver:
@@ -136,7 +136,6 @@ class CaptchaSolver:
 
         # Generation 4 never runs find_grid: the pointer server's element detector numbers a grid's cells along with
         # everything else on the board, and its answer is points (and element numbers) like any other board's.
-        # The animated path never runs find_grid: it false-positives on the header and footer bands of hCaptcha's click puzzles.
         grid_boxes = [] if self.planner.prompts.pointer else find_grid(image_path)
         dims = _grid_dims(len(grid_boxes), puzzle_source) if grid_boxes else None
         if grid_boxes and dims and self._is_real_grid(image_path, grid_boxes):
@@ -144,7 +143,7 @@ class CaptchaSolver:
         if grid_boxes:
             _debug(f"find_grid returned {len(grid_boxes)} cells; not solving as a grid")
 
-        if img_h < 400:
+        if not self.planner.prompts.pointer:
             checkbox = find_checkbox(image_path)
             if checkbox:
                 x, y, w, h = checkbox
@@ -294,28 +293,20 @@ class CaptchaSolver:
         if irregularity is not None and irregularity > _GRID_REGULARITY_TOL:
             _debug(f"_is_real_grid: cells are {irregularity:.3f} of a cell out of true → reject")
             return False
-        try:
-            import cv2
-            import numpy as np
-
-            img = cv2.imread(image_path)
-            if img is None:
-                return True
-            rois = [img[y1:y2, x1:x2].reshape(-1, 3) for (x1, y1, x2, y2) in grid_boxes
-                    if x2 > x1 and y2 > y1 and img[y1:y2, x1:x2].size]
-            if not rois:
-                return False
-            # Real tiles are independent photographs; a sprite board shares one colour behind every cell.
-            if len(rois) >= 4 and float(np.mean(np.std(np.array([np.median(r, axis=0) for r in rois]), axis=0))) < 6.0:
-                _debug("_is_real_grid: every cell shares one background colour → reject")
-                return False
-            if float(np.mean([np.mean(np.std(r, axis=0)) for r in rois])) < 25.0:
-                _debug("_is_real_grid: overall mean stddev too low → reject")
-                return False
-            return True
-        except Exception as e:
-            _debug(f"_is_real_grid check errored ({e}); accepting grid.")
-            return True
+        with Image.open(image_path) as im:
+            img = np.asarray(im.convert("RGB"))
+        rois = [img[y1:y2, x1:x2].reshape(-1, 3) for (x1, y1, x2, y2) in grid_boxes
+                if x2 > x1 and y2 > y1 and img[y1:y2, x1:x2].size]
+        if not rois:
+            return False
+        # Real tiles are independent photographs; a sprite board shares one colour behind every cell.
+        if len(rois) >= 4 and float(np.mean(np.std(np.array([np.median(r, axis=0) for r in rois]), axis=0))) < 6.0:
+            _debug("_is_real_grid: every cell shares one background colour → reject")
+            return False
+        if float(np.mean([np.mean(np.std(r, axis=0)) for r in rois])) < 25.0:
+            _debug("_is_real_grid: overall mean stddev too low → reject")
+            return False
+        return True
 
     def _cells_of(self, click: dict, grid_boxes: List[Tuple[int, int, int, int]]) -> List[int]:
         """The 1-based cells a generation-3 click names: its ids when any is a cell, else where its points land."""
