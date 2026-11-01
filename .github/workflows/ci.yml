@@ -74,6 +74,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+      # The element detector's weights (124 MB) are fetched, not shipped: grid,
+      # checkbox and routing tests run the real network. Cached on the sha256 the
+      # client pins, so a new release is downloaded once and an unchanged one never.
+      # Fetched by the client's own `weights_path()`, which checks the hash: CI
+      # exercises the download a fresh install does.
+      - name: Element detector weights (cache)
+        id: detector-key
+        run: |
+          python -c "from captchakraken.pointer.detector import WEIGHTS; print('sha=' + WEIGHTS['sha256'])" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ~/.captchakraken/detector
+          key: detector-${{ steps.detector-key.outputs.sha }}
+      - name: Element detector weights (fetch)
+        run: python -c "from captchakraken.pointer.detector import weights_path; print(weights_path())"
       # STAGE 5: the coverage threshold, measured over the run above rather than
       # by a second run of the same tests. The floor lives in pyproject.toml
       # ([tool.coverage.report] fail_under) so a local run enforces exactly what

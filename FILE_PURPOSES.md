@@ -410,6 +410,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_burst_cannot_trip_its_own_deadline.py` | The burst plans its frames from the ceiling, so it must not be able to exceed the deadline it was given. |
 | `python/tests/test_cycling_board_waits_for_its_screen.py` | The Python twin of the frame-gate regression: hold until the page shows the keyframe the model chose. |
 | `python/tests/test_every_keyframe_write_names_its_stem.py` | Both entries into the animated path write keyframes the same way; only one of them used to be exercised. |
+| `python/tests/test_detector_weights_are_fetched_once_and_checked.py` | The detector's weights are downloaded once at the pinned commit, checked against the pinned hash and refused (and not kept) when they differ. |
 | `python/tests/test_keyframes_compare_each_pair_once.py` | Keyframe extraction diffs each pair of frames once, and remembering the diffs changes no keyframe. |
 | `python/tests/test_the_client_runs_without_opencv.py` | No module of the package imports OpenCV, and the client loads where it cannot. |
 | `python/tests/test_a_frame_keeps_its_colours_and_its_pixels.py` | Frames stay BGR from disk to model, grey and movement use OpenCV's weights and threshold, and resizes reproduce OpenCV's pixels. |

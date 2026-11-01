@@ -31,9 +31,9 @@ MIN_SCORE = 0.3
 #: The released ONNX weights the client runs, pinned by commit and content.
 WEIGHTS = {
     "repo": "CaptchaKraken/CaptchaKraken-v2-Detector",
-    "revision": "main",
+    "revision": "2c47ab53e0158e35299832484889672703058dc7",
     "file": "detector.onnx",
-    "sha256": "",
+    "sha256": "725f18914ad0f8621ed332752b6fde4949bbbe2b589bbac406f47e07fe2a6a71",
 }
 
 
