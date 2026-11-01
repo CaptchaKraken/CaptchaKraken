@@ -1,4 +1,4 @@
-"""The `captchakraken` CLI: one-shot solves, the OpenCV tool calls, the CV worker, and server management.
+"""The `captchakraken` CLI: one-shot solves, the detector tool calls, the CV worker, and server management.
 
 `captchakraken image.png [model] [api_provider] [api_key] [--puzzle-source ...]` solves one still.
 Exit codes: 1 failure, 2 unsupported puzzle, 3 the hosted API refused.

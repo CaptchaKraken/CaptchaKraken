@@ -1221,7 +1221,7 @@ class PageSolver:
             _delay(_DETECTION_POLL_MS)
 
     def _checkbox_on_screen(self, element: Any) -> Optional[Tuple[float, float]]:
-        """One capture and OpenCV, no model: a point inside the tick box, or None when none is drawn."""
+        """One capture and the element detector, no model: a point inside the tick box, or None when none is drawn."""
         from .tool_calls.find_checkbox import find_checkbox
 
         box = element.bounding_box()
