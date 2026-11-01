@@ -50,7 +50,7 @@ try:
     from .solver import CaptchaSolver, solve_captcha
 
     from .page_solver import PageSolver, SolveResult, solve_captcha_on_page
-    from .selectors import SELECTORS, VendorSelectors
+    from .selectors import DEFAULT_CONFIG_PATH, SELECTORS, SelectorConfigError, VendorSelectors, load_config
     from .watcher import CaptchaWatcher
 except ModuleNotFoundError:
     ActionPlanner = None
@@ -59,6 +59,9 @@ except ModuleNotFoundError:
     PageSolver = None
     SELECTORS = None
     VendorSelectors = None
+    DEFAULT_CONFIG_PATH = None
+    SelectorConfigError = None
+    load_config = None
     CaptchaWatcher = None
     SolveResult = None
     solve_captcha_on_page = None
@@ -69,6 +72,9 @@ __all__ = [
     "PageSolver",
     "SELECTORS",
     "VendorSelectors",
+    "DEFAULT_CONFIG_PATH",
+    "SelectorConfigError",
+    "load_config",
     "CaptchaWatcher",
     "SolveResult",
     "solve_captcha_on_page",

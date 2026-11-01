@@ -1,10 +1,15 @@
-"""Every selector the driver knows, keyed by vendor. Mirrored in js/src/selectors.ts; keep both in the same order,
-because detection takes the first visible match in table order."""
+"""Every selector the driver knows, keyed by vendor, read from `captchakraken.config.json` at the repository root.
+
+The JS port reads the same file (js/src/selectors.ts). Detection takes the first visible match in table order, so the
+file's order is the detection order."""
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, fields
-from typing import Mapping, NamedTuple, Optional, Sequence, Tuple
+from pathlib import Path
+from typing import Any, Dict, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
 
 from .kinds import FrameRole, RecaptchaBanner, Vendor
 
@@ -59,152 +64,139 @@ class VendorSelectors:
     hold_completes: bool = False
 
 
-SELECTORS: Mapping[Vendor, VendorSelectors] = {
-    # An Enterprise sitekey serves the same widget from /recaptcha/enterprise/ instead of /recaptcha/api2/.
-    Vendor.RECAPTCHA: VendorSelectors(
-        hosts=("google.com/recaptcha", "recaptcha.net"),
-        challenge=('iframe[src*="recaptcha/api2/bframe"]', 'iframe[src*="recaptcha/enterprise/bframe"]'),
-        checkbox=('iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',
-                  'iframe[src*="recaptcha/enterprise/anchor"]:not([src*="size=invisible"])'),
-        response='[name="g-recaptcha-response"]',
-        checked=".recaptcha-checkbox-checked",
-        box=("#recaptcha-anchor",),
-        fresh=".rc-imageselect-instructions, #rc-imageselect",
-        submit=("#recaptcha-verify-button",),
-        refresh=("#recaptcha-reload-button",),
-        banners=(
-            (".rc-imageselect-error-select-more", RecaptchaBanner.SELECT_MORE),
-            (".rc-imageselect-error-dynamic-more", RecaptchaBanner.DYNAMIC_MORE),
-            (".rc-imageselect-incorrect-response", RecaptchaBanner.REJECTED),
-        ),
-        blocked=(".rc-doscaptcha-header-text",),
-        passive=('iframe[src*="size=invisible"]',),
-    ),
-    # Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com. secure-api.js
-    # draws every frame inside a full-viewport enclave, one per render, and only a visible one holds an open challenge.
-    Vendor.HCAPTCHA: VendorSelectors(
-        hosts=("hcaptcha.com",),
-        challenge=('iframe[src*="hcaptcha"][src*="frame=challenge"]',),
-        checkbox=('iframe[src*="hcaptcha"][src*="frame=checkbox"]:not([src*="frame=checkbox-invisible"])',),
-        enclave=('iframe[src*="hcaptcha"][src*="frame=enclave"]',),
-        response='[name="h-captcha-response"]',
-        checked='#checkbox[aria-checked="true"]',
-        box=("#checkbox",),
-        fresh=".prompt-text",
-        images=(".task-image .image", ".task .image", ".challenge-example img", ".image-wrapper img"),
-        submit=(".button-submit",),
-        refresh=(".refresh.button",),
-        passive=('iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'),
-    ),
-    Vendor.TURNSTILE: VendorSelectors(
-        hosts=("challenges.cloudflare.com",),
-        checkbox=('iframe[src*="challenges.cloudflare.com"]', ".cf-turnstile"),
-        response='[name="cf-turnstile-response"]',
-    ),
-    # v4's "Click to verify" bar opens the puzzle. Its container wears `geetest_freeze_wait` while the puzzle is open
-    # (`geetest_boxShow` only until a first wrong answer, after which the box stays up dealing a new one) and
-    # `geetest_success` once passed, so the checkbox matches only a bar that has not been clicked yet.
-    Vendor.GEETEST: VendorSelectors(
-        hosts=("geetest.com",),
-        checkbox=(".geetest_captcha:not(.geetest_boxShow):not(.geetest_freeze_wait):not(.geetest_success):not(.geetest_lock_success) "
-                  ".geetest_btn_click",),
-        box=(".geetest_btn_click",),
-        widget=(".geetest_box", ".geetest_panel_box", ".geetest_popup_window", ".geetest_widget"),
-        accepted=(".geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, "
-                  ".geetest_captcha.geetest_lock_success"),
-        submit=(".geetest_submit",),
-        refresh=(".geetest_refresh", ".geetest_refresh_1"),
-        slider_handle=(".geetest_slider_button", ".geetest_btn", ".geetest_slider .geetest_arrow"),
-        piece=(".geetest_slice",),
-    ),
-    # Both in-page and iframe shapes stay (Tencent moved in-host on 2026-08-11; see TRIBAL_KNOWLEDGE.md), and the iframe
-    # id is prefix-anchored: `[id*=tcaptcha]` also matched MTCaptcha's iframe and hid that `.mtcap` matched nothing.
-    Vendor.TENCENT: VendorSelectors(
-        hosts=("captcha.gtimg.com", "captcha.qcloud.com"),
-        widget=("#tcaptcha_transform_dy", "#tCaptchaDyContent", ".tencent-captcha-dy__content", "iframe#tcaptcha_iframe_dy",
-                'iframe[id^="tcaptcha"]', 'iframe[src*="captcha.gtimg.com"]', 'iframe[src*="captcha.qq.com"]'),
-        slider_handle=(".tencent-captcha-dy__slider-block", "#tcaptcha_drag_thumb", ".tc-slider-normal", "[id*=slideBlock]"),
-        piece=(".tencent-captcha-dy__fg-item",),
-        refresh=(".tencent-captcha-dy__footer-icon--refresh",),
-    ),
-    Vendor.YIDUN: VendorSelectors(
-        hosts=("dun.163.com", "cstaticdun.126.net", "necaptcha.nosdn.127.net"),
-        widget=(".yidun_panel", ".yidun"),
-        slider_handle=(".yidun_slider", ".yidun_jigsaw"),
-        piece=(".yidun_jigsaw",),
-        refresh=(".yidun_refresh",),
-    ),
-    Vendor.YANDEX: VendorSelectors(
-        hosts=("smartcaptcha.yandexcloud.net",),
-        widget=('iframe[src*="smartcaptcha.yandexcloud.net/advanced"]', 'iframe[src*="smartcaptcha.yandexcloud.net"]',
-                ".CheckboxCaptcha"),
-        text_input=(".AdvancedCaptcha-Input input", "input.Textinput-Control", 'input[name="rep"]'),
-    ),
-    Vendor.LEMIN: VendorSelectors(
-        hosts=("leminnow.com",),
-        widget=("#lemin-cropped-captcha", ".lemin-captcha-popup"),
-        slider_handle=(".lemin-slider-handle", "#lemin-cropped-captcha .slider"),
-        piece=(".lemin-cropped-puzzle-piece", "#lemin-cropped-captcha canvas + canvas"),
-    ),
-    Vendor.PROSOPO: VendorSelectors(
-        hosts=("prosopo.io",),
-        widget=(".prosopo-modalInner", ".procaptcha-checkbox"),
-    ),
-    Vendor.MTCAPTCHA: VendorSelectors(
-        hosts=("mtcaptcha.com",),
-        widget=('iframe[src*="service.mtcaptcha.com"]', 'iframe[id^="mtcaptcha-iframe"]', ".mtcaptcha", ".mtcap"),
-        text_input=("input.mtcap-inputtext", ".mtcap input[type=text]"),
-        refresh=(".mtcap-refresh",),
-    ),
-    Vendor.BOTDETECT: VendorSelectors(
-        hosts=(),
-        widget=(".BDC_CaptchaDiv",),
-        text_input=("input[id*=captchaCode]", "input#captchaCode", "input[id*=validateCaptcha]",
-                    ".BDC_CaptchaDiv input[type=text]"),
-        refresh=('a[id*="ReloadLink"]', ".BDC_ReloadIcon"),
-    ),
-    # The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's
-    # iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.
-    Vendor.HUMAN: VendorSelectors(
-        hosts=(),
-        widget=("#px-captcha",),
-        hold_completes=True,
-    ),
-    # The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.
-    Vendor.AWSWAF: VendorSelectors(
-        hosts=("awswaf.com",),
-        widget=(".amzn-captcha-modal",),
-    ),
-    # The puzzle opens in a modal over the "I am human" box, which stays on screen, so the modal is a challenge: a
-    # widget would be outranked by the box and the box clicked again.
-    Vendor.CAPTCHAFOX: VendorSelectors(
-        hosts=("captchafox.com",),
-        challenge=(".cf-modal__challenge",),
-        checkbox=('div[id^="cf-widget-"]',),
-        response='[name="cf-captcha-response"]',
-        slider_handle=(".cf-slider__button",),
-    ),
-    # Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.
-    Vendor.DINGXIANG: VendorSelectors(
-        hosts=("cdn.dingxiang-inc.com/ctu-group/captcha", "cap.dingxiang-inc.com"),
-        widget=(".dx_captcha_oneclick_one-step",),
-        slider_handle=(".dx_captcha_basic_slider", ".dx_captcha_rotate_slider"),
-    ),
-    # The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside
-    # it; the game frame's own path is listed so a page that frames the game directly is found too.
-    Vendor.FUNCAPTCHA: VendorSelectors(
-        hosts=("arkoselabs.com",),
-        widget=('iframe[src*="arkoselabs.com"]', 'iframe[src*="ec-game-core/game-core"]'),
-        hold_completes=True,
-    ),
-    # Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.
-    Vendor.PROTON: VendorSelectors(
-        hosts=("/core/v4/captcha",),
-        widget=('iframe[src*="/core/v4/captcha"]',),
-    ),
-    Vendor.UNKNOWN: VendorSelectors(hosts=()),
-}
-assert set(SELECTORS) == set(Vendor), "every vendor names its selectors"
+#: The default config: the repository's own `captchakraken.config.json` when this package runs from a checkout, so an
+#: edit there is what the solver reads, else the copy shipped inside the package (a wheel has no repository root).
+_SHIPPED_CONFIG = Path(__file__).with_name("captchakraken.config.json")
+_CHECKOUT_CONFIG = Path(__file__).resolve().parents[3] / "captchakraken.config.json"
+DEFAULT_CONFIG_PATH: Path = _CHECKOUT_CONFIG if _CHECKOUT_CONFIG.is_file() else _SHIPPED_CONFIG
+
+ConfigSource = Union[str, "os.PathLike[str]", Mapping[str, Any]]
+
+_FIELDS = {f.name: f for f in fields(VendorSelectors)}
+_ONE = {"response", "checked", "accepted", "fresh"}
+_GENERIC = ("submit_text", "text_input", "slider_handle", "piece")
+
+
+class SelectorConfigError(ValueError):
+    """A selector config the solver cannot use; the message names the file and the key."""
+
+
+def _read(source: ConfigSource) -> Tuple[str, Mapping[str, Any]]:
+    if isinstance(source, Mapping):
+        return "selectors", source
+    path = Path(source)
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise SelectorConfigError(f"{path}: cannot be read as JSON ({e})") from None
+    if not isinstance(doc, Mapping):
+        raise SelectorConfigError(f"{path}: the top level must be an object")
+    return str(path), doc
+
+
+def _strings(where: str, value: Any) -> Tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise SelectorConfigError(f"{where}: must be a list of strings")
+    return tuple(value)
+
+
+def _entry(where: str, raw: Any, hosts_required: bool = True) -> VendorSelectors:
+    if not isinstance(raw, Mapping):
+        raise SelectorConfigError(f"{where}: must be an object")
+    kw: Dict[str, Any] = {}
+    for key, value in raw.items():
+        at = f"{where}.{key}"
+        if key == "note" or key.startswith("_"):
+            continue
+        if key not in _FIELDS:
+            raise SelectorConfigError(f"{at}: not a selector field (one of {', '.join(_FIELDS)})")
+        if key in _ONE:
+            if value is not None and not isinstance(value, str):
+                raise SelectorConfigError(f"{at}: must be one selector string")
+            kw[key] = value
+        elif key == "hold_completes":
+            if not isinstance(value, bool):
+                raise SelectorConfigError(f"{at}: must be true or false")
+            kw[key] = value
+        elif key == "banners":
+            if not isinstance(value, list):
+                raise SelectorConfigError(f"{at}: must be a list of [selector, verdict] pairs")
+            pairs = []
+            for i, pair in enumerate(value):
+                if not (isinstance(pair, list) and len(pair) == 2 and isinstance(pair[0], str)):
+                    raise SelectorConfigError(f"{at}[{i}]: must be a [selector, verdict] pair")
+                try:
+                    pairs.append((pair[0], RecaptchaBanner(pair[1])))
+                except ValueError:
+                    raise SelectorConfigError(
+                        f"{at}[{i}]: verdict {pair[1]!r} is not one of {[b.value for b in RecaptchaBanner]}") from None
+            kw[key] = tuple(pairs)
+        else:
+            kw[key] = _strings(at, value)
+    if "hosts" not in kw:
+        if hosts_required:
+            raise SelectorConfigError(f"{where}.hosts: missing (an empty list when the vendor has no host of its own)")
+        kw["hosts"] = ()
+    return VendorSelectors(**kw)
+
+
+class SelectorConfig(NamedTuple):
+    """A loaded selector config: the caller's own entry, every vendor's in detection order, and the generic fallbacks."""
+    custom: Optional[VendorSelectors]
+    vendors: Mapping[Vendor, VendorSelectors]
+    generic: Mapping[str, Tuple[str, ...]]
+
+
+def _parse(name: str, doc: Mapping[str, Any], base: Optional[SelectorConfig]) -> SelectorConfig:
+    for key in doc:
+        if not key.startswith("_") and key not in ("custom", "vendors", "generic"):
+            raise SelectorConfigError(f"{name}: {key}: not a config key (custom, vendors, generic)")
+    custom = base.custom if base else None
+    if "custom" in doc:
+        custom = None if doc["custom"] is None else _entry(f"{name}: custom", doc["custom"], hosts_required=False)
+    raw_vendors = doc.get("vendors", {})
+    if not isinstance(raw_vendors, Mapping):
+        raise SelectorConfigError(f"{name}: vendors: must be an object keyed by vendor")
+    vendors: Dict[Vendor, VendorSelectors] = dict(base.vendors) if base else {}
+    for key, raw in raw_vendors.items():
+        if key.startswith("_"):
+            continue
+        try:
+            vendor = Vendor(key)
+        except ValueError:
+            raise SelectorConfigError(
+                f"{name}: vendors.{key}: not a vendor this solver knows; a captcha of your own goes under `custom`") from None
+        vendors[vendor] = _entry(f"{name}: vendors.{key}", raw)
+    if base is None and set(vendors) != set(Vendor):
+        missing = sorted(v.value for v in set(Vendor) - set(vendors))
+        raise SelectorConfigError(f"{name}: vendors: every vendor must have an entry; missing {missing}")
+    raw_generic = doc.get("generic", {})
+    if not isinstance(raw_generic, Mapping):
+        raise SelectorConfigError(f"{name}: generic: must be an object")
+    generic: Dict[str, Tuple[str, ...]] = dict(base.generic) if base else {}
+    for key, value in raw_generic.items():
+        if key.startswith("_"):
+            continue
+        if key not in _GENERIC:
+            raise SelectorConfigError(f"{name}: generic.{key}: not a generic list (one of {', '.join(_GENERIC)})")
+        generic[key] = _strings(f"{name}: generic.{key}", value)
+    if base is None and set(generic) != set(_GENERIC):
+        raise SelectorConfigError(f"{name}: generic: missing {sorted(set(_GENERIC) - set(generic))}")
+    return SelectorConfig(custom, vendors, generic)
+
+
+def load_config(source: Optional[ConfigSource] = None) -> SelectorConfig:
+    """The shipped default, or `source` (a path or a parsed object) laid over it: a key it gives replaces the default's
+    `custom`, one vendor's whole entry, or one generic list. Raises SelectorConfigError naming the bad key."""
+    default = _parse(*_read(DEFAULT_CONFIG_PATH), base=None)
+    if source is None or (not isinstance(source, Mapping) and Path(source) == DEFAULT_CONFIG_PATH):
+        return default
+    return _parse(*_read(source), base=default)
+
+
+DEFAULT_CONFIG: SelectorConfig = load_config()
+#: Every vendor's entry, in detection order, as the default config gives it.
+SELECTORS: Mapping[Vendor, VendorSelectors] = DEFAULT_CONFIG.vendors
 
 _LOWER = "translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
 
@@ -224,18 +216,24 @@ _DETECTED_BY = ("challenge", "checkbox", "widget")
 
 
 class SelectorTable:
-    """The table one solver detects and drives with: the built-in vendors, plus the caller's own entry when given.
+    """The table one solver detects and drives with: a selector config's vendors, plus its `custom` entry when it has one.
 
-    A custom entry is reported as `Vendor.UNKNOWN` and searched before the built-in vendors, because the caller
-    wrote it for the page in front of them.
+    `config` is a path, a parsed object or a loaded SelectorConfig, laid over the shipped default (see `load_config`).
+    `custom` (the older `custom_selectors=`) replaces the config's own `custom`. A custom entry is reported as
+    `Vendor.UNKNOWN` and searched before the built-in vendors, because the caller wrote it for the page in front of them.
     """
 
-    def __init__(self, custom: Optional[VendorSelectors] = None) -> None:
+    def __init__(self, custom: Optional[VendorSelectors] = None,
+                 config: Union[ConfigSource, SelectorConfig, None] = None) -> None:
+        loaded = config if isinstance(config, SelectorConfig) else load_config(config)
+        custom = custom if custom is not None else loaded.custom
         if custom is not None and not any(getattr(custom, key) for key in _DETECTED_BY):
-            raise ValueError("custom_selectors names nothing to detect: give it a `widget`, `challenge` or `checkbox`")
+            raise SelectorConfigError(
+                "custom selectors name nothing to detect: give the entry a `widget`, `challenge` or `checkbox`")
+        self.config = loaded
         self.selectors: Mapping[Vendor, VendorSelectors] = (
-            {Vendor.UNKNOWN: custom, **{v: s for v, s in SELECTORS.items() if v != Vendor.UNKNOWN}}
-            if custom is not None else SELECTORS)
+            {Vendor.UNKNOWN: custom, **{v: s for v, s in loaded.vendors.items() if v != Vendor.UNKNOWN}}
+            if custom is not None else loaded.vendors)
         self.vendors: Sequence[Tuple[Vendor, VendorSelectors]] = tuple(self.selectors.items())
         # Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then
         # inline widgets.
@@ -248,34 +246,23 @@ class SelectorTable:
         self.response: Sequence[str] = tuple(s.response for _, s in self.vendors if s.response)
         self.accepted: Sequence[str] = tuple(s.accepted for _, s in self.vendors if s.accepted)
         # A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
-        self.submit: Sequence[str] = (*map(submit_by_text, ("verify", "next", "submit", "skip", "confirm")),
+        self.submit: Sequence[str] = (*map(submit_by_text, loaded.generic["submit_text"]),
                                       *self._of_every_vendor("submit"))
         # Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
         # reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
         self.text_input_vendor: Sequence[str] = self._of_every_vendor("text_input")
-        self.text_input: Sequence[str] = (
-            *self.text_input_vendor,
-            'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
-            'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
-            "input[type=text]", "input:not([type])", "input[type=tel]", "textarea",
-        )
-        # `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove.
-        self.slider_handle: Sequence[str] = (
-            *self._of_every_vendor("slider_handle"),
-            '[role="slider"]', "[aria-valuenow]",
-            '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
-            '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
-        )
+        self.text_input: Sequence[str] = (*self.text_input_vendor, *loaded.generic["text_input"])
+        # `[draggable=true]` is absent from the generic handles: HTML5 DnD fires dragstart, not pointermove.
+        self.slider_handle: Sequence[str] = (*self._of_every_vendor("slider_handle"), *loaded.generic["slider_handle"])
         self.refresh: Sequence[str] = self._of_every_vendor("refresh")
-        self.piece: Sequence[str] = (*self._of_every_vendor("piece"), '[class*="puzzle"][class*="piece"]',
-                                     '[class*="jigsaw"]')
+        self.piece: Sequence[str] = (*self._of_every_vendor("piece"), *loaded.generic["piece"])
 
     def _of_every_vendor(self, key: str) -> Sequence[str]:
         assert key in {f.name for f in fields(VendorSelectors)}
         return tuple(s for _, v in self.vendors for s in getattr(v, key))
 
 
-DEFAULT_TABLE = SelectorTable()
+DEFAULT_TABLE = SelectorTable(config=DEFAULT_CONFIG)
 VENDORS = DEFAULT_TABLE.vendors
 WIDGET_PROBES = DEFAULT_TABLE.widget_probes
 ENCLAVE_SELECTORS = DEFAULT_TABLE.enclave

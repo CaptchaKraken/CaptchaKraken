@@ -1,6 +1,6 @@
 import type { RoundVerdict } from './verdicts';
 import type { Humanizer, TouchTransform } from './humanize.js';
-import type { CustomSelectors } from './selectors';
+import type { CustomSelectors, SelectorConfigFile } from './selectors';
 import type { ActionKind, FrameRole, HumanizationMode, PromptFamily, SolveStage, Vendor } from './kinds';
 
 /** One intermediate stage of a solve, handed to `CaptchaKrakenConfig.onStep`. */
@@ -24,7 +24,13 @@ export interface CaptchaKrakenConfig {
   humanization?: HumanizationMode;
   /** Your own gesture implementation; overrides `humanization`. */
   humanizer?: Humanizer;
-  /** Your own vendor entry, for a captcha the built-in table does not know. Detected before every built-in vendor. */
+  /**
+   * Every URL pattern and selector the solver detects and drives with: a path to a config file of the shape of the
+   * repository's `captchakraken.config.json`, or the parsed object. What it gives is laid over the shipped default, so
+   * a file holding only a `custom` entry adds that entry and keeps every built-in vendor. Default: `DEFAULT_CONFIG_PATH`.
+   */
+  selectors?: string | SelectorConfigFile;
+  /** Deprecated, kept working: your own vendor entry in code. Prefer `custom` in the `selectors` file; when both are given this one wins. */
   customSelectors?: CustomSelectors;
   /** Mobile only: an Appium / WebdriverIO driver on a real handset. Unset dispatches CDP touch at the page. */
   touchDriver?: any;

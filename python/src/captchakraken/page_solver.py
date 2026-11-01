@@ -17,14 +17,14 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import AbstractSet, Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import AbstractSet, Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple, Union
 
 from . import planner
 from .action_types import CaptchaAction
 from .humanize import Humanizer, hold, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
                     RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
-from .selectors import DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe
+from .selectors import DEFAULT_CONFIG_PATH, DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe
 from .solver import AnimatedRecording, CaptchaSolver, UnsupportedCaptchaError, cut_recording
 from .timing import PhaseBudget, timings_enabled
 from .verdicts import RoundVerdict, VerdictLog
@@ -297,7 +297,12 @@ HOLD_MAX_MS = 12000
 class PageSolverConfig:
     humanization: Optional[HumanizationMode] = None
     humanizer: Optional[Humanizer] = None
-    # Your own vendor entry, for a captcha the built-in table does not know. Detected before every built-in vendor.
+    # Every URL pattern and selector the solver detects and drives with: a path to a config file of the shape of the
+    # repository's `captchakraken.config.json`, or the parsed object. What it gives is laid over the shipped default,
+    # so a file holding only a `custom` entry adds that entry and keeps every built-in vendor.
+    selectors: Union[str, "os.PathLike[str]", Mapping[str, Any]] = DEFAULT_CONFIG_PATH
+    # Deprecated, kept working: your own vendor entry in code. Prefer `custom` in the `selectors` file;
+    # when both are given this one wins.
     custom_selectors: Optional[VendorSelectors] = None
     touch_driver: Optional[Any] = None
     touch_transform: Optional[Dict[str, Any]] = None
@@ -472,7 +477,7 @@ class PageSolver:
             solver_kwargs.setdefault("expert", self.config.expert)
         self._solver = solver or CaptchaSolver(**solver_kwargs)
         self._human: Humanizer = resolve_humanizer(self.config)
-        self._sel = SelectorTable(self.config.custom_selectors)
+        self._sel = SelectorTable(self.config.custom_selectors, config=self.config.selectors)
         self._last_submit_frame_hash: Optional[str] = None
         self._deadline_ms: Optional[float] = None
         self._budget: Optional[PhaseBudget] = None

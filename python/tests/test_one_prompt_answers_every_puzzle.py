@@ -6,7 +6,6 @@ the parser and the grid live only here because the JS port asks the engine.
 from __future__ import annotations
 
 import json
-import re
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, List
@@ -328,25 +327,20 @@ def test_a_second_refresh_is_a_second_board_not_a_repeated_answer(monkeypatch):
 # ── the two ports' tables ────────────────────────────────────────────────
 
 
-def _js_rows(field: str) -> dict:
-    """{vendor value: [selectors]} for one list field of js/src/selectors.ts."""
-    src = (ROOT / "js" / "src" / "selectors.ts").read_text()
-    rows = re.findall(r"\[Vendor\.([A-Z]+)\]: \{(.*?)\n  \}", src, re.S)
-    out = {}
-    for name, body in rows:
-        m = re.search(rf"\n    {field}: \[(.*?)\],", body, re.S)
-        out[Vendor[name].value] = re.findall(r"'([^']*)'", m.group(1)) if m else []
-    return out
+def _file_rows(field: str) -> dict:
+    """{vendor value: [selectors]} for one list field of the config file both ports read."""
+    doc = json.loads((ROOT / "captchakraken.config.json").read_text())
+    return {k: v.get(field, []) for k, v in doc["vendors"].items() if not k.startswith("_")}
 
 
-def test_both_ports_press_the_same_refresh_controls():
-    js = {v: sels for v, sels in _js_rows("refresh").items() if sels}
-    assert js == {v.value: list(s.refresh) for v, s in SELECTORS.items() if s.refresh}
+def test_the_refresh_controls_are_the_files():
+    in_file = {v: sels for v, sels in _file_rows("refresh").items() if sels}
+    assert in_file == {v.value: list(s.refresh) for v, s in SELECTORS.items() if s.refresh}
     assert REFRESH_SELECTORS, "no vendor names a refresh control"
 
 
-def test_both_ports_find_the_press_and_hold_widget():
-    assert list(SELECTORS[Vendor.HUMAN].widget) == _js_rows("widget")["human"] == ["#px-captcha"]
+def test_the_press_and_hold_widget_is_the_files():
+    assert list(SELECTORS[Vendor.HUMAN].widget) == _file_rows("widget")["human"] == ["#px-captcha"]
 
 
 def test_the_press_and_hold_widget_is_found_by_its_container():

@@ -1,6 +1,7 @@
 """The vendor hint is whichever SELECTORS entry named the widget, keyed on the `hcaptcha` substring rather than the apex host
 (challenges come off newassets.hcaptcha.com), and `unknown` must stay permissive for every grid shape: the offline grader reports it."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,9 @@ def test_an_hcaptcha_frame_not_served_off_the_apex_host_is_still_hcaptcha():
 
 def test_the_hint_matches_the_same_substring_the_dom_selectors_do():
     src = Path(__file__).resolve().parents[1] / "src" / "captchakraken"
-    assert HCAPTCHA_CHALLENGE in (src / "selectors.py").read_text(), "the challenge selector moved"
+    config = Path(__file__).resolve().parents[2] / "captchakraken.config.json"
+    assert HCAPTCHA_CHALLENGE in json.loads(config.read_text())["vendors"]["hcaptcha"]["challenge"], (
+        "the challenge selector moved")
     assert "'hcaptcha.com' in" not in (src / "page_solver.py").read_text(), (
         "the apex host is being matched again somewhere; the shape gate will not engage")
 
