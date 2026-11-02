@@ -272,7 +272,10 @@ def weights_path(model: Optional[str] = None) -> Path:
     url = f"https://huggingface.co/{pin['repo']}/resolve/{pin['revision']}/{pin['file']}"
     path.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
-    with requests.get(url, stream=True, timeout=60) as r:
+    # Hugging Face's own variable: a private copy of the weights (CI, a self-hosted mirror) needs it.
+    token = os.getenv("HF_TOKEN")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    with requests.get(url, stream=True, timeout=60, headers=headers) as r:
         r.raise_for_status()
         with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tf:
             for chunk in r.iter_content(1 << 20):

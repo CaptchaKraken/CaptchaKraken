@@ -32,12 +32,14 @@ def served(monkeypatch, tmp_path):
     monkeypatch.setenv("CAPTCHA_KRAKEN_STATE_DIR", str(tmp_path))
     monkeypatch.delenv("CAPTCHA_KRAKEN_DETECTOR", raising=False)
     monkeypatch.setenv("CAPTCHA_KRAKEN_DETECTOR_MODEL", "standard")
-    calls = []
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    calls, sent = [], []
 
     def serve(body, pinned):
         monkeypatch.setitem(detector.WEIGHTS["standard"], "sha256", pinned)
-        monkeypatch.setattr(requests, "get", lambda url, **kw: calls.append(url) or _Response(body))
+        monkeypatch.setattr(requests, "get", lambda url, **kw: calls.append(url) or sent.append(kw) or _Response(body))
         return calls
+    serve.sent = sent
     return serve
 
 
@@ -49,6 +51,21 @@ def test_the_pinned_file_is_downloaded_once_and_reused(served, tmp_path):
     assert detector.weights_path() == first
     assert len(calls) == 1, "the weights were downloaded again although they were cached"
     assert detector.WEIGHTS["standard"]["revision"] in calls[0], "the download does not name the pinned revision"
+
+
+def test_a_private_copy_is_fetched_with_the_hugging_face_token(served, monkeypatch):
+    body = b"onnx bytes"
+    served(body, hashlib.sha256(body).hexdigest())
+    monkeypatch.setenv("HF_TOKEN", "hf_example")
+    detector.weights_path()
+    assert served.sent[-1]["headers"] == {"Authorization": "Bearer hf_example"}
+
+
+def test_a_public_download_sends_no_credential(served):
+    body = b"onnx bytes"
+    served(body, hashlib.sha256(body).hexdigest())
+    detector.weights_path()
+    assert served.sent[-1]["headers"] == {}
 
 
 def test_weights_that_do_not_match_the_pin_are_refused_and_not_kept(served, tmp_path):

@@ -89,6 +89,9 @@ jobs:
           path: ~/.captchakraken/detector
           key: detector-${{ steps.detector-key.outputs.sha }}
       - name: Element detector weights (fetch)
+        # The weights repo is private until it is published; a read-only token fetches them.
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python -c "from captchakraken.pointer.detector import WEIGHTS, weights_path; [print(weights_path(m)) for m in WEIGHTS]"
       # STAGE 5: the coverage threshold, measured over the run above rather than
       # by a second run of the same tests. The floor lives in pyproject.toml

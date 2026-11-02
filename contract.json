@@ -314,6 +314,9 @@
       "js/src/timing.ts",
       "python/src/captchakraken/timing.py"
     ],
+    "HF_TOKEN": [
+      "python/src/captchakraken/pointer/detector.py"
+    ],
     "PYTHONPATH": [
       "js/src/solver.ts"
     ],
