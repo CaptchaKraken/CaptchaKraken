@@ -78,6 +78,12 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Fixed
 
+- **A grid whose cells the detector half-misses is still a grid.** On two real
+  reCAPTCHA 4x4 photo boards it read 14 and 17 cells: a faint gutter merged
+  two tiles, or split none. When the cells do not make whole rows, `find_grid`
+  takes the lattice they mostly fill (three in four slots, every row and
+  column seen), counted from the spacing between cells, and puts each tile in
+  its slot. Boards whose cells fill no lattice are refused as before.
 - **A HUMAN or FunCaptcha press-and-hold is held until it says it is done.**
   These buttons complete on their own once full and verify only after drawing
   their done state; let go at full and they reset. When the answer named the
