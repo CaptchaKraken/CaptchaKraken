@@ -3,7 +3,7 @@ from enum import StrEnum
 
 
 class Vendor(StrEnum):
-    """`puzzle_source` everywhere. UNKNOWN must stay permissive: GeeTest and Prosopo report it, and so does the offline grader."""
+    """`puzzle_source` everywhere. UNKNOWN must stay permissive: the CLI, scripts and the offline grader report it."""
 
     HCAPTCHA = "hcaptcha"
     RECAPTCHA = "recaptcha"

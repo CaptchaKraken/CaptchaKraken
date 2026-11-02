@@ -129,7 +129,7 @@ class CaptchaSolver:
         # everything else on the board, and its answer is points (and element numbers) like any other board's.
         grid_boxes = [] if self.planner.prompts.pointer else find_grid(image_path)
         dims = _grid_dims(len(grid_boxes), puzzle_source) if grid_boxes else None
-        if grid_boxes and dims and self._is_real_grid(image_path, grid_boxes):
+        if dims:
             return self._solve_grid(image_path, grid_boxes, dims[0], dims[1], retry_mode=retry_mode)
         if grid_boxes:
             _debug(f"find_grid returned {len(grid_boxes)} cells; not solving as a grid")
@@ -270,25 +270,6 @@ class CaptchaSolver:
         with Image.open(media_path) as img:
             self._image_size = img.size
         return media_path
-
-    def _is_real_grid(self, image_path: str, grid_boxes: List[Tuple[int, int, int, int]]) -> bool:
-        """Reject a sprite board on one background: icons laid out in rows are a click board even where the
-        element detector sees their rows as a grid.
-
-        Only an UNKNOWN vendor reaches this with such a board; `_grid_dims` keeps known click vendors out. Measured
-        2026-11-01 on 30 real captures per type: 0 of 297 known-vendor grids rejected; as UNKNOWN it turns away
-        10 of 484, all click or drag boards (GeeTest align-icons, hCaptcha drag patterns)."""
-        with Image.open(image_path) as im:
-            img = np.asarray(im.convert("RGB"))
-        rois = [img[y1:y2, x1:x2].reshape(-1, 3) for (x1, y1, x2, y2) in grid_boxes
-                if x2 > x1 and y2 > y1 and img[y1:y2, x1:x2].size]
-        if not rois:
-            return False
-        # Real tiles are independent photographs; a sprite board shares one colour behind every cell.
-        if len(rois) >= 4 and float(np.mean(np.std(np.array([np.median(r, axis=0) for r in rois]), axis=0))) < 6.0:
-            _debug("_is_real_grid: every cell shares one background colour → reject")
-            return False
-        return True
 
     def _cells_of(self, click: dict, grid_boxes: List[Tuple[int, int, int, int]]) -> List[int]:
         """The 1-based cells a generation-3 click names: its ids when any is a cell, else where its points land."""

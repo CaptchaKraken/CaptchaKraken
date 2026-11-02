@@ -170,9 +170,9 @@ to that gate, and the gate going quiet is how prompt drift shipped on
 entry is the single `general` prompt: the puzzle's type is never named, and a
 generation-3 model is never routed by family, even if its registry entry
 declares `experts`. The driver still decides how the board is SHOWN — a grid
-that `find_grid`, `_grid_dims` and `_is_real_grid` accept is sent with its
+that `find_grid` and `_grid_dims` accept is sent with its
 cells numbered, anything else as the plain picture — because the model was
-trained on exactly what those three would number. Its `ids` name cells; when
+trained on exactly what those two would number. Its `ids` name cells; when
 they name none, the cells its points land in do.
 
 **An animated board on generation 3 is a video, and the answer names WHEN in
