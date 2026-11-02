@@ -373,6 +373,12 @@ class PageSolverConfig:
                 + self.video_extra_inference_ms)
 
 
+# The old name reads and writes the new field; as an InitVar alone it was accepted by __init__ but read back as None.
+PageSolverConfig.hcaptcha_images_timeout_ms = property(  # type: ignore[assignment]
+    lambda self: self.board_images_timeout_ms,
+    lambda self, v: setattr(self, "board_images_timeout_ms", v))
+
+
 class Widget(NamedTuple):
     """What detection found: the handle to photograph, the locator to search inside, and which table entry named it."""
 
