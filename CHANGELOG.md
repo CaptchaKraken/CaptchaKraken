@@ -5,6 +5,26 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ## [Unreleased]
 
+Version 4.0.0.
+
+### Breaking
+
+- **The package root exports only what a caller writes.** Both ports now
+  publish what you construct, configure, receive or implement, so internal
+  helpers can change without a major release.
+  - TypeScript drops `ActionKind`, `RetryMode`, `SettleVerdict`,
+    `PaintVerdict`, `KeyframeMode`, `RecaptchaBanner`, `Phase`, `isOneOf`,
+    `SELECTORS`, `DETECTOR_MODELS`, `resolveLoraName`, `BaseHumanizer`,
+    `resolveHumanizer`, `touchBackendFor`, the three touch backends,
+    `PAUSE_KINDS`, `HUMANIZATION_MODES`, `Widget`, `HumanizerOptions`,
+    `TouchSample`, and the action and CLI types from `types.ts`. It now
+    exports the `Point` type a custom `Humanizer` is written against.
+  - Python drops `ActionPlanner`, `ImageProcessor`, `add_overlays_to_image`,
+    `SELECTORS`, `Availability`, `KeyframeMode` and the three touch backends
+    from `captchakraken`, and adds `PageSolverConfig` and `CaptchaSolveError`,
+    which the docs already imported from `captchakraken.page_solver`.
+  - Submodules (`captchakraken.page_solver`, `js/src/*`) are internal.
+
 ### Added
 
 - **`HF_TOKEN` fetches the detector weights from a private repository.** The

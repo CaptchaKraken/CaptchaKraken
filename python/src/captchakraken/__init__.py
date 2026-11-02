@@ -1,3 +1,6 @@
+"""The published surface: what a caller constructs, configures, receives or implements. Everything else is internal
+and can change in any release; add a name here only when a caller needs to write it."""
+
 from pathlib import Path
 
 try:
@@ -15,16 +18,18 @@ from .action_types import (
     TypeAction,
     WaitAction,
 )
-from .image_processor import ImageProcessor
-from .overlay import add_overlays_to_image
-
 from .errors import CaptchaKrakenAPIError
+from .humanize import (
+    Humanizer,
+    MobileHumanizer,
+    MouseHumanizer,
+    NullHumanizer,
+    TouchBackend,
+)
 from .kinds import (
     ActionKind,
-    Availability,
     ErrorCode,
     HumanizationMode,
-    KeyframeMode,
     Outcome,
     PauseKind,
     PromptFamily,
@@ -34,79 +39,65 @@ from .kinds import (
 )
 from .verdicts import RoundVerdict
 
-from .humanize import (
-    AppiumTouchBackend,
-    CdpTouchBackend,
-    Humanizer,
-    MobileHumanizer,
-    MouseHumanizer,
-    NullHumanizer,
-    TouchBackend,
-    TouchscreenTouchBackend,
-)
-
 try:
-    from .planner import ActionPlanner
     from .solver import CaptchaSolver, solve_captcha
 
-    from .page_solver import PageSolver, SolveResult, solve_captcha_on_page
-    from .selectors import DEFAULT_CONFIG_PATH, SELECTORS, SelectorConfigError, VendorSelectors, load_config
+    from .page_solver import CaptchaSolveError, PageSolver, PageSolverConfig, SolveResult, solve_captcha_on_page
+    from .selectors import DEFAULT_CONFIG_PATH, SelectorConfigError, VendorSelectors, load_config
     from .watcher import CaptchaWatcher
 except ModuleNotFoundError:
-    ActionPlanner = None
     CaptchaSolver = None
     solve_captcha = None
+    CaptchaSolveError = None
     PageSolver = None
-    SELECTORS = None
+    PageSolverConfig = None
+    SolveResult = None
+    solve_captcha_on_page = None
     VendorSelectors = None
     DEFAULT_CONFIG_PATH = None
     SelectorConfigError = None
     load_config = None
     CaptchaWatcher = None
-    SolveResult = None
-    solve_captcha_on_page = None
 
 __all__ = [
+    # Solving a page
+    "PageSolver",
+    "PageSolverConfig",
+    "SolveResult",
+    "CaptchaSolveError",
+    "solve_captcha_on_page",
+    "CaptchaWatcher",
+    # Solving an image
     "CaptchaSolver",
     "solve_captcha",
-    "PageSolver",
-    "SELECTORS",
-    "VendorSelectors",
-    "DEFAULT_CONFIG_PATH",
-    "SelectorConfigError",
-    "load_config",
-    "CaptchaWatcher",
-    "SolveResult",
-    "solve_captcha_on_page",
-    "ActionPlanner",
-    "ImageProcessor",
     "CaptchaAction",
     "ClickAction",
     "DragAction",
     "TypeAction",
     "WaitAction",
-    "add_overlays_to_image",
+    "ActionKind",
+    "RetryMode",
+    "PromptFamily",
+    # Configuration
+    "DEFAULT_CONFIG_PATH",
+    "SelectorConfigError",
+    "VendorSelectors",
+    "load_config",
+    "Vendor",
+    "HumanizationMode",
+    # Results and errors
+    "RoundVerdict",
+    "Outcome",
+    "Verdict",
+    "ErrorCode",
     "CaptchaKrakenAPIError",
+    # Humanizers: the built-in three, and what one of your own implements
     "Humanizer",
     "MouseHumanizer",
     "MobileHumanizer",
     "NullHumanizer",
     "TouchBackend",
-    "CdpTouchBackend",
-    "AppiumTouchBackend",
-    "TouchscreenTouchBackend",
-    "ActionKind",
-    "Availability",
-    "ErrorCode",
-    "HumanizationMode",
-    "KeyframeMode",
-    "Outcome",
     "PauseKind",
-    "PromptFamily",
-    "RetryMode",
-    "RoundVerdict",
-    "Vendor",
-    "Verdict",
 ]
 
-__version__ = "3.3.0"
+__version__ = "4.0.0"
