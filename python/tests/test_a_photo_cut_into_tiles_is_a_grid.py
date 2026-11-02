@@ -1,10 +1,7 @@
 """`_is_real_grid` tells a photo grid from a sprite board by what lies behind the cells.
 
 A reCAPTCHA 4x4 is ONE photograph cut into sixteen tiles, so a tile of sky is nearly
-flat. The line tracer's flat-cell gate (mean stddev < 25) refused 24 of 343 real 4x4
-boards once the element detector's cells stopped at the white gutters; it caught no
-click board the background check does not. A sprite board, icons on one colour, is
-still refused.
+flat and must still pass. A sprite board, icons on one colour, is refused.
 """
 import numpy as np
 from PIL import Image

@@ -1,11 +1,7 @@
 """A board of tall tiles must not be read as a lattice of tile PAIRS.
 
-Six columns of tall tiles fail the near-square cell gate, but every other gutter
-spaces a lattice whose cells (two tiles wide) pass it, so a 6x3 board came back
-as a 3x3. A 3x3 is what the grid expert answers, so such a board was routed to
-an expert trained on photo grids instead of the one trained on it. A candidate
-whose every cell is split down its middle by a detected gutter is a sub-sampling
-of a finer lattice, not the board.
+A 6x3 board read as a 3x3 is routed to the expert trained on photo grids
+instead of the one trained on it, so the detector must return every tile.
 """
 
 import os
