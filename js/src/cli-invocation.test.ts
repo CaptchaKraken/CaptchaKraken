@@ -1,10 +1,9 @@
-// The key rides in env because argv is world-readable; the args are an array so no shell ever sees them; the LEVEL travels, not a temperature.
+// The key rides in env because argv is world-readable; the args are an array so no shell ever sees them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   API_KEY_ENV,
-  RESAMPLE_LEVEL_ENV,
   buildSolveArgs,
   redactCommand,
   solveEnv,
@@ -70,16 +69,3 @@ test('vendor hint, retry mode and text mode still reach the CLI', () => {
   assert.ok(args.includes('captcha-v12'));
 });
 
-test('a re-ask carries its level to the CLI, and a first look does not', () => {
-  const first = solveEnv({}, 'k');
-  assert.equal(first[RESAMPLE_LEVEL_ENV], undefined,
-    'a first look must stay deterministic');
-  const reask = solveEnv({}, 'k', 2);
-  assert.equal(reask[RESAMPLE_LEVEL_ENV], '2');
-
-  assert.equal(reask['CAPTCHA_RESAMPLE_TEMPERATURE'], undefined);
-});
-
-test('level 0 is not sent at all', () => {
-  assert.equal(solveEnv({}, 'k', 0)[RESAMPLE_LEVEL_ENV], undefined);
-});

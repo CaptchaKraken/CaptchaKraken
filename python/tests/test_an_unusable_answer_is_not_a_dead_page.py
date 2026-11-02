@@ -20,8 +20,7 @@ from captchakraken.page_solver import CaptchaSolveError, PageSolver, PageSolverC
 
 def _driver(rounds_answered_with_nothing: int, video_solve_enabled: bool = True):
     """A solver whose answers execute nothing for the first N rounds; records what each round was armed with."""
-    solver = PageSolver(config=PageSolverConfig(max_solve_loops=4, post_solve_outcome_timeout_ms=1,
-                                                post_solve_delay_ms=1, stale_element_backoff_ms=0,
+    solver = PageSolver(config=PageSolverConfig(max_solve_loops=4, post_solve_outcome_timeout_ms=1, stale_element_backoff_ms=0,
                                                 video_solve_enabled=video_solve_enabled))
     solver._reset_animated_state()
     armed = []

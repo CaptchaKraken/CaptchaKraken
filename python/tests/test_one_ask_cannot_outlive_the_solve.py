@@ -22,7 +22,6 @@ class _Planner:
 
     def __init__(self):
         self.request_timeout_s = planner.DEFAULT_REQUEST_TIMEOUT_S
-        self.sampling = {}
 
 
 def _solver_with_budget_left(ms: float) -> PageSolver:

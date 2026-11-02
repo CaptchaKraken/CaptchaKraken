@@ -78,6 +78,11 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Fixed
 
+- **A wrong reCAPTCHA answer is asked fresh, not as missed tiles.** The
+  "Please try again" banner set the missed-tiles retry, the same as "Please
+  select all matching images", so the next ask told the model it had
+  under-selected on a board it had answered wrongly. Only the under-selection
+  banner sets it now.
 - **A grid whose cells the detector half-misses is still a grid.** On two real
   reCAPTCHA 4x4 photo boards it read 14 and 17 cells: a faint gutter merged
   two tiles, or split none. When the cells do not make whole rows, `find_grid`
@@ -117,6 +122,20 @@ semantic versioning; v2 is a major, **breaking** release.
 - **GeeTest v4 opens its own puzzle.** The "Click to verify" bar is clicked as a
   checkbox, where it is, and only while no puzzle is open; it was not detected,
   and the puzzle waited for a person to open it.
+
+### Changed
+
+- **`hcaptcha_images_timeout_ms` is `board_images_timeout_ms`**
+  (`boardImagesTimeoutMs`), and its phase is `board-images`: the wait runs for
+  any vendor whose config lists `images`, not only hCaptcha. The old option
+  name is still read, and `Phase.HCAPTCHA_IMAGES` is an alias; only the key in
+  a result's phase timings reads `board-images` instead of `hcaptcha-images`.
+- **`CAPTCHA_RESAMPLE_LEVEL` is no longer read.** Re-asks were greedy at every
+  level, so it never changed a request; a repeated answer still makes the
+  pointer avoid the answers already refused.
+
+- **`grid::<type>` templates in a `prompts.json` are not read.** No caller
+  ever passed a puzzle type, so they never replaced the grid prompt.
 
 ## [3.3.0] - 2026-10-27
 

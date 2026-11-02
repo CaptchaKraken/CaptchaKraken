@@ -18,7 +18,7 @@ import { CaptchaKrakenSolver } from './solver';
 
 /** A solver whose round `blankAt` (or every round from it, with `everyRound`) cannot film, and whose widget reports `solvedAfter` afterwards. */
 function driver(blankAt: number, solvedAfter: boolean, opts: { everyRound?: boolean; videoSolveEnabled?: boolean } = {}) {
-  const solver: any = new CaptchaKrakenSolver({ maxSolveLoops: 6, postSolveOutcomeTimeoutMs: 1, postSolveDelayMs: 1,
+  const solver: any = new CaptchaKrakenSolver({ maxSolveLoops: 6, postSolveOutcomeTimeoutMs: 1,
     staleElementBackoffMs: 0, videoSolveEnabled: opts.videoSolveEnabled });
   const state = { rounds: 0, solved: false, asked: 0 };
   solver.solveSingle = async () => {

@@ -28,8 +28,7 @@ from captchakraken.page_solver import (  # noqa: E402
 
 def _driver(*, rounds_before_blank: int, solved_after: bool, raises=AnimatedChallengeError, every_round: bool = False):
     """A solver whose Nth round (or every round from it on) cannot film, and whose widget reports `solved_after` afterwards."""
-    solver = PageSolver(config=PageSolverConfig(max_solve_loops=6, post_solve_outcome_timeout_ms=1,
-                                                post_solve_delay_ms=1, stale_element_backoff_ms=0))
+    solver = PageSolver(config=PageSolverConfig(max_solve_loops=6, post_solve_outcome_timeout_ms=1, stale_element_backoff_ms=0))
     solver._reset_animated_state()
     state = {"rounds": 0, "solved": False}
 

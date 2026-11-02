@@ -74,7 +74,9 @@ export const Phase = {
   GRID_LOAD: 'grid-load',
   FADE_WAIT: 'fade-wait',
   BOARD_PAINT: 'board-paint',
-  HCAPTCHA_IMAGES: 'hcaptcha-images',
+  BOARD_IMAGES: 'board-images',
+  /** @deprecated Use `BOARD_IMAGES`. */
+  HCAPTCHA_IMAGES: 'board-images',
   AWAIT_NEXT_ROUND: 'await-next-round',
   AWAIT_VERDICT: 'await-verdict',
   POST_SUBMIT_DELAY: 'post-submit-delay',

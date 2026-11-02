@@ -58,7 +58,7 @@ def test_a_repeat_makes_the_pointer_ask_past_its_refused_answers_until_the_board
     answers already tried instead, and forgets them on a new board."""
     from captchakraken import planner as P
     pl = P.ActionPlanner.__new__(P.ActionPlanner)
-    pl.sampling, pl.pointer_answers, pl.avoid_refused = {}, [], False
+    pl.pointer_answers, pl.avoid_refused = [], False
     solver = PageSolver(config=PageSolverConfig(), solver=type("S", (), {"planner": pl})())
     pl.pointer_answers.append({"action": "type", "text": "XK4XWP"})
     solver._note_answer(ANSWER, None)

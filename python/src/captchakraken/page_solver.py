@@ -16,7 +16,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import AbstractSet, Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple, Union
 
 from . import planner
@@ -313,16 +313,11 @@ class PageSolverConfig:
     # A page just navigated has often not drawn its widget; this long is spent looking before "no captcha" is
     # believed. It is not charged to overall_solve_timeout_ms, which starts when there is something to solve.
     detection_timeout_ms: int = 15_000
-    # Repeats of one answer on one board before the solve ends; the first repeats are re-asked at a fresh sample.
+    # Repeats of one answer on one board before the solve ends; the first repeats are re-asked naming the refused answer.
     max_no_progress_rounds: int = 2
-    # Deprecated and ignored since 3.2.0: a round that performed nothing goes straight on to the next.
-    post_solve_delay_ms: int = 1_200
     post_solve_outcome_timeout_ms: int = 1_000
     post_solve_outcome_poll_ms: int = 75
     element_screenshot_timeout_ms: int = 8_000
-    # Deprecated and ignored since 3.2.0: each of these failures now counts against max_solve_loops.
-    max_unsupported_resolves: int = 3
-    max_stale_element_retries: int = 3
     # The pause before a failed round is tried again.
     stale_element_backoff_ms: int = 900
     stale_frame_resolve_enabled: bool = True
@@ -348,7 +343,7 @@ class PageSolverConfig:
     keyframe_wait_timeout_ms: int = 9_000
     keyframe_wait_poll_ms: int = 120
     video_extra_inference_ms: int = 8_000
-    hcaptcha_images_timeout_ms: int = 3_000
+    board_images_timeout_ms: int = 3_000
     grid_load_poll_interval_ms: int = 250
     grid_load_timeout_ms: int = 8_000
     board_paint_poll_ms: int = 180
@@ -361,6 +356,17 @@ class PageSolverConfig:
     recaptcha_tile_hover_enabled: bool = True
     slide_tolerance_px: float = 2.0
     slide_max_corrections: int = 3
+    # Older names, still accepted. The first three have done nothing since 3.2.0 (each failure counts against
+    # max_solve_loops); the last is board_images_timeout_ms, which waits for any vendor's `images`, not only hCaptcha's.
+    post_solve_delay_ms: InitVar[Optional[int]] = None
+    max_unsupported_resolves: InitVar[Optional[int]] = None
+    max_stale_element_retries: InitVar[Optional[int]] = None
+    hcaptcha_images_timeout_ms: InitVar[Optional[int]] = None
+
+    def __post_init__(self, post_solve_delay_ms, max_unsupported_resolves, max_stale_element_retries,
+                      hcaptcha_images_timeout_ms) -> None:
+        if hcaptcha_images_timeout_ms is not None:
+            self.board_images_timeout_ms = hcaptcha_images_timeout_ms
 
     def video_budget_ms(self) -> int:
         return (self.video_burst_max_ms + self.keyframe_wait_timeout_ms
@@ -538,8 +544,8 @@ class PageSolver:
         self._keyframe_steady_screens = 0
         self._last_answer_sig: Optional[str] = None
         self._no_progress_rounds = 0
-        self._resample_level = 0
-        self._apply_sampling()
+        self._refused_rounds = 0
+        self._apply_refusals()
 
     @staticmethod
     def _answer_signature(actions: Sequence[Any], retry_mode: Optional[RetryMode]) -> Optional[str]:
@@ -554,7 +560,7 @@ class PageSolver:
             return None
 
     def _note_answer(self, actions: Sequence[Any], retry_mode: Optional[RetryMode]) -> bool:
-        """True when this answer already ran and changed nothing: resample, re-ask, and arm the probe."""
+        """True when this answer already ran and changed nothing: re-ask avoiding it, and arm the probe."""
         sig = self._answer_signature(actions, retry_mode)
         # A refresh asks for a different board, so the same refresh twice is two boards, not a refused answer. An
         # answer that could not be signed could not be read either, and is not looked into.
@@ -565,8 +571,8 @@ class PageSolver:
         if sig is not None and sig == self._last_answer_sig:
             self._no_progress_rounds += 1
             _log(f"[no-progress] the model returned the same answer again ({self._no_progress_rounds} in a row)")
-            self._resample_level += 1
-            self._apply_sampling()
+            self._refused_rounds += 1
+            self._apply_refusals()
             self._invalidate_animated_answer()
             self._arm_animated_probe()
             return True
@@ -588,18 +594,15 @@ class PageSolver:
         target.request_timeout_s = max(planner.MIN_REQUEST_TIMEOUT_S,
                                        min(planner.DEFAULT_REQUEST_TIMEOUT_S, left_s))
 
-    def _apply_sampling(self) -> None:
+    def _apply_refusals(self) -> None:
         target = getattr(self._solver, "planner", None)
         if target is None:
             return
-        target.sampling = sampling = planner.sampling_for_level(self._resample_level)
         # A pointer model is an argmax and samples nothing. Once an answer has come back unchanged and refused,
         # every ask on this board names the answers already tried, and the pointer returns its likeliest other one.
-        target.avoid_refused = self._resample_level > 0
-        if not self._resample_level and hasattr(target, "pointer_answers"):
+        target.avoid_refused = self._refused_rounds > 0
+        if not self._refused_rounds and hasattr(target, "pointer_answers"):
             target.pointer_answers.clear()
-        if sampling:
-            _log(f"[resample] temperature {sampling['temperature']}, seed {sampling['seed']}")
 
     def _fresh_board(self) -> None:
         # ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer describes the
@@ -611,9 +614,9 @@ class PageSolver:
         # Its own second look, but only once IT fails: an arm set on the previous board is evidence about that one.
         self._animated_probe_armed = False
         self._animated_probe_done = False
-        self._resample_level = 0
+        self._refused_rounds = 0
         self._acted_on_board = False
-        self._apply_sampling()
+        self._apply_refusals()
 
     def _check_deadline(self, where: str) -> None:
         # Called inside loops too: a camoufox session once ran ten minutes past a 120s timeout because only
@@ -1154,10 +1157,6 @@ class PageSolver:
             pass
         return False
 
-    @staticmethod
-    def _banner_is_fatal_after_retry(kind: Optional[RecaptchaBanner]) -> bool:
-        return kind in (RecaptchaBanner.SELECT_MORE, RecaptchaBanner.REJECTED)
-
     def _banner_kind(self, page: Any) -> Optional[RecaptchaBanner]:
         """Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error."""
         try:
@@ -1436,7 +1435,7 @@ class PageSolver:
         """Best-effort: hold until the board's pictures have painted."""
         try:
             frame.wait_for_function(_BOARD_IMAGES_READY_JS, arg={"prompt": selectors.fresh or "", "images": ",".join(selectors.images)},
-                                    timeout=self.config.hcaptcha_images_timeout_ms)
+                                    timeout=self.config.board_images_timeout_ms)
         except Exception:
             pass
 
@@ -2045,7 +2044,7 @@ class PageSolver:
                 with self._phase(Phase.AWAIT_NEXT_ROUND):
                     self._wait_for_change_since(element, self._last_submit_frame_hash)
                 self._last_submit_frame_hash = None
-            with self._phase(Phase.HCAPTCHA_IMAGES):
+            with self._phase(Phase.BOARD_IMAGES):
                 self._wait_for_board_images(frame, self._sel.selectors[puzzle_source])
 
         # THE TWO QUESTIONS BELOW ARE PUT TO A PAINTED BOARD. Which expert answers the round is read out of
@@ -2156,7 +2155,7 @@ class PageSolver:
 
             _log("[answer] " + json.dumps({"actions": [_as_dict(a) for a in actions]}, default=str))
             # A repeated answer is not re-performed: the widget already refused it, and every extra press is
-            # behaviour a vendor scores. Re-asking with a fresh sample or a recording is the round's only move.
+            # behaviour a vendor scores. Re-asking, or asking a recording, is the round's only move.
             # `_note_answer` drops the refused animated answer on its way through, so the next round re-asks.
             if self._note_answer(actions, retry_mode):
                 return False, all_usage
@@ -2428,7 +2427,9 @@ class PageSolver:
             if said == Verdict.REJECTED:
                 _log(f"[verdict] the vendor rejected the answer after {verdict_ms:.0f}ms")
 
-            if self._banner_is_fatal_after_retry(self._banner_kind(page)):
+            # Only "select all matching images" means tiles were missed; "please try again" is a wrong answer and
+            # deals a new board, which is asked fresh.
+            if self._banner_kind(page) == RecaptchaBanner.SELECT_MORE:
                 _log("reCAPTCHA under-selection error; the next round asks for the missed tiles.")
                 pending_retry_mode = RetryMode.MISSED_TILES
 

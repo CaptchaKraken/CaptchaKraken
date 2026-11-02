@@ -312,7 +312,6 @@ export class CaptchaKrakenSolver {
   private solveDeadlineAt = 0;
   private lastAnswerSig: string | null = null;
   private noProgressRounds = 0;
-  private resampleLevel = 0;
   /** The recording `classifyByRecording` started and left running for the branch below to finish or drop. */
   private pendingBurst: ReturnType<CaptchaKrakenSolver['startKeyframeBurst']> | null = null;
   /**
@@ -628,7 +627,6 @@ export class CaptchaKrakenSolver {
         widgetGone = roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page)) ? widgetGone + 1 : 0;
         if (widgetGone >= 2) { solved = true; break; }
         if (await this.isChallengeFreshlyRendered(page)) {
-          this.resampleLevel = 0;
           this.actedOnBoard = false;
           // ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer
           // describes the board it was cut from, so replaying it here presses that board's
@@ -653,7 +651,9 @@ export class CaptchaKrakenSolver {
       if (await this.isBlocked(page)) throw blocked('it is showing its try-again-later screen');
       if (roundSaid === Verdict.REJECTED) console.log(`[verdict] the vendor rejected the answer after ${Date.now() - verdictT0}ms`);
 
-      if (this.bannerIsFatalAfterRetry(await this.bannerKind(page))) {
+      // Only "select all matching images" means tiles were missed; "please try again" is a wrong answer and
+      // deals a new board, which is asked fresh.
+      if ((await this.bannerKind(page)) === RecaptchaBanner.SELECT_MORE) {
         console.log('reCAPTCHA under-selection error; the next round asks for the missed tiles.');
         pendingRetryMode = RetryMode.MISSED_TILES;
       }
@@ -779,7 +779,7 @@ export class CaptchaKrakenSolver {
         await this.ph(Phase.AWAIT_NEXT_ROUND, () => this.waitForChangeSince(captchaElement, this.lastSubmitFrameHash as string));
         this.lastSubmitFrameHash = null;
       }
-      await this.ph(Phase.HCAPTCHA_IMAGES, () => this.waitForBoardImages(frame, this.sel.selectors[puzzleSource]));
+      await this.ph(Phase.BOARD_IMAGES, () => this.waitForBoardImages(frame, this.sel.selectors[puzzleSource]));
     }
 
     // THE TWO QUESTIONS BELOW ARE PUT TO A PAINTED BOARD. Which expert answers the round is read out of the
@@ -982,7 +982,7 @@ export class CaptchaKrakenSolver {
       // Tier 3 grades this line with Tier 2's grader to split driver bugs from model misses (see TRIBAL_KNOWLEDGE.md).
       console.log('[answer] ' + JSON.stringify({ actions: actionList }));
       // A repeated answer is not re-performed: the widget already refused it, and every extra press is
-      // behaviour a vendor scores. Re-asking with a fresh sample or a recording is the round's only move.
+      // behaviour a vendor scores. Re-asking, or asking a recording, is the round's only move.
       // `noteAnswer` drops the refused animated answer on its way through, so the next round re-asks.
       if (this.noteAnswer(actionList, retryMode)) return { didInteract: false, tokenUsage: allTokenUsage };
       console.log(`Executing ${actionList.length} actions.`);
@@ -1170,10 +1170,6 @@ export class CaptchaKrakenSolver {
     return !!frame && (await visible(frame, [checked])).length > 0;
   }
 
-  private bannerIsFatalAfterRetry(kind: RecaptchaBanner | null): boolean {
-    return kind === RecaptchaBanner.SELECT_MORE || kind === RecaptchaBanner.REJECTED;
-  }
-
   /** Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error. */
   private async bannerKind(page: Page): Promise<RecaptchaBanner | null> {
     const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].banners);
@@ -1240,7 +1236,7 @@ export class CaptchaKrakenSolver {
           const bg = getComputedStyle(el).backgroundImage;
           return !!bg && bg !== 'none' && !/url\(["']?["']?\)/.test(bg);
         });
-      }, { prompt: s.fresh ?? '', images: (s.images ?? []).join(',') }, { timeout: this.config.hcaptchaImagesTimeoutMs ?? 3000 });
+      }, { prompt: s.fresh ?? '', images: (s.images ?? []).join(',') }, { timeout: this.config.boardImagesTimeoutMs ?? this.config.hcaptchaImagesTimeoutMs ?? 3000 });
     } catch { /* timed out or detached mid-load; screenshot anyway */ }
   }
 
@@ -2077,7 +2073,7 @@ export class CaptchaKrakenSolver {
 
   /** The routing values and the credential travel in the environment, never in argv. */
   private solveEnvironment(cliRoot: string, apiKey: string | undefined): NodeJS.ProcessEnv {
-    return solveEnv(cliEnv(cliRoot, this.routingEnv()), apiKey, this.resampleLevel);
+    return solveEnv(cliEnv(cliRoot, this.routingEnv()), apiKey);
   }
 
   /** Exit 2 is an unsupported puzzle, exit 3 the hosted API's own refusal; both are relayed, not reworded. */
@@ -2170,7 +2166,6 @@ export class CaptchaKrakenSolver {
     this.solveDeadlineAt = 0;
     this.lastAnswerSig = null;
     this.noProgressRounds = 0;
-    this.resampleLevel = 0;
     this.videoBudgetMs = 0;
     this.videoBudgetGranted = false;
   }
@@ -2192,7 +2187,7 @@ export class CaptchaKrakenSolver {
     if (plan?.response) this.animatedPlan = { burstDir: plan.burstDir, response: null };
   }
 
-  /** True when this answer already ran and changed nothing: resample, and let the recording path have a go. */
+  /** True when this answer already ran and changed nothing: re-ask, and let the recording path have a go. */
   private noteAnswer(actions: any[], retryMode: RetryMode | null): boolean {
     const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode);
     // A refresh asks for a different board, so the same refresh twice is two boards, not a refused answer. An
@@ -2205,8 +2200,7 @@ export class CaptchaKrakenSolver {
     if (sig !== null && sig === this.lastAnswerSig) {
       this.noProgressRounds++;
       console.log(`[no-progress] the model returned the same answer again (${this.noProgressRounds} in a row) — the previous one already ran and changed nothing`);
-      this.resampleLevel++;
-      // A raised sample never reaches the wire while the cached animated answer stands in front of it.
+      // A re-ask never reaches the wire while the cached animated answer stands in front of it.
       this.invalidateAnimatedAnswer();
       this.repeatedAnswerSeen = true;
       return true;

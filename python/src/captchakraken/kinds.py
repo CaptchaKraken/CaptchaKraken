@@ -137,7 +137,8 @@ class Phase(StrEnum):
     GRID_LOAD = "grid-load"
     FADE_WAIT = "fade-wait"
     BOARD_PAINT = "board-paint"
-    HCAPTCHA_IMAGES = "hcaptcha-images"
+    BOARD_IMAGES = "board-images"
+    HCAPTCHA_IMAGES = "board-images"  # the old name; an alias of BOARD_IMAGES
     AWAIT_NEXT_ROUND = "await-next-round"
     AWAIT_VERDICT = "await-verdict"
     POST_SUBMIT_DELAY = "post-submit-delay"
