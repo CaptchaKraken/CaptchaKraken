@@ -10,6 +10,13 @@ def test_the_old_image_wait_name_sets_the_new_one():
     assert PageSolverConfig().board_images_timeout_ms == 3_000
 
 
+def test_the_old_image_wait_name_reads_and_writes_the_new_one():
+    cfg = PageSolverConfig(board_images_timeout_ms=2_000)
+    assert cfg.hcaptcha_images_timeout_ms == 2_000
+    cfg.hcaptcha_images_timeout_ms = 1_500
+    assert cfg.board_images_timeout_ms == 1_500
+
+
 def test_options_ignored_since_3_2_are_still_accepted():
     PageSolverConfig(post_solve_delay_ms=1, max_unsupported_resolves=2, max_stale_element_retries=3)
 
