@@ -64,6 +64,7 @@ answers with a frame number the driver then waits for on screen.
 | `.gitignore` | What never gets committed: build output, venvs, caches, `captchakraken.env`, and test-run artifacts. |
 | `AGENTS.md` | The product's own guide, written for whoever is **using** CaptchaKraken — pick an endpoint, install, one call that works, the account tools, every error, and the rules an agent must not break. |
 | `CHANGELOG.md` | What changed in each published version, both ports. |
+| `captchakraken.config.json` | Every URL pattern and selector the solver detects and drives with: each vendor's hosts and selectors in detection order, the generic fallbacks, and an empty `custom` entry for the caller's own. Both ports load it by default. |
 | `CLAUDE.md` | One line pointing a coding harness at `CONTRIBUTING.md`. |
 | `.cursorrules` | The same one line, for Cursor. |
 | `GEMINI.md` | The same one line, for Gemini. |
@@ -132,7 +133,7 @@ answers with a frame number the driver then waits for on screen.
 | `js/src/index.ts` | The package's public surface, and the worked examples in its doc comments. |
 | `js/src/solver.ts` | `CaptchaKrakenSolver`: the driver. Finds the widget, screenshots it, asks the engine for a plan, performs it, decides whether the vendor accepted, and goes round again if not. |
 | `js/src/kinds.ts` | Every closed set of names the driver uses — vendors, action kinds, verdicts, phases, error codes — as `as const` objects mirrored one-for-one in `kinds.py`. |
-| `js/src/selectors.ts` | Every selector the driver knows, in one typed table keyed by vendor (`SELECTORS`): hosts, challenge and checkbox iframes, the enclave frames those are drawn inside, inline widget shapes, response field, accepted markers, submit controls, text inputs, slider handles, pieces, refresh controls, the vendor's refusal screen and its never-interactive frames. Table order is detection order. Mirrored one-for-one in `selectors.py`. |
+| `js/src/selectors.ts` | Loads `captchakraken.config.json` (the repository root's in a checkout, else the bundled engine's copy) into the typed table keyed by vendor (`SELECTORS`), lays a caller's own config over it, validates it with errors that name the key, and derives the detection probes and control lists. |
 | `js/src/verdicts.ts` | The vendor's own answer to each submitted round, read off the page's network: which answer-check endpoints are readable, how each vendor words accept, reject, a new board and a refusal to serve, and the per-solve log the driver reads them from. Mirrored in `verdicts.py`. |
 | `js/src/types.ts` | `SolveResult`, the per-step lifecycle event, and the whole configuration surface with a doc comment per knob. |
 | `js/src/watcher.ts` | `watchPage()`: a background poller that solves captchas as they appear and hands back a `stop()`. Injects nothing into the page. |
@@ -213,6 +214,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/your-own-selectors-find-your-captcha.test.ts` | A captcha only the caller's `customSelectors` / `custom_selectors` entry names is found as vendor `unknown`, its controls are tried before the generic ones, other solvers are untouched, and an entry naming nothing to detect is refused. |
 | `js/src/outcome-reporting.test.ts` | The outcome report reaches the engine with the session, vendor and site, a hosted refusal is warned about every time, and a self-hosted endpoint with no route is not asked again. |
 | `js/src/the-package-ships-only-what-it-runs.test.ts` | The npm tarball holds the driver and the engine source it installs, and nothing else. |
+| `js/src/the-selector-config-is-the-table.test.ts` | The JS table is `captchakraken.config.json` field for field in the file's order; a caller's file is laid over it (their `custom` first and reported `unknown`, a vendor replaced whole in place, a generic list replaced); a bad key is named. Mirror of the Python test. |
 | `js/src/watcher.test.ts` | The watcher's contract, driven against a fake solver. |
 | `js/src/api-error-crosses-the-process-boundary.test.ts` | A hosted-API refusal is written by the Python CLI to stderr in snake_case and rebuilt here as `CaptchaKrakenAPIError`. Pins that every field survives the rename, that a wrong type is dropped rather than passed through, and that unrelated stderr yields `null` instead of a confident billing message. |
 | `js/src/token-usage-never-reports-nan.test.ts` | `SolveResult.tokenUsage` is published, and the rounds it sums arrive in two dialects. Pins that both are counted, that an unknown shape contributes zero rather than poisoning the total with `NaN`, and that an unpriced model still yields a finite cost. |
@@ -267,6 +269,7 @@ something every browser-driver install should pay for.
 | File | Purpose |
 |---|---|
 | `python/src/captchakraken/__init__.py` | The package's public surface and `__version__`, which must equal both manifests. |
+| `python/src/captchakraken/captchakraken.config.json` | The copy of the root `captchakraken.config.json` the wheel and npm package ship, because an installed package has no repository root; a test holds it identical to the root file. |
 | `python/src/captchakraken/cli.py` | Every CLI mode: solve a still image, solve a recorded animated burst, the frame-diff and grid-cell state helpers the drivers poll, each OpenCV tool call, `server start\|stop\|status\|run`, and `fetch`. |
 | `python/src/captchakraken/config.py` | Central, model-agnostic configuration: the endpoint, the key, and which model is served, read from the environment with defaults from `models.json`. |
 | `python/src/captchakraken/solver.py` | `CaptchaSolver`: solve one still image or one recorded burst against the endpoint. The engine behind the CLI. |
@@ -278,7 +281,7 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/pinned_model.json` | The adapter this release was validated against, so a client can say what it was proved with rather than what happens to be latest. |
 | `python/src/captchakraken/action_types.py` | The typed actions the model may return — click, drag, type, wait — and the normalised `BoundingBox` they carry. |
 | `python/src/captchakraken/kinds.py` | Every closed set of names the engine uses — vendors, action kinds, verdicts, phases, error codes — as `StrEnum`s mirrored one-for-one in `kinds.ts`. |
-| `python/src/captchakraken/selectors.py` | Every selector the page driver knows, in one typed table keyed by vendor (`SELECTORS`), mirrored one-for-one in `selectors.ts`. |
+| `python/src/captchakraken/selectors.py` | Loads `captchakraken.config.json` (the repository root's in a checkout, else the packaged copy) into the typed table keyed by vendor (`SELECTORS`), lays a caller's own config over it, validates it with errors that name the key, and derives the detection probes and control lists. |
 | `python/src/captchakraken/verdicts.py` | The vendor's own answer to each submitted round, read off the page's network, mirrored one-for-one in `verdicts.ts`. |
 | `python/src/captchakraken/image_processor.py` | Image manipulation and the grid-detection entry points the solver calls. |
 | `python/src/captchakraken/overlay.py` | Draws the numbered cell labels onto a grid screenshot. The model reads those labels; it was never trained to invent a numbering. |
@@ -332,6 +335,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_missing_prompt_is_not_a_reason_to_wait.py` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
 | `python/tests/test_slide_tracker.py` | The slide tracker on drawn boards — a jigsaw on a track at three handle ratios, a disc turning in place, a piece the pointer carries, each with a moving handle and an animated badge — down to the mask, the sub-pixel position, the loop's convergence, HiDPI, and the cases it must refuse rather than guess. |
 | `python/tests/slide_boards.py` | Slide boards drawn in numpy — a jigsaw on a track, a disc turning in place, a piece the pointer carries — that render what the page shows after any handle travel. Shared by the tracker's tests and the driver's. |
+| `python/tests/test_the_selector_config_is_the_table.py` | The Python table is `captchakraken.config.json` field for field in the file's order and the package ships the root file unchanged; a caller's file is laid over it (their `custom` first and reported `unknown`, a vendor replaced whole in place, a generic list replaced); a bad key is named. |
 | `python/tests/test_the_slide_driver_steers_by_what_it_sees.py` | The Python slide driver on rendered boards with the real tracker: seats a jigsaw at three handle ratios, turns a disc upright, carries a piece, works at HiDPI, lets go of a part that never moves, never reads a selector for a generation-3 answer, and still lands a generation-2 one by its handle or piece selector. |
 | `python/tests/test_public_contract.py` | The published Python surface, pinned name by name, plus the rule that `__version__`, `pyproject.toml` and `js/package.json` all say one number. Real callers depend on these names; removing one is a major version. |
 | `python/tests/test_version_matches_manifest.py` | `captchakraken.__version__` must equal the version pip installs. It drifted once, and every bug report quoted a release that was not running. |

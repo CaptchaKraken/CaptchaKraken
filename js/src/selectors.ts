@@ -1,8 +1,13 @@
 /**
- * Every selector the driver knows, keyed by vendor. Mirrored in python/src/captchakraken/selectors.py; keep both in the
- * same order, because detection takes the first visible match in table order.
+ * Every selector the driver knows, keyed by vendor, read from `captchakraken.config.json` at the repository root. The
+ * Python port reads the same file. Detection takes the first visible match in table order, so the file's order is the
+ * detection order.
  */
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { FrameRole, RecaptchaBanner, Vendor } from './kinds';
+import { getBundledCliRoot } from './model-name';
 
 export interface VendorSelectors {
   /** URL substrings of the vendor's code on the wire. A tripwire, not a detector: the host stays on the wire when a vendor renames its markup (see TRIBAL_KNOWLEDGE.md). BotDetect is self-hosted, so it has none. */
@@ -53,148 +58,163 @@ export interface VendorSelectors {
   readonly holdCompletes?: boolean;
 }
 
-export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> = {
-  // An Enterprise sitekey serves the same widget from /recaptcha/enterprise/ instead of /recaptcha/api2/.
-  [Vendor.RECAPTCHA]: {
-    hosts: ['google.com/recaptcha', 'recaptcha.net'],
-    challenge: ['iframe[src*="recaptcha/api2/bframe"]', 'iframe[src*="recaptcha/enterprise/bframe"]'],
-    checkbox: [
-      'iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])',
-      'iframe[src*="recaptcha/enterprise/anchor"]:not([src*="size=invisible"])',
-    ],
-    response: '[name="g-recaptcha-response"]',
-    checked: '.recaptcha-checkbox-checked',
-    box: ['#recaptcha-anchor'],
-    fresh: '.rc-imageselect-instructions, #rc-imageselect',
-    submit: ['#recaptcha-verify-button'],
-    refresh: ['#recaptcha-reload-button'],
-    banners: [
-      ['.rc-imageselect-error-select-more', RecaptchaBanner.SELECT_MORE],
-      ['.rc-imageselect-error-dynamic-more', RecaptchaBanner.DYNAMIC_MORE],
-      ['.rc-imageselect-incorrect-response', RecaptchaBanner.REJECTED],
-    ],
-    blocked: ['.rc-doscaptcha-header-text'],
-    passive: ['iframe[src*="size=invisible"]'],
-  },
-  // Keyed on the `hcaptcha` substring, not the apex host: challenges are served off newassets.hcaptcha.com. secure-api.js
-  // draws every frame inside a full-viewport enclave, one per render, and only a visible one holds an open challenge.
-  [Vendor.HCAPTCHA]: {
-    hosts: ['hcaptcha.com'],
-    challenge: ['iframe[src*="hcaptcha"][src*="frame=challenge"]'],
-    checkbox: ['iframe[src*="hcaptcha"][src*="frame=checkbox"]:not([src*="frame=checkbox-invisible"])'],
-    enclave: ['iframe[src*="hcaptcha"][src*="frame=enclave"]'],
-    response: '[name="h-captcha-response"]',
-    checked: '#checkbox[aria-checked="true"]',
-    box: ['#checkbox'],
-    fresh: '.prompt-text',
-    images: ['.task-image .image', '.task .image', '.challenge-example img', '.image-wrapper img'],
-    submit: ['.button-submit'],
-    refresh: ['.refresh.button'],
-    passive: ['iframe[src*="hcaptcha"][src*="frame=enclave"]', 'iframe[src*="hcaptcha"][src*="frame=checkbox-invisible"]'],
-  },
-  [Vendor.TURNSTILE]: {
-    hosts: ['challenges.cloudflare.com'],
-    checkbox: ['iframe[src*="challenges.cloudflare.com"]', '.cf-turnstile'],
-    response: '[name="cf-turnstile-response"]',
-  },
-  // v4's "Click to verify" bar opens the puzzle. Its container wears `geetest_freeze_wait` while the puzzle is open
-  // (`geetest_boxShow` only until a first wrong answer, after which the box stays up dealing a new one) and
-  // `geetest_success` once passed, so the checkbox matches only a bar that has not been clicked yet.
-  [Vendor.GEETEST]: {
-    hosts: ['geetest.com'],
-    checkbox: ['.geetest_captcha:not(.geetest_boxShow):not(.geetest_freeze_wait):not(.geetest_success):not(.geetest_lock_success) .geetest_btn_click'],
-    box: ['.geetest_btn_click'],
-    widget: ['.geetest_box', '.geetest_panel_box', '.geetest_popup_window', '.geetest_widget'],
-    accepted: '.geetest_result_tips.geetest_success, .geetest_captcha.geetest_success, .geetest_captcha.geetest_lock_success',
-    submit: ['.geetest_submit'],
-    refresh: ['.geetest_refresh', '.geetest_refresh_1'],
-    sliderHandle: ['.geetest_slider_button', '.geetest_btn', '.geetest_slider .geetest_arrow'],
-    piece: ['.geetest_slice'],
-  },
-  // Both in-page and iframe shapes stay (Tencent moved in-host on 2026-08-11; see TRIBAL_KNOWLEDGE.md), and the iframe id
-  // is prefix-anchored: `[id*=tcaptcha]` also matched MTCaptcha's iframe and hid that `.mtcap` matched nothing.
-  [Vendor.TENCENT]: {
-    hosts: ['captcha.gtimg.com', 'captcha.qcloud.com'],
-    widget: ['#tcaptcha_transform_dy', '#tCaptchaDyContent', '.tencent-captcha-dy__content', 'iframe#tcaptcha_iframe_dy', 'iframe[id^="tcaptcha"]', 'iframe[src*="captcha.gtimg.com"]', 'iframe[src*="captcha.qq.com"]'],
-    sliderHandle: ['.tencent-captcha-dy__slider-block', '#tcaptcha_drag_thumb', '.tc-slider-normal', '[id*=slideBlock]'],
-    piece: ['.tencent-captcha-dy__fg-item'],
-    refresh: ['.tencent-captcha-dy__footer-icon--refresh'],
-  },
-  [Vendor.YIDUN]: {
-    hosts: ['dun.163.com', 'cstaticdun.126.net', 'necaptcha.nosdn.127.net'],
-    widget: ['.yidun_panel', '.yidun'],
-    sliderHandle: ['.yidun_slider', '.yidun_jigsaw'],
-    piece: ['.yidun_jigsaw'],
-    refresh: ['.yidun_refresh'],
-  },
-  [Vendor.YANDEX]: {
-    hosts: ['smartcaptcha.yandexcloud.net'],
-    widget: ['iframe[src*="smartcaptcha.yandexcloud.net/advanced"]', 'iframe[src*="smartcaptcha.yandexcloud.net"]', '.CheckboxCaptcha'],
-    textInput: ['.AdvancedCaptcha-Input input', 'input.Textinput-Control', 'input[name="rep"]'],
-  },
-  [Vendor.LEMIN]: {
-    hosts: ['leminnow.com'],
-    widget: ['#lemin-cropped-captcha', '.lemin-captcha-popup'],
-    sliderHandle: ['.lemin-slider-handle', '#lemin-cropped-captcha .slider'],
-    piece: ['.lemin-cropped-puzzle-piece', '#lemin-cropped-captcha canvas + canvas'],
-  },
-  [Vendor.PROSOPO]: {
-    hosts: ['prosopo.io'],
-    widget: ['.prosopo-modalInner', '.procaptcha-checkbox'],
-  },
-  [Vendor.MTCAPTCHA]: {
-    hosts: ['mtcaptcha.com'],
-    widget: ['iframe[src*="service.mtcaptcha.com"]', 'iframe[id^="mtcaptcha-iframe"]', '.mtcaptcha', '.mtcap'],
-    textInput: ['input.mtcap-inputtext', '.mtcap input[type=text]'],
-    refresh: ['.mtcap-refresh'],
-  },
-  [Vendor.BOTDETECT]: {
-    hosts: [],
-    widget: ['.BDC_CaptchaDiv'],
-    textInput: ['input[id*=captchaCode]', 'input#captchaCode', 'input[id*=validateCaptcha]', '.BDC_CaptchaDiv input[type=text]'],
-    refresh: ['a[id*="ReloadLink"]', '.BDC_ReloadIcon'],
-  },
-  // The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's
-  // iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.
-  [Vendor.HUMAN]: {
-    hosts: [],
-    widget: ['#px-captcha'],
-    holdCompletes: true,
-  },
-  // The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.
-  [Vendor.AWSWAF]: {
-    hosts: ['awswaf.com'],
-    widget: ['.amzn-captcha-modal'],
-  },
-  // The puzzle opens in a modal over the "I am human" box, which stays on screen, so the modal is a challenge: a
-  // widget would be outranked by the box and the box clicked again.
-  [Vendor.CAPTCHAFOX]: {
-    hosts: ['captchafox.com'],
-    challenge: ['.cf-modal__challenge'],
-    checkbox: ['div[id^="cf-widget-"]'],
-    response: '[name="cf-captcha-response"]',
-    sliderHandle: ['.cf-slider__button'],
-  },
-  // Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.
-  [Vendor.DINGXIANG]: {
-    hosts: ['cdn.dingxiang-inc.com/ctu-group/captcha', 'cap.dingxiang-inc.com'],
-    widget: ['.dx_captcha_oneclick_one-step'],
-    sliderHandle: ['.dx_captcha_basic_slider', '.dx_captcha_rotate_slider'],
-  },
-  // The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside
-  // it; the game frame's own path is listed so a page that frames the game directly is found too.
-  [Vendor.FUNCAPTCHA]: {
-    hosts: ['arkoselabs.com'],
-    widget: ['iframe[src*="arkoselabs.com"]', 'iframe[src*="ec-game-core/game-core"]'],
-    holdCompletes: true,
-  },
-  // Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.
-  [Vendor.PROTON]: {
-    hosts: ['/core/v4/captcha'],
-    widget: ['iframe[src*="/core/v4/captcha"]'],
-  },
-  [Vendor.UNKNOWN]: { hosts: [] },
-};
+/** A selector config file's shape: the repository's `captchakraken.config.json`, or any part of it. */
+export interface SelectorConfigFile {
+  readonly custom?: Record<string, unknown> | null;
+  readonly vendors?: Record<string, Record<string, unknown>>;
+  readonly generic?: Record<string, readonly string[]>;
+  readonly [comment: `_${string}`]: unknown;
+}
+
+/** A selector config the solver cannot use; the message names the file and the key. */
+export class SelectorConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SelectorConfigError';
+  }
+}
+
+/** A loaded selector config: the caller's own entry, every vendor's in detection order, and the generic fallbacks. */
+export interface SelectorConfig {
+  readonly custom: CustomSelectors | null;
+  readonly vendors: ReadonlyArray<readonly [Vendor, VendorSelectors]>;
+  readonly generic: Readonly<Record<GenericKey, readonly string[]>>;
+}
+
+const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece'] as const;
+type GenericKey = (typeof GENERIC)[number];
+// The file is spelled as the Python port's fields; these three are camelCase here.
+const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
+const FIELDS = ['hosts', 'challenge', 'checkbox', 'enclave', 'widget', 'response', 'checked', 'box', 'accepted', 'fresh',
+  'images', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'piece', 'refresh', 'hold_completes'];
+const ONE = new Set(['response', 'checked', 'accepted', 'fresh']);
+const BANNERS = new Set<string>(Object.values(RecaptchaBanner));
+const VENDOR_VALUES = new Set<string>(Object.values(Vendor));
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+function strings(where: string, value: unknown): readonly string[] {
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new SelectorConfigError(`${where}: must be a list of strings`);
+  }
+  return value;
+}
+
+function entry(where: string, raw: unknown, hostsRequired = true): VendorSelectors {
+  if (!isObject(raw)) throw new SelectorConfigError(`${where}: must be an object`);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const at = `${where}.${key}`;
+    if (key === 'note' || key.startsWith('_')) continue;
+    if (!FIELDS.includes(key)) throw new SelectorConfigError(`${at}: not a selector field (one of ${FIELDS.join(', ')})`);
+    const name = CAMEL[key] ?? key;
+    if (ONE.has(key)) {
+      if (value !== null && typeof value !== 'string') throw new SelectorConfigError(`${at}: must be one selector string`);
+      if (value !== null) out[name] = value;
+    } else if (key === 'hold_completes') {
+      if (typeof value !== 'boolean') throw new SelectorConfigError(`${at}: must be true or false`);
+      if (value) out[name] = value;
+    } else if (key === 'banners') {
+      if (!Array.isArray(value)) throw new SelectorConfigError(`${at}: must be a list of [selector, verdict] pairs`);
+      out[name] = value.map((pair, i) => {
+        if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string') {
+          throw new SelectorConfigError(`${at}[${i}]: must be a [selector, verdict] pair`);
+        }
+        if (!BANNERS.has(pair[1])) {
+          throw new SelectorConfigError(`${at}[${i}]: verdict ${JSON.stringify(pair[1])} is not one of ${JSON.stringify([...BANNERS])}`);
+        }
+        return [pair[0], pair[1]] as const;
+      });
+    } else {
+      const list = strings(at, value);
+      if (list.length || key === 'hosts') out[name] = list;
+    }
+  }
+  if (!('hosts' in out)) {
+    if (hostsRequired) throw new SelectorConfigError(`${where}.hosts: missing (an empty list when the vendor has no host of its own)`);
+    out.hosts = [];
+  }
+  return out as unknown as VendorSelectors;
+}
+
+function parse(name: string, doc: unknown, base: SelectorConfig | null): SelectorConfig {
+  if (!isObject(doc)) throw new SelectorConfigError(`${name}: the top level must be an object`);
+  for (const key of Object.keys(doc)) {
+    if (!key.startsWith('_') && !['custom', 'vendors', 'generic'].includes(key)) {
+      throw new SelectorConfigError(`${name}: ${key}: not a config key (custom, vendors, generic)`);
+    }
+  }
+  let custom = base?.custom ?? null;
+  if ('custom' in doc) custom = doc.custom === null ? null : entry(`${name}: custom`, doc.custom, false);
+  const rawVendors = doc.vendors ?? {};
+  if (!isObject(rawVendors)) throw new SelectorConfigError(`${name}: vendors: must be an object keyed by vendor`);
+  const vendors = new Map<Vendor, VendorSelectors>(base?.vendors ?? []);
+  for (const [key, raw] of Object.entries(rawVendors)) {
+    if (key.startsWith('_')) continue;
+    if (!VENDOR_VALUES.has(key)) {
+      throw new SelectorConfigError(`${name}: vendors.${key}: not a vendor this solver knows; a captcha of your own goes under \`custom\``);
+    }
+    vendors.set(key as Vendor, entry(`${name}: vendors.${key}`, raw));
+  }
+  if (!base) {
+    const missing = [...VENDOR_VALUES].filter((v) => !vendors.has(v as Vendor)).sort();
+    if (missing.length) throw new SelectorConfigError(`${name}: vendors: every vendor must have an entry; missing ${JSON.stringify(missing)}`);
+  }
+  const rawGeneric = doc.generic ?? {};
+  if (!isObject(rawGeneric)) throw new SelectorConfigError(`${name}: generic: must be an object`);
+  const generic: Partial<Record<GenericKey, readonly string[]>> = { ...(base?.generic ?? {}) };
+  for (const [key, value] of Object.entries(rawGeneric)) {
+    if (key.startsWith('_')) continue;
+    if (!(GENERIC as readonly string[]).includes(key)) {
+      throw new SelectorConfigError(`${name}: generic.${key}: not a generic list (one of ${GENERIC.join(', ')})`);
+    }
+    generic[key as GenericKey] = strings(`${name}: generic.${key}`, value);
+  }
+  const absent = GENERIC.filter((k) => !generic[k]);
+  if (absent.length) throw new SelectorConfigError(`${name}: generic: missing ${JSON.stringify(absent)}`);
+  return { custom, vendors: [...vendors], generic: generic as Record<GenericKey, readonly string[]> };
+}
+
+function read(file: string): unknown {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf-8');
+  } catch (e) {
+    throw new SelectorConfigError(`${file}: cannot be read (${(e as Error).message})`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new SelectorConfigError(`${file}: cannot be read as JSON (${(e as Error).message})`);
+  }
+}
+
+/**
+ * The default config: the repository's own `captchakraken.config.json` when this package runs from a checkout, so an
+ * edit there is what the solver reads, else the copy the bundled Python engine ships (an installed package has no
+ * repository root). The Python port resolves the same file.
+ */
+export const DEFAULT_CONFIG_PATH: string = (() => {
+  const checkout = path.resolve(__dirname, '..', '..', 'captchakraken.config.json');
+  return fs.existsSync(checkout)
+    ? checkout
+    : path.join(getBundledCliRoot(), 'src', 'captchakraken', 'captchakraken.config.json');
+})();
+
+/**
+ * The shipped default, or `source` (a path or a parsed object) laid over it: a key it gives replaces the default's
+ * `custom`, one vendor's whole entry, or one generic list. Throws SelectorConfigError naming the bad key.
+ */
+export function loadConfig(source?: string | SelectorConfigFile): SelectorConfig {
+  const base = parse(DEFAULT_CONFIG_PATH, read(DEFAULT_CONFIG_PATH), null);
+  if (source === undefined || (typeof source === 'string' && path.resolve(source) === DEFAULT_CONFIG_PATH)) return base;
+  return typeof source === 'string' ? parse(source, read(source), base) : parse('selectors', source, base);
+}
+
+export const DEFAULT_CONFIG: SelectorConfig = loadConfig();
+/** Every vendor's entry, in detection order, as the default config gives it. */
+export const SELECTORS: Readonly<Record<Vendor, VendorSelectors>> =
+  Object.fromEntries(DEFAULT_CONFIG.vendors) as Record<Vendor, VendorSelectors>;
 
 export interface WidgetProbe {
   readonly vendor: Vendor;
@@ -214,11 +234,13 @@ type ListKey = { [K in keyof VendorSelectors]-?: VendorSelectors[K] extends read
 const DETECTED_BY = [[FrameRole.CHALLENGE, 'challenge'], [FrameRole.CHECKBOX, 'checkbox'], [FrameRole.UNKNOWN, 'widget']] as const;
 
 /**
- * The table one solver detects and drives with: the built-in vendors, plus the caller's own entry when given. A custom
- * entry is reported as `Vendor.UNKNOWN` and searched before the built-in vendors, because the caller wrote it for the
- * page in front of them.
+ * The table one solver detects and drives with: a selector config's vendors, plus its `custom` entry when it has one.
+ * `config` is a path, a parsed object or a loaded SelectorConfig, laid over the shipped default (see `loadConfig`);
+ * `custom` (the older `customSelectors`) replaces the config's own. A custom entry is reported as `Vendor.UNKNOWN` and
+ * searched before the built-in vendors, because the caller wrote it for the page in front of them.
  */
 export class SelectorTable {
+  readonly config: SelectorConfig;
   readonly selectors: Readonly<Record<Vendor, VendorSelectors>>;
   readonly vendors: ReadonlyArray<readonly [Vendor, VendorSelectors]>;
   /** Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then inline widgets. */
@@ -234,19 +256,21 @@ export class SelectorTable {
    * the vendor's own is how a captcha's answer ends up in a login form's username box.
    */
   readonly textInput: readonly string[];
-  /** `[draggable=true]` is absent: HTML5 DnD fires dragstart, not pointermove. */
+  /** `[draggable=true]` is absent from the generic handles: HTML5 DnD fires dragstart, not pointermove. */
   readonly sliderHandle: readonly string[];
   readonly refresh: readonly string[];
   readonly piece: readonly string[];
 
-  constructor(custom?: CustomSelectors) {
-    if (custom && !DETECTED_BY.some(([, key]) => custom[key]?.length)) {
-      throw new Error('customSelectors names nothing to detect: give it a `widget`, `challenge` or `checkbox`');
+  constructor(custom?: CustomSelectors, config?: string | SelectorConfigFile | SelectorConfig) {
+    const loaded = isLoaded(config) ? config : loadConfig(config);
+    const own = custom ?? loaded.custom ?? undefined;
+    if (own && !DETECTED_BY.some(([, key]) => own[key]?.length)) {
+      throw new SelectorConfigError('custom selectors name nothing to detect: give the entry a `widget`, `challenge` or `checkbox`');
     }
-    const builtIn = Object.entries(SELECTORS) as Array<[Vendor, VendorSelectors]>;
-    this.vendors = custom
-      ? [[Vendor.UNKNOWN, { hosts: [], ...custom }], ...builtIn.filter(([v]) => v !== Vendor.UNKNOWN)]
-      : builtIn;
+    this.config = loaded;
+    this.vendors = own
+      ? [[Vendor.UNKNOWN, { hosts: [], ...own }], ...loaded.vendors.filter(([v]) => v !== Vendor.UNKNOWN)]
+      : loaded.vendors;
     this.selectors = Object.fromEntries(this.vendors) as Record<Vendor, VendorSelectors>;
     const every = (key: ListKey): readonly string[] => this.vendors.flatMap(([, s]) => s[key] ?? []);
     this.widgetProbes = DETECTED_BY.flatMap(([role, key]) =>
@@ -254,24 +278,19 @@ export class SelectorTable {
     this.enclave = every('enclave');
     this.response = this.vendors.flatMap(([, s]) => s.response ?? []);
     this.accepted = this.vendors.flatMap(([, s]) => s.accepted ?? []);
-    this.submit = [...['verify', 'next', 'submit', 'skip', 'confirm'].map(submitByText), ...every('submit')];
+    this.submit = [...loaded.generic.submit_text.map(submitByText), ...every('submit')];
     this.textInputVendor = every('textInput');
-    this.textInput = [...this.textInputVendor,
-      'input[name*="captcha" i]', 'input[id*="captcha" i]', 'input[aria-label*="captcha" i]',
-      'input[placeholder*="code" i]', 'input[autocomplete="off"][type=text]',
-      'input[type=text]', 'input:not([type])', 'input[type=tel]', 'textarea',
-    ];
-    this.sliderHandle = [...every('sliderHandle'),
-      '[role="slider"]', '[aria-valuenow]',
-      '[class*="slider"][class*="btn"]', '[class*="slider"][class*="button"]',
-      '[class*="slide"][class*="handle"]', '[class*="drag"][class*="thumb"]',
-    ];
+    this.textInput = [...this.textInputVendor, ...loaded.generic.text_input];
+    this.sliderHandle = [...every('sliderHandle'), ...loaded.generic.slider_handle];
     this.refresh = every('refresh');
-    this.piece = [...every('piece'), '[class*="puzzle"][class*="piece"]', '[class*="jigsaw"]'];
+    this.piece = [...every('piece'), ...loaded.generic.piece];
   }
 }
 
-export const DEFAULT_TABLE = new SelectorTable();
+const isLoaded = (c: unknown): c is SelectorConfig =>
+  isObject(c) && Array.isArray((c as any).vendors) && isObject((c as any).generic) && 'custom' in c;
+
+export const DEFAULT_TABLE = new SelectorTable(undefined, DEFAULT_CONFIG);
 export const VENDORS = DEFAULT_TABLE.vendors;
 export const WIDGET_PROBES = DEFAULT_TABLE.widgetProbes;
 export const ENCLAVE_SELECTORS = DEFAULT_TABLE.enclave;

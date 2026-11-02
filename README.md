@@ -290,6 +290,21 @@ or a real handset over **Appium / WebdriverIO / Selenium** via `touchDriver`.
 Full details in
 [docs/usage.md § How it moves](./docs/usage.md#how-it-moves--mouse-mobile-none-or-yours).
 
+**Your own captcha?** Every URL pattern and selector the solver uses is in
+[`captchakraken.config.json`](./captchakraken.config.json). Write a file with a
+`custom` entry for a captcha it does not know, and pass it in:
+
+```typescript
+new CaptchaKrakenSolver({ selectors: './my-captchas.json' })
+```
+
+```python
+PageSolver(config=PageSolverConfig(selectors="my-captchas.json"))
+```
+
+It is laid over the defaults, so it holds only what it changes. Details in
+[docs/usage.md § Selectors and URL patterns](./docs/usage.md#selectors-and-url-patterns-captchakrakenconfigjson).
+
 **Stay current** — pull the latest model + engine in one step, no reinstall:
 
 ```bash
