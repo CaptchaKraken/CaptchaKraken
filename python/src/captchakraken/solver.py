@@ -275,13 +275,9 @@ class CaptchaSolver:
         """Reject a sprite board on one background: icons laid out in rows are a click board even where the
         element detector sees their rows as a grid.
 
-        Measured on the detector's cells over 3,809 real and generated grids and 270 non-grid 9- or 16-cell
-        lattices: no grid has its cells share a background, and every GeeTest iconcrush board the detector reads
-        as a grid does. Two of the line tracer's checks are gone. Its lattice-regularity gate (0.02 of a cell,
-        set on traced lines) rejected most true grids: detector boxes sit a median 0.04 out of true. Its
-        flat-cell gate (mean stddev < 25) caught none of the 270 and refused 24 of 343 reCAPTCHA 4x4 boards,
-        one photo cut into sixteen tiles whose sky tiles are flat once the cells stop at the white gutters.
-        """
+        Only an UNKNOWN vendor reaches this with such a board; `_grid_dims` keeps known click vendors out. Measured
+        2026-11-01 on 30 real captures per type: 0 of 297 known-vendor grids rejected; as UNKNOWN it turns away
+        10 of 484, all click or drag boards (GeeTest align-icons, hCaptcha drag patterns)."""
         with Image.open(image_path) as im:
             img = np.asarray(im.convert("RGB"))
         rois = [img[y1:y2, x1:x2].reshape(-1, 3) for (x1, y1, x2, y2) in grid_boxes

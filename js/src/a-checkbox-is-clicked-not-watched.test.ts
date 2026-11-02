@@ -86,7 +86,7 @@ for (const [name, vendor, frame] of [['no DOM selector', Vendor.TURNSTILE, null]
     assert.equal(seen.asks, 0);
     assert.deepEqual(result.tokenUsage, []);
     assert.equal(pressedAt.length, 1);
-    assert.ok(inside(pressedAt[0], { x: 33 + 16, y: 237 + 23, width: 30, height: 30 }), `clicked ${pressedAt[0]}, outside the tick box OpenCV found`);
+    assert.ok(inside(pressedAt[0], { x: 33 + 16, y: 237 + 23, width: 30, height: 30 }), `clicked ${pressedAt[0]}, outside the tick box the detector found`);
   });
 }
 

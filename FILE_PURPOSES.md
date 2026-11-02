@@ -384,8 +384,6 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_grid_dims_must_be_possible.py` | Only the shapes the grid expert was trained on reach it, per named vendor; a count no puzzle has is never a grid. |
 | `python/tests/test_grid_never_pairs_tiles.py` | A board of tall tiles is never read as a lattice of tile pairs, which sent it to the wrong expert. |
 | `python/tests/test_hcaptcha_boards_reach_the_right_expert.py` | Two captured Tier 3 boards: a 6x3 card board is not read as a 3x3 of tile pairs, and an off-centre 3x3 photo grid is still found. |
-| `python/tests/test_grid_noisy_gutter.py` | A grid whose gutters carry capture dither is still a grid, and pure texture is not one. |
-| `python/tests/test_grid_overcount_falls_back.py` | Every widget puts a footer under its grid; the footer is never read as another row of cells. |
 | `python/tests/test_grid_round_pays_once.py` | One grid round costs one detection, not one per cell. |
 | `python/tests/test_hcaptcha_badge_detection.py` | A photo is not a selection badge: the selected-state check must not read tile content as a tick. |
 | `python/tests/test_selected_fields.py` | Selected-tile readback over the same corpus, and skips the same way. |
