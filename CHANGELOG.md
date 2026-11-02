@@ -7,6 +7,9 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Added
 
+- **`HF_TOKEN` fetches the detector weights from a private repository.** The
+  download sends it as a bearer token when it is set, and nothing otherwise.
+
 - **Every selector and URL pattern is in one config file.**
   `captchakraken.config.json` at the repository root holds each vendor's
   `hosts` and selectors in detection order, the generic fallbacks, and a

@@ -125,6 +125,7 @@ Everything model-specific lives in `captchakraken.config` and is env-overridable
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` disables local auto-start | `1` |
 | `CAPTCHA_KRAKEN_DETECTOR` | A local element-detector `.onnx` to run instead of downloading the released one | the released weights, fetched once |
 | `CAPTCHA_KRAKEN_DETECTOR_MODEL` | Which released detector runs: `lite` (MobileNetV3, about 100 ms a board on one vCPU), `standard` (ResNet-18), or `auto`; overrides `detector` in `captchakraken.config.json` | the config's `detector`, shipped as `auto`: `lite` on two usable CPUs or fewer (a container's CPU quota included), else one board is timed and `standard` runs when it fits in 200 ms |
+| `HF_TOKEN` | A Hugging Face token, sent only when downloading the detector weights from a private copy of their repo | unset: the download sends no credential |
 | `CAPTCHA_HUMANIZATION` | How gestures are performed: `mouse`, `mobile` or `none` | `mouse` |
 
 **How it moves** is a choice of input device, not a realism dial. `mobile`
