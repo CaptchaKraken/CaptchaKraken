@@ -231,6 +231,10 @@
     "CAPTCHA_KRAKEN_DETECTOR": [
       "python/src/captchakraken/pointer/detector.py"
     ],
+    "CAPTCHA_KRAKEN_DETECTOR_MODEL": [
+      "js/src/solver.ts",
+      "python/src/captchakraken/pointer/detector.py"
+    ],
     "CAPTCHA_KRAKEN_EXTRA_HEADERS": [
       "python/src/captchakraken/planner.py"
     ],
@@ -438,6 +442,7 @@
       "CaptchaKrakenSolver",
       "CdpTouchBackend",
       "DEFAULT_CONFIG_PATH",
+      "DETECTOR_MODELS",
       "ErrorCode",
       "FrameRole",
       "HUMANIZATION_MODES",

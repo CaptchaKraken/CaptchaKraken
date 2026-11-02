@@ -129,10 +129,30 @@ def test_custom_selectors_still_wins_over_the_files_entry():
     ({"custom": {"widget": ".one-string"}}, "custom.widget: must be a list of strings"),
     ({"custom": {"text_input": ["#code"]}}, "nothing to detect"),
     ({"generic": {"buttons": []}}, "generic.buttons: not a generic list"),
+    ({"detector": "heavy"}, "detector: 'heavy' is not one of auto, standard, lite"),
 ])
 def test_a_bad_key_is_named(doc, names):
     with pytest.raises(SelectorConfigError, match=names.replace("[", r"\[").replace("]", r"\]")):
         SelectorTable(config=doc)
+
+
+def test_the_detector_is_auto_unless_the_config_names_one():
+    assert DEFAULT_TABLE.config.detector == "auto"
+    assert SelectorTable(config={"custom": {"widget": ["#c"]}}).config.detector == "auto"
+    assert SelectorTable(config={"detector": "lite"}).config.detector == "lite"
+
+
+def test_the_configs_detector_choices_are_the_detectors_models():
+    from captchakraken.pointer import detector
+    assert S.DETECTOR_CHOICES == detector.MODELS
+
+
+def test_a_page_solver_runs_its_configs_detector(monkeypatch):
+    from captchakraken.pointer import detector
+    monkeypatch.setattr(detector, "_CHOICE", None)
+    PageSolver(PageSolverConfig(selectors={"detector": "standard"}), solver=object())
+    assert detector._CHOICE == "standard"
+    detector.configure(None)
 
 
 def test_a_file_that_is_not_json_names_the_file(tmp_path):

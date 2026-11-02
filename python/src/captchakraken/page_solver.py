@@ -478,6 +478,9 @@ class PageSolver:
         self._solver = solver or CaptchaSolver(**solver_kwargs)
         self._human: Humanizer = resolve_humanizer(self.config)
         self._sel = SelectorTable(self.config.custom_selectors, config=self.config.selectors)
+        # The config's `detector`: which element detector finds this solver's grids and tick boxes.
+        from .pointer import detector as _detector
+        _detector.configure(self._sel.config.detector)
         self._last_submit_frame_hash: Optional[str] = None
         self._deadline_ms: Optional[float] = None
         self._budget: Optional[PhaseBudget] = None

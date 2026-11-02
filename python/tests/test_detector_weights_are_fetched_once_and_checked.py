@@ -84,9 +84,9 @@ def test_auto_runs_lite_on_one_or_two_cpus_without_measuring(monkeypatch, cpus):
     assert detector.model_name() == "lite"
 
 
-@pytest.mark.parametrize("lite_s, want", [(0.020, "standard"), (0.028, "standard"), (0.030, "lite"), (0.090, "lite")])
+@pytest.mark.parametrize("lite_s, want", [(0.020, "standard"), (0.036, "standard"), (0.037, "lite"), (0.090, "lite")])
 def test_auto_times_lite_and_runs_standard_only_when_it_would_fit(monkeypatch, tmp_path, lite_s, want):
-    """standard takes STANDARD_OVER_LITE times lite's time: 0.028 s x 7 fits 0.2 s, 0.030 s does not."""
+    """standard takes STANDARD_OVER_LITE times lite's time: 0.036 s x 5.5 fits 0.2 s, 0.037 s does not."""
     monkeypatch.delenv("CAPTCHA_KRAKEN_DETECTOR_MODEL", raising=False)
     monkeypatch.setenv("CAPTCHA_KRAKEN_STATE_DIR", str(tmp_path))
     monkeypatch.setattr(detector, "usable_cpus", lambda: 8)

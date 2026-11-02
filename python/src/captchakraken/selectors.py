@@ -140,17 +140,28 @@ def _entry(where: str, raw: Any, hosts_required: bool = True) -> VendorSelectors
     return VendorSelectors(**kw)
 
 
+#: The element detector a config may choose (see `pointer.detector`).
+DETECTOR_CHOICES = ("auto", "standard", "lite")
+
+
 class SelectorConfig(NamedTuple):
-    """A loaded selector config: the caller's own entry, every vendor's in detection order, and the generic fallbacks."""
+    """A loaded config: the caller's own entry, every vendor's in detection order, the generic fallbacks, and which
+    element detector runs."""
     custom: Optional[VendorSelectors]
     vendors: Mapping[Vendor, VendorSelectors]
     generic: Mapping[str, Tuple[str, ...]]
+    detector: str = "auto"
 
 
 def _parse(name: str, doc: Mapping[str, Any], base: Optional[SelectorConfig]) -> SelectorConfig:
     for key in doc:
-        if not key.startswith("_") and key not in ("custom", "vendors", "generic"):
-            raise SelectorConfigError(f"{name}: {key}: not a config key (custom, vendors, generic)")
+        if not key.startswith("_") and key not in ("detector", "custom", "vendors", "generic"):
+            raise SelectorConfigError(f"{name}: {key}: not a config key (detector, custom, vendors, generic)")
+    detector = base.detector if base else "auto"
+    if "detector" in doc:
+        if not isinstance(doc["detector"], str) or doc["detector"].strip().lower() not in DETECTOR_CHOICES:
+            raise SelectorConfigError(f"{name}: detector: {doc['detector']!r} is not one of {', '.join(DETECTOR_CHOICES)}")
+        detector = doc["detector"].strip().lower()
     custom = base.custom if base else None
     if "custom" in doc:
         custom = None if doc["custom"] is None else _entry(f"{name}: custom", doc["custom"], hosts_required=False)
@@ -182,7 +193,7 @@ def _parse(name: str, doc: Mapping[str, Any], base: Optional[SelectorConfig]) ->
         generic[key] = _strings(f"{name}: generic.{key}", value)
     if base is None and set(generic) != set(_GENERIC):
         raise SelectorConfigError(f"{name}: generic: missing {sorted(set(_GENERIC) - set(generic))}")
-    return SelectorConfig(custom, vendors, generic)
+    return SelectorConfig(custom, vendors, generic, detector)
 
 
 def load_config(source: Optional[ConfigSource] = None) -> SelectorConfig:

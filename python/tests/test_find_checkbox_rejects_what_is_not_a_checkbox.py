@@ -18,7 +18,10 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "checkbox")
 GRIDS = os.path.join(os.path.dirname(__file__), "fixtures", "grid")
 
 #: Widget picture -> the tick box on it (x0, y0, x1, y1), as the vendor's DOM placed it.
-#: GeeTest v4 draws no tick box: its whole "click to verify" bar is the target.
+#: GeeTest v4 is not here: its whole "click to verify" bar is the target, and the driver
+#: clicks it through the config's `box` selector without a screenshot (see
+#: test_an_in_page_button_with_no_tick_box_is_clicked_where_it_is). The lite detector
+#: does not find a box that fills the whole shot, and nothing asks it to.
 TICK_BOXES = {
     "recaptcha_light.png": (13, 23, 41, 51),
     "recaptcha_dark_compact_2x.png": (26, 57, 82, 113),
@@ -27,7 +30,6 @@ TICK_BOXES = {
     "turnstile_light.png": (9, 20.5, 33, 44.5),
     "turnstile_dark_flexible_2x.png": (18, 41, 66, 89),
     "captchafox.png": (16, 18, 40, 42),
-    "geetest_v4_bar.png": (0, 0, 260, 50),
 }
 #: A ticked or passed widget has nothing left to click.
 TICKED = ["recaptcha_ticked_1.5x.png", "hcaptcha_ticked.png", "turnstile_passed.png"]

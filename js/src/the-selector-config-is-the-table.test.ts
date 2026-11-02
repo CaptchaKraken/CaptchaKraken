@@ -89,12 +89,34 @@ const BAD: Array<[unknown, RegExp]> = [
   [{ custom: { widget: '.one-string' } }, /custom\.widget: must be a list of strings/],
   [{ custom: { text_input: ['#code'] } }, /nothing to detect/],
   [{ generic: { buttons: [] } }, /generic\.buttons: not a generic list/],
+  [{ detector: 'heavy' }, /detector: "heavy" is not one of auto, standard, lite/],
 ];
 
 test('a bad key is named', () => {
   for (const [doc, names] of BAD) {
     assert.throws(() => new SelectorTable(undefined, doc as SelectorConfigFile), (e: unknown) => e instanceof SelectorConfigError && names.test(e.message),
       `${JSON.stringify(doc)} did not raise ${names}`);
+  }
+});
+
+test('the detector is auto unless the config names one', () => {
+  assert.equal(DEFAULT_TABLE.config.detector, 'auto');
+  assert.equal(new SelectorTable(undefined, { custom: SIGNUP }).config.detector, 'auto');
+  assert.equal(new SelectorTable(undefined, { detector: 'lite' }).config.detector, 'lite');
+});
+
+test("the config's detector reaches the engine, and the environment still wins", () => {
+  const saved = process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL;
+  try {
+    delete process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL;
+    const env = (s: CaptchaKrakenSolver) => (s as any).routingEnv().CAPTCHA_KRAKEN_DETECTOR_MODEL;
+    assert.equal(env(new CaptchaKrakenSolver()), 'auto');
+    assert.equal(env(new CaptchaKrakenSolver({ selectors: { detector: 'standard' } })), 'standard');
+    process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL = 'lite';
+    assert.equal(env(new CaptchaKrakenSolver({ selectors: { detector: 'standard' } })), undefined);
+  } finally {
+    if (saved === undefined) delete process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL;
+    else process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL = saved;
   }
 });
 

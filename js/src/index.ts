@@ -12,8 +12,8 @@ export { fromPuppeteer } from './puppeteer-adapter';
 
 export type { Page, PlaywrightPage, PlaywrightFrame, PlaywrightElementHandle, PlaywrightLocator, PlaywrightScope } from './playwright-types';
 export type { RoundVerdict } from './verdicts';
-export { DEFAULT_CONFIG_PATH, SELECTORS, SelectorConfigError, loadConfig } from './selectors';
-export type { SelectorConfig, SelectorConfigFile } from './selectors';
+export { DEFAULT_CONFIG_PATH, DETECTOR_MODELS, SELECTORS, SelectorConfigError, loadConfig } from './selectors';
+export type { DetectorModel, SelectorConfig, SelectorConfigFile } from './selectors';
 export type { CustomSelectors } from './selectors';
 export type { VendorSelectors } from './selectors';
 

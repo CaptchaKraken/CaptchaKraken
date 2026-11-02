@@ -14,6 +14,13 @@
     "submit, text box, refresh and slider controls are tried before the generic",
     "ones. It must name a `widget`, `challenge` or `checkbox`; `hosts` is optional.",
     "",
+    "detector: the element detector that finds grids, tick boxes and pieces on the",
+    "CPU before any model is asked. `standard` (ResNet-18, 124 MB), `lite`",
+    "(MobileNetV3, 24 MB, ~6x faster on one CPU) or `auto`: lite on two usable",
+    "CPUs or fewer, and above that standard only when a one-off timing predicts",
+    "it inside 200 ms a board. Only the chosen model is downloaded.",
+    "CAPTCHA_KRAKEN_DETECTOR_MODEL overrides this.",
+    "",
     "vendors: one entry per vendor, in detection order. Order matters: the driver",
     "takes the first visible match in table order. `hosts` are URL substrings of",
     "the vendor's code on the wire; every other field is a list of CSS (or",
@@ -48,6 +55,7 @@
     "refresh": "Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.",
     "hold_completes": "A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching the answer's `to` is not a release, and the hold lasts until the widget says it is done."
   },
+  "detector": "auto",
   "custom": null,
   "vendors": {
     "recaptcha": {

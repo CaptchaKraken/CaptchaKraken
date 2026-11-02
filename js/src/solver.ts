@@ -734,6 +734,8 @@ export class CaptchaKrakenSolver {
       ...(this.solveWidgetHost ? { CAPTCHA_KRAKEN_WIDGET_HOST: this.solveWidgetHost } : {}),
       // This driver warns about a legacy model name itself, once; the engine it starts per round stays quiet.
       CAPTCHA_KRAKEN_MODEL_WARNING: '0',
+      // The config's detector choice; the caller's own environment variable still wins, as it does in Python.
+      ...(process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL ? {} : { CAPTCHA_KRAKEN_DETECTOR_MODEL: this.sel.config.detector }),
     };
   }
 

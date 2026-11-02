@@ -40,9 +40,9 @@ WEIGHTS = {
     },
     "lite": {
         "repo": "CaptchaKraken/CaptchaKraken-v2-Detector",
-        "revision": "LITE_REVISION",
+        "revision": "184987101f0b2ad3f2d5e1dfc4697108c4f2d967",
         "file": "detector-lite.onnx",
-        "sha256": "LITE_SHA256",
+        "sha256": "b654e6b02028e29ccdc4c4ca0f52ba7110c9f064f97d507f03ac308745eb41ad",
     },
 }
 #: What `auto` may choose from, and the names a checkpoint's `arch` has had.
@@ -52,10 +52,11 @@ _ARCH_NAMES = {"standard": "standard", "lite": "lite", "normal": "standard", "li
 LITE_AT_CPUS = 2
 #: Above that, `auto` times `lite` once and runs `standard` only when it is predicted
 #: to finish a board inside this budget. `standard` takes this many times as long as
-#: `lite` on the same CPUs (measured, see `STANDARD_OVER_LITE` in the Finetune repo's
-#: detector measurements).
+#: `lite` on the same CPUs. Measured on 520x570 grid boards, one x86 core per thread:
+#: 5.3x at 1 thread, 5.1x at 2, 4.6x at 4, 3.9x at 8. The ratio falls as threads are
+#: added, so the worst of them, rounded up, never predicts `standard` too fast.
 AUTO_BUDGET_S = 0.2
-STANDARD_OVER_LITE = 7.0
+STANDARD_OVER_LITE = 5.5
 
 
 def build(num_classes: int, pretrained: bool = False, min_size: Sequence[int] = (512,),
@@ -288,7 +289,8 @@ _CHOICE: Optional[str] = None
 
 
 def configure(choice: Optional[str]) -> None:
-    """Set the config's `detector` choice for this process; the next detection loads it."""
+    """Set the config's `detector` choice (`auto`, `standard`, `lite`) for this process; the next
+    detection loads it. A process that never calls this runs the shipped config file's choice."""
     global _CHOICE
     if choice is not None and choice.strip().lower() not in MODELS:
         raise ValueError(f"detector {choice!r}: one of {', '.join(MODELS)}")
@@ -303,6 +305,10 @@ def local() -> OnnxDetector:
     """The client's detector, loaded once per process."""
     if os.getenv("CAPTCHA_KRAKEN_DETECTOR"):
         return OnnxDetector(weights_path())
+    if _CHOICE is None:
+        # Nothing configured this process (the CLI, a script): the shipped config file's choice.
+        from ..selectors import DEFAULT_CONFIG
+        return OnnxDetector(weights_path(model_name(DEFAULT_CONFIG.detector)))
     return OnnxDetector(weights_path(model_name(_CHOICE)))
 
 

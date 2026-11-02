@@ -24,6 +24,17 @@ semantic versioning; v2 is a major, **breaking** release.
   slider controls are tried before the generic ones. An entry that names no
   `widget`, `challenge` or `checkbox` is refused when the solver is built.
 
+- **A lite element detector for small machines.** Two detectors are released:
+  `standard` (ResNet-18) and `lite` (MobileNetV3, about 100 ms a board on one
+  vCPU), trained on the same data. `detector` in `captchakraken.config.json`
+  picks one: `auto` (the default) runs `lite` on two usable CPUs or fewer, a
+  container's CPU quota included, and otherwise times one board once and runs
+  `standard` when it fits in 200 ms; the verdict is cached per machine. Only
+  the chosen weights are downloaded. `CAPTCHA_KRAKEN_DETECTOR_MODEL` overrides
+  the config. `lite` does not find a box that fills the whole screenshot, such as
+  GeeTest v4's "click to verify" bar; the driver clicks that bar through its
+  `box` selector and never asks the detector.
+
 ### Changed
 
 - **Grids and checkboxes are found by a CNN, and OpenCV is gone.** `find_grid`

@@ -270,7 +270,7 @@ something every browser-driver install should pay for.
 |---|---|
 | `python/src/captchakraken/__init__.py` | The package's public surface and `__version__`, which must equal both manifests. |
 | `python/src/captchakraken/captchakraken.config.json` | The copy of the root `captchakraken.config.json` the wheel and npm package ship, because an installed package has no repository root; a test holds it identical to the root file. |
-| `python/src/captchakraken/cli.py` | Every CLI mode: solve a still image, solve a recorded animated burst, the frame-diff and grid-cell state helpers the drivers poll, each OpenCV tool call, `server start\|stop\|status\|run`, and `fetch`. |
+| `python/src/captchakraken/cli.py` | Every CLI mode: solve a still image, solve a recorded animated burst, the frame-diff and grid-cell state helpers the drivers poll, each image tool call (grid, checkbox, slider and hold trackers), `server start\|stop\|status\|run`, and `fetch`. |
 | `python/src/captchakraken/config.py` | Central, model-agnostic configuration: the endpoint, the key, and which model is served, read from the environment with defaults from `models.json`. |
 | `python/src/captchakraken/solver.py` | `CaptchaSolver`: solve one still image or one recorded burst against the endpoint. The engine behind the CLI. |
 | `python/src/captchakraken/page_solver.py` | `PageSolver`: the Python page driver, mirror of `js/src/solver.ts`, and the home of `CaptchaSolveError` and its four subclasses. |
