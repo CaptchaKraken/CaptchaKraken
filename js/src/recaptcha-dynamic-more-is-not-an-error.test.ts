@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { CaptchaKrakenSolver } from './solver';
 import { SELECTORS } from './selectors';
-import { Vendor } from './kinds';
+import { RecaptchaBanner, Vendor } from './kinds';
 import { fakeDom } from './fake-dom.test';
 
 const [BFRAME] = SELECTORS[Vendor.RECAPTCHA].challenge as readonly string[];
@@ -38,15 +38,10 @@ test('an empty banner is a placeholder, not a verdict', async () => {
   assert.equal(await solver().bannerKind(pageShowing('.rc-imageselect-incorrect-response', '  ')), null);
 });
 
-test('dynamic-more never arms the abort latch', async () => {
+test('only an under-selection banner asks for the missed tiles', async () => {
   const s = solver();
-  const page = pageShowing('.rc-imageselect-error-dynamic-more', 'Please also check the new images.');
-  assert.equal(s.bannerIsFatalAfterRetry(await s.bannerKind(page)), false);
-  assert.equal(s.bannerIsFatalAfterRetry(await s.bannerKind(page)), false);
-});
-
-test('a repeated under-selection IS fatal after one retry', async () => {
-  const s = solver();
-  const page = pageShowing('.rc-imageselect-error-select-more', 'Please select all matching images.');
-  assert.equal(s.bannerIsFatalAfterRetry(await s.bannerKind(page)), true);
+  const missed = async (sel: string, text: string) => (await s.bannerKind(pageShowing(sel, text))) === RecaptchaBanner.SELECT_MORE;
+  assert.equal(await missed('.rc-imageselect-error-select-more', 'Please select all matching images.'), true);
+  assert.equal(await missed('.rc-imageselect-error-dynamic-more', 'Please also check the new images.'), false);
+  assert.equal(await missed('.rc-imageselect-incorrect-response', 'Please try again.'), false);
 });

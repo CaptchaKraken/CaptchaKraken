@@ -61,6 +61,7 @@
       "animated_challenge_after_ms",
       "animated_motion_streak",
       "animated_probe_enabled",
+      "board_images_timeout_ms",
       "board_paint_floor",
       "board_paint_poll_ms",
       "board_paint_timeout_ms",
@@ -306,10 +307,6 @@
     "CAPTCHA_REQUEST_PRIORITY": [
       "python/src/captchakraken/planner.py"
     ],
-    "CAPTCHA_RESAMPLE_LEVEL": [
-      "js/src/cli-invocation.ts",
-      "python/src/captchakraken/planner.py"
-    ],
     "CAPTCHA_TIMINGS": [
       "js/src/timing.ts",
       "python/src/captchakraken/timing.py"
@@ -487,6 +484,7 @@
       "animatedMotionStreak",
       "apiKey",
       "baseUrl",
+      "boardImagesTimeoutMs",
       "boardPaintFloor",
       "boardPaintPollMs",
       "boardPaintTimeoutMs",

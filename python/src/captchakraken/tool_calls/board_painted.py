@@ -1,7 +1,10 @@
 """Has the widget painted its puzzle yet, or are we photographing the rebuild hole?
 
-Measured on gt4.geetest.com's slide demo (2026-09-12): 6 of 52 requests carried a board with under 5% ink and
-every one came back dead centre. The settle gate cannot catch it because a blank panel is perfectly still.
+First seen on GeeTest's slide demo (2026-09-12): 6 of 52 requests carried a board with under 5% ink. The settle gate
+cannot catch it because a blank panel is perfectly still. Measured 2026-11-02 over 1,557 real captures of every
+vendor: no painted board read as blank, and no board with its centre blanked read as painted. Asking the element
+detector instead was tried and lost: it missed every text captcha and saw items at the edges of a blank centre, at
+0.2-0.4 s a call against this check's ~1 ms.
 Structure is measured, not ink, because geetest_v4_svg is line art on white. A caller must treat False as
 "wait a moment longer", never "give up": a gate that can refuse to ever take a picture is worse than the blank one.
 """
@@ -10,7 +13,7 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-# Trimmed in from every edge: the caption and icon row are chrome that paints early, on a blank board too.
+# Trimmed in from every edge: a caption, an icon row or a slider track is chrome that paints early, on a blank board too.
 CENTRE_BOX = (0.15, 0.25, 0.85, 0.75)
 
 # Below this is JPEG noise and anti-aliasing on a flat fill.

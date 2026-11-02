@@ -150,14 +150,11 @@ they drifted once: the runtime attribute said one release while the wheel on PyP
 said another, so every caller branching on it — and every bug report quoting it —
 named a version that had not been current for weeks.
 
-**Resampling is greedy-only, by measurement.** `RESAMPLE_TEMPERATURES` is
-`(0.0,)`. Trying `(0.0, 0.35, 0.7)` on repeated answers scored 0/5 against 4/5,
-and the median failed attempt cost 24.0 s against 13.9 s: making each re-ask
-differ resets the no-progress counter, so the attempt stops bailing at round 3.
-The level and seed plumbing stays for a network-refusal trigger. The driver
-sends the resample LEVEL, never a temperature, so the schedule lives in one
-place and the two ports cannot drift; the CLI is a fresh process per round and
-cannot know the round count.
+**Re-asks are greedy, by measurement.** Heating repeated answers to
+`(0.0, 0.35, 0.7)` scored 0/5 against 4/5, and the median failed attempt cost
+24.0 s against 13.9 s: making each re-ask differ resets the no-progress counter,
+so the attempt stops bailing at round 3. A repeated answer instead turns on
+`avoid_refused`, and the pointer answers with its likeliest other answer.
 
 **`BUILTIN_PROMPTS`, `AVAILABILITIES` and `PROMPT_FAMILIES` are pure literals,
 and stay strings even though `kinds.py` has the enums.** The training repo's
@@ -215,7 +212,7 @@ on a licensed model replaces a `RepositoryNotFoundError` that reads as "you are
 not logged in" with the truth, but doing the same to a private model would stop
 our own admin token from pulling weights it is entitled to.
 
-**`MIN_PIXELS` is a floor on area, not a resize.** On a 277x285 GeeTest board,
+**`DEFAULT_PIXEL_BUDGET` is a floor on area, not a resize.** On a 277x285 GeeTest board,
 predictions landed 80-105 px from the hand label at native size and 1-4 px once
 upscaled. The area is clamped rather than the dimensions because squashing the
 aspect moves every tile centre.
@@ -613,8 +610,7 @@ that plays once and stops films like.
 
 **The camera does not stop when the answer is sent.** A burst can only show the
 model the screens that fell inside its window, and the answer it produces is
-identical next round by construction: sampling is greedy (`RESAMPLE_TEMPERATURES
-= (0.0,)`), so the same frames give the same answer. A board whose answer lived
+identical next round by construction: sampling is greedy, so the same frames give the same answer. A board whose answer lived
 on a screen the window missed therefore had no second chance — the stored plan
 was re-pressed until the no-progress fence tripped at round 3 of 6, with half
 the budget unspent. Measured live on 2026-09-15 against the vendors' own pages,

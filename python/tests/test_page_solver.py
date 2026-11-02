@@ -212,7 +212,7 @@ class TestSolveLoop:
         assert result.is_solved is True
 
     def test_no_interaction_with_captcha_still_present_gives_up_when_the_loops_are_spent(self):
-        solver = _solver(post_solve_delay_ms=1)
+        solver = _solver()
         solver.detect_captcha = lambda _page: _widget(FakeElement(src="recaptcha/api2/bframe"))
         solver._solve_single = lambda *_: (False, [])
         solver.is_captcha_solved = lambda _page: False
@@ -235,7 +235,7 @@ class TestSolveLoop:
         assert calls["n"] == 6, "an unusable answer ended the solve before its loops were spent"
 
     def test_unsupported_mid_solve_retries_instead_of_aborting(self):
-        solver = _solver(max_unsupported_resolves=2)
+        solver = _solver()
         solver.detect_captcha = lambda _page: _widget(FakeElement(src="https://hcaptcha.com/?frame=challenge"))
         solver._wait_for_element_settled = lambda _el: "settled"
         solver.is_captcha_solved = lambda _page: False

@@ -81,7 +81,8 @@ widget the page has not drawn yet, so you can call `solve()` straight after
 readable, `result.verdicts` lists its answer to each round, and an accepted
 verdict is what ends the solve. `max_stale_element_retries`,
 `max_unsupported_resolves` and `post_solve_delay_ms` are still accepted but
-ignored since 3.2.0.
+ignored since 3.2.0. `hcaptcha_images_timeout_ms` is read as
+`board_images_timeout_ms`.
 
 Tune with `PageSolverConfig`. Its fields are the snake_cased names of the
 TypeScript `CaptchaKrakenConfig` keys, so a value tuned on one driver is

@@ -316,10 +316,10 @@ def test_a_second_refresh_is_a_second_board_not_a_repeated_answer(monkeypatch):
     assert s._note_answer(refresh, None) is False
     assert s._no_progress_rounds == 0
     click = [ClickAction(action=ActionKind.CLICK, target_bounding_boxes=[[0.4, 0.4, 0.6, 0.6]])]
-    monkeypatch.setattr(s, "_apply_sampling", lambda: None, raising=False)
+    monkeypatch.setattr(s, "_apply_refusals", lambda: None)
     monkeypatch.setattr(s, "_invalidate_animated_answer", lambda: None, raising=False)
     monkeypatch.setattr(s, "_arm_animated_probe", lambda: None, raising=False)
-    s._resample_level = 0
+    s._refused_rounds = 0
     assert s._note_answer(click, None) is False
     assert s._note_answer(click, None) is True, "an ordinary repeated answer is still caught"
 
