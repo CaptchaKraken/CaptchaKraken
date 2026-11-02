@@ -16,6 +16,12 @@ class Vendor(StrEnum):
     PROSOPO = "prosopo"
     MTCAPTCHA = "mtcaptcha"
     BOTDETECT = "botdetect"
+    HUMAN = "human"
+    AWSWAF = "awswaf"
+    CAPTCHAFOX = "captchafox"
+    DINGXIANG = "dingxiang"
+    FUNCAPTCHA = "funcaptcha"
+    PROTON = "proton"
     UNKNOWN = "unknown"
 
 
@@ -25,6 +31,9 @@ class ActionKind(StrEnum):
     TYPE = "type"
     WAIT = "wait"
     DONE = "done"
+    HOLD = "hold"
+    REFRESH = "refresh"
+    SLIDE = "slide"
 
 
 class PixelAnswerKind(StrEnum):
@@ -34,6 +43,8 @@ class PixelAnswerKind(StrEnum):
     DRAG = "drag"
     SLIDE = "slide"
     TYPE = "type"
+    HOLD = "hold"
+    REFRESH = "refresh"
 
 
 class RetryMode(StrEnum):

@@ -128,24 +128,30 @@ requirements → one agent.
 
 - **The model is Qwen3.5-9B.** Never reference Qwen2 / Qwen2.5 / Qwen-VL anywhere;
   grep before any change that touches serving or the planner.
-- **`find_grid` is the foundation.** It's pure OpenCV (no model) and the most
-  heavily gated code here: every geometry gate in
-  `python/tests/test_grid_geometry_gates.py` exists because one specific false
-  positive happened. Read the test named for a gate before you change it.
+- **`find_grid` is the foundation.** It reads the element detector (a small
+  Mask R-CNN run on the CPU through onnxruntime, no planner model): the grid and
+  its cells are boxes the network found. Every board that once reached the wrong
+  expert is a test under `python/tests/test_grid_*` and
+  `test_hcaptcha_boards_reach_the_right_expert.py`; run them before you change
+  how detections become a lattice.
 - **Locators, never `page.$()` / `page.$$()` / `query_selector()`.** The
   driver reads the page through `scope.locator(sel).filter({ visible: true })`
   (`filter(visible=True)` in Python), `.all()`, `.count()` and
   `.elementHandle()`; the structural `Page` type in `js/src/playwright-types.ts`
   deliberately has no `$`. Query every selector of a pass at once (see the
   `visible()` helper in `solver.ts`), not one after another.
-- **Every selector lives in `js/src/selectors.ts` and
-  `python/src/captchakraken/selectors.py`.** They are one typed table,
-  `SELECTORS: Record<Vendor, VendorSelectors>`, with a row per vendor: hosts,
-  challenge and checkbox iframes, inline widget shapes, response field,
+- **Every selector and URL pattern lives in `captchakraken.config.json`** at the
+  repository root, which both ports load (`js/src/selectors.ts`,
+  `python/src/captchakraken/selectors.py`) into one typed table,
+  `SELECTORS: Record<Vendor, VendorSelectors>`, with an entry per vendor:
+  hosts, challenge and checkbox iframes, inline widget shapes, response field,
   accepted and checked markers, submit controls, text inputs, slider handles,
-  pieces. Import from it; never write a selector string in the driver. Adding
-  a vendor is adding a row, and the two files stay in the same order because
-  table order is detection order.
+  pieces; then the generic fallbacks. Import from the table; never write a
+  selector string in the driver. Adding a vendor is adding an entry (and its
+  `Vendor` value), and the file's order is detection order. The Python package
+  ships a copy of the file: after editing the root one,
+  `cp captchakraken.config.json python/src/captchakraken/` (a test fails until
+  they match).
 - **General first, vendor second.** There are only a few puzzle types — drag,
   grid selection, text, clicking, slider, grid fading, grid boundary (the 4×4
   reCAPTCHA) and video clicking — and the model handles the divergence between

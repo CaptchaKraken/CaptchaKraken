@@ -31,7 +31,6 @@ class _Kf:
 
 def _burst(monkeypatch, payloads: Sequence[bytes], work_ms: Sequence[float] = ()) -> Tuple[int, float, List[float]]:
     """Film `payloads` in order; frame i costs `work_ms[i]` (QUICK_MS past the end). Returns (frames, burst_ms, capture times)."""
-    import cv2
     import numpy as np
 
     clock = install(monkeypatch, page_solver)
@@ -48,7 +47,7 @@ def _burst(monkeypatch, payloads: Sequence[bytes], work_ms: Sequence[float] = ()
             fh.write(payloads[min(i, len(payloads) - 1)])
 
     monkeypatch.setattr(solver, "_screenshot", fake_shot)
-    monkeypatch.setattr(cv2, "imread", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
+    monkeypatch.setattr("captchakraken.keyframes.read_frame", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
     frames, _order, _moved, burst_ms, _cycled = solver._burst(object())
     return len(frames), burst_ms, captured
 

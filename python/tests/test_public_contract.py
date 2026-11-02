@@ -87,6 +87,7 @@ def surface() -> dict:
                 "CaptchaSolver.__init__": _sig(captchakraken.CaptchaSolver.__init__),
                 "CaptchaSolver.solve": _sig(captchakraken.CaptchaSolver.solve),
                 "CaptchaSolver.solve_keyframes": _sig(captchakraken.CaptchaSolver.solve_keyframes),
+                "CaptchaSolver.solve_animated": _sig(captchakraken.CaptchaSolver.solve_animated),
                 "PageSolver.__init__": _sig(captchakraken.PageSolver.__init__),
                 "PageSolver.solve": _sig(captchakraken.PageSolver.solve),
                 "PageSolver.watch": _sig(captchakraken.PageSolver.watch),

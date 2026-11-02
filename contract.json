@@ -1,6 +1,6 @@
 {
   "python": {
-    "version": "3.2.1",
+    "version": "3.3.0",
     "exports": [
       "ActionKind",
       "ActionPlanner",
@@ -12,6 +12,7 @@
       "CaptchaWatcher",
       "CdpTouchBackend",
       "ClickAction",
+      "DEFAULT_CONFIG_PATH",
       "DragAction",
       "ErrorCode",
       "HumanizationMode",
@@ -28,6 +29,7 @@
       "RetryMode",
       "RoundVerdict",
       "SELECTORS",
+      "SelectorConfigError",
       "SolveResult",
       "TouchBackend",
       "TouchscreenTouchBackend",
@@ -37,6 +39,7 @@
       "Verdict",
       "WaitAction",
       "add_overlays_to_image",
+      "load_config",
       "solve_captcha",
       "solve_captcha_on_page"
     ],
@@ -45,6 +48,7 @@
       "CaptchaSolver.__init__": "(self, model=None, provider='captchaKrakenApi', api_key=None, expert=None)",
       "CaptchaSolver.solve": "(self, media_path, instruction='', puzzle_source=<Vendor.UNKNOWN: 'unknown'>, retry_mode=None, text_mode=False)",
       "CaptchaSolver.solve_keyframes": "(self, keyframe_paths)",
+      "CaptchaSolver.solve_animated": "(self, recording)",
       "PageSolver.__init__": "(self, config=None, solver=None, **solver_kwargs)",
       "PageSolver.solve": "(self, page)",
       "PageSolver.watch": "(self, page, **options)",
@@ -60,6 +64,7 @@
       "board_paint_floor",
       "board_paint_poll_ms",
       "board_paint_timeout_ms",
+      "custom_selectors",
       "detection_timeout_ms",
       "element_screenshot_timeout_ms",
       "expert",
@@ -85,6 +90,7 @@
       "recaptcha_fade_onset_grace_ms",
       "recaptcha_max_dynamic_rounds",
       "recaptcha_tile_hover_enabled",
+      "selectors",
       "settle_diff_threshold",
       "settle_frames",
       "settle_poll_ms",
@@ -154,6 +160,7 @@
       "check-movement",
       "detect-selected",
       "fetch",
+      "fill-step",
       "find-checkbox",
       "find-grid",
       "get-numbered-grid",
@@ -163,8 +170,8 @@
       "report-outcome",
       "serve",
       "server",
+      "slide-step",
       "solve-animated",
-      "track-piece",
       "update"
     ],
     "solve_parser": [
@@ -220,6 +227,13 @@
     ],
     "CAPTCHA_KRAKEN_CLIENT": [
       "python/src/captchakraken/planner.py"
+    ],
+    "CAPTCHA_KRAKEN_DETECTOR": [
+      "python/src/captchakraken/pointer/detector.py"
+    ],
+    "CAPTCHA_KRAKEN_DETECTOR_MODEL": [
+      "js/src/solver.ts",
+      "python/src/captchakraken/pointer/detector.py"
     ],
     "CAPTCHA_KRAKEN_EXTRA_HEADERS": [
       "python/src/captchakraken/planner.py"
@@ -391,6 +405,7 @@
     ],
     "js_only_config": [
       "apiKey",
+      "baseUrl",
       "idleMouseWander",
       "maxStaleFrameReSolves",
       "maxUnsupportedReSolves",
@@ -426,6 +441,8 @@
       "CaptchaKrakenAPIError",
       "CaptchaKrakenSolver",
       "CdpTouchBackend",
+      "DEFAULT_CONFIG_PATH",
+      "DETECTOR_MODELS",
       "ErrorCode",
       "FrameRole",
       "HUMANIZATION_MODES",
@@ -443,6 +460,7 @@
       "RecaptchaBanner",
       "RetryMode",
       "SELECTORS",
+      "SelectorConfigError",
       "SettleVerdict",
       "SolveStage",
       "TouchscreenTouchBackend",
@@ -450,6 +468,7 @@
       "Verdict",
       "fromPuppeteer",
       "isOneOf",
+      "loadConfig",
       "resolveHumanizer",
       "resolveLoraName",
       "touchBackendFor",
@@ -464,9 +483,11 @@
       "animatedChallengeAfterMs",
       "animatedMotionStreak",
       "apiKey",
+      "baseUrl",
       "boardPaintFloor",
       "boardPaintPollMs",
       "boardPaintTimeoutMs",
+      "customSelectors",
       "detectionTimeoutMs",
       "elementScreenshotTimeoutMs",
       "expert",
@@ -497,6 +518,7 @@
       "recaptchaMaxDynamicRounds",
       "recaptchaTileHoverEnabled",
       "repoPath",
+      "selectors",
       "settleDiffThreshold",
       "settleFrames",
       "settlePollMs",

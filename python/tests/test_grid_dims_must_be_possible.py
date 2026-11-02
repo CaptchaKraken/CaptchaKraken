@@ -35,9 +35,12 @@ def test_an_unknown_vendor_is_allowed_both_shapes():
     assert _grid_dims(16, "unknown") == (4, 4)
 
 
-def test_an_unrecognised_vendor_string_is_treated_as_unknown():
-    assert _grid_dims(9, "turnstile") == (3, 3)
-    assert _grid_dims(16, "turnstile") == (4, 4)
+@pytest.mark.parametrize("source", ["geetest", "turnstile", "yidun", "prosopo"])
+def test_a_named_vendor_the_grid_expert_never_saw_goes_to_the_pixel_expert(source):
+    """The grid expert was trained on reCAPTCHA's 3x3/4x4 and hCaptcha's 3x3 only; another
+    vendor's lattice of tiles is answered by the expert that was trained on that vendor."""
+    assert _grid_dims(9, source) is None
+    assert _grid_dims(16, source) is None
 
 
 def test_solve_grid_cannot_invent_its_own_dimensions():

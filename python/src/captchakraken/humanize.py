@@ -8,10 +8,11 @@ touch mode that dispatches no motion between taps still has to say where the nex
 
 from __future__ import annotations
 
+import math
 import os
 import random
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from cursory import generate_trajectory
 
@@ -22,6 +23,8 @@ Point = Tuple[float, float]
 # Each device supplies its own table. An unknown kind yields no wait rather than raising, so adding
 # a pause site cannot break a custom humanizer written against an older release.
 PAUSE_KINDS = tuple(PauseKind)
+# How often a held press looks at the widget, in ms: a frame hash per look, so not every frame.
+HOLD_POLL_MS = (180.0, 320.0)
 
 
 def _delay(ms: float) -> None:
@@ -38,10 +41,57 @@ def _same_point(a: Point, b: Point) -> bool:
     return abs(float(a[0]) - float(b[0])) < 1e-6 and abs(float(a[1]) - float(b[1])) < 1e-6
 
 
+# What one mouse event may cover. cursory's samples are up to 250 ms and 560 px apart, which the page sees as a
+# cursor that vanishes and reappears: a teleport. A real mouse reports every 8 ms (125 Hz).
+MAX_EVENT_GAP_MS = 8.0
+MAX_EVENT_STEP_PX = 16.0
+# How far a reach may swing off the straight line between its endpoints: a fraction of its length, at least a few
+# pixels. cursory morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px wide and a
+# 140 px one 300 px.
+MAX_DEVIATION = 0.15
+MIN_DEVIATION_PX = 3.0
+
+
+def _nearest_on_segment(p: Point, a: Point, b: Point) -> Point:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    if length2 == 0.0:
+        return a
+    k = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2))
+    return a[0] + k * dx, a[1] + k * dy
+
+
+def _tame(points: List[Point], start: Point, end: Point) -> List[Point]:
+    """Shrink the path's swing off the segment, shape kept, until it stays within MAX_DEVIATION of it."""
+    limit = max(MIN_DEVIATION_PX, MAX_DEVIATION * ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5)
+    near = [_nearest_on_segment(p, start, end) for p in points]
+    worst = max((((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5 for p, q in zip(points, near)), default=0.0)
+    if worst <= limit:
+        return points
+    k = limit / worst
+    return [(q[0] + (p[0] - q[0]) * k, q[1] + (p[1] - q[1]) * k) for p, q in zip(points, near)]
+
+
+def _densify(points: List[Point], timings: List[float]) -> Tuple[List[Point], List[float]]:
+    """Fill every gap wider than one mouse report with evenly timed samples along it."""
+    out_p, out_t = points[:1], timings[:1]
+    for (a, ta), (b, tb) in zip(zip(points, timings), zip(points[1:], timings[1:])):
+        dist = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+        n = max(1, int(-(-(tb - ta) // MAX_EVENT_GAP_MS)), int(-(-dist // MAX_EVENT_STEP_PX)))
+        for i in range(1, n + 1):
+            f = i / n
+            out_p.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+            out_t.append(ta + (tb - ta) * f)
+    return out_p, out_t
+
+
 def trajectory(start: Point, end: Point, frequency: int = 60) -> Tuple[List[Point], List[float]]:
-    """A recorded human movement morphed onto the endpoints; timings are cumulative ms."""
+    """A recorded human movement morphed onto the endpoints, held near the line between them and sampled at
+    least once per mouse report; timings are cumulative ms."""
     points, timings = generate_trajectory(start, end, frequency=frequency)
-    return [(float(x), float(y)) for x, y in points], [float(t) for t in timings]
+    start, end = (float(start[0]), float(start[1])), (float(end[0]), float(end[1]))
+    pts = _tame([(float(x), float(y)) for x, y in points], start, end)
+    return _densify(pts, [float(t) for t in timings])
 
 
 class Humanizer:
@@ -59,6 +109,11 @@ class Humanizer:
 
     def move(self, page: Any, to: Point) -> None:
         raise NotImplementedError
+
+    def drift(self, page: Any, to: Point) -> None:
+        """A held hand's pixel of wander. `move` is a reach, and a reach overshoots: on a 1px move it wandered up to
+        34px, off a thin bar, which the widget takes for a release."""
+        self.move(page, to)
 
     def press(self, page: Any) -> None:
         raise NotImplementedError
@@ -91,6 +146,36 @@ class Humanizer:
         self.release(page)
 
 
+def hold(human: "Humanizer", page: Any, to: Point, done: Callable[[], bool], max_ms: float) -> bool:
+    """Press at `to` until `done()` says the widget completed, or `max_ms` passes; True when it completed.
+
+    Built on move/press/release so any humanizer can hold. The hand drifts a pixel or so meanwhile, because a
+    press that does not move for seconds is a synthetic one, and the button is released whatever `done` raises.
+    """
+    human.move(page, to)
+    anchor = human.at
+    human.press(page)
+    t0 = time.monotonic()
+    try:
+        while True:
+            _delay(random.uniform(*HOLD_POLL_MS))
+            try:
+                getattr(human, "drift", human.move)(page, (anchor[0] + random.gauss(0.0, 0.8),
+                                                         anchor[1] + random.gauss(0.0, 0.8)))
+            except Exception:
+                pass
+            if done():
+                return True
+            if (time.monotonic() - t0) * 1000.0 >= max_ms:
+                return False
+    finally:
+        human.release(page)
+
+
+# How much longer than the bare round trip a step takes when the browser re-draws it as a path of its own.
+BROWSER_PATH_MS = 100.0
+
+
 class MouseHumanizer(Humanizer):
     name = HumanizationMode.MOUSE
     hovers = True
@@ -104,11 +189,13 @@ class MouseHumanizer(Humanizer):
         self._viewport_cache: Optional[Dict[str, float]] = None
         self._down = False
         self._cursor_seeded = False
+        self._browser_draws_path: Optional[bool] = None
 
     def reset(self, page: Any) -> None:
         self._viewport_cache = None
         self._cursor_seeded = False
         self._down = False
+        self._browser_draws_path = None
 
     def _viewport(self, page: Any) -> Optional[Dict[str, float]]:
         """The window to keep the cursor inside; None under camoufox, which reports no viewport."""
@@ -140,22 +227,60 @@ class MouseHumanizer(Humanizer):
         except Exception:
             pass
 
+    def _clamp(self, page: Any, point: Point) -> Point:
+        # Clamp only when the viewport is known: a guessed edge coordinate deadlocks camoufox's juggler.
+        x, y = float(point[0]), float(point[1])
+        viewport = self._viewport(page)
+        if viewport is None:
+            return x, y
+        return max(1.0, min(x, viewport["width"] - 1.0)), max(1.0, min(y, viewport["height"] - 1.0))
+
+    def _measure_browser_path(self, page: Any, to: Point) -> bool:
+        """Whether the browser draws its own path for every mouse.move(), as camoufox's humanize does.
+
+        Ours on top has every sample re-drawn: a 1px step took 190ms there against 1ms, and one GeeTest slider 82s
+        against 13s. One short step towards `to`, timed against a zero-length move (the bare round trip, so a remote
+        browser is not mistaken for one), tells them apart with no movement the page could single out.
+        """
+        x0, y0 = self._clamp(page, self.at)
+        d = math.hypot(to[0] - x0, to[1] - y0)
+        step = self._clamp(page, to if d <= 3 else (x0 + 3 * (to[0] - x0) / d, y0 + 3 * (to[1] - y0) / d))
+        try:
+            page.mouse.move(x0, y0)
+            t = time.monotonic()
+            page.mouse.move(x0, y0)
+            round_trip = time.monotonic() - t
+            t = time.monotonic()
+            page.mouse.move(*step)
+        except Exception as exc:
+            if "Target closed" in str(exc) or "Session closed" in str(exc):
+                _log("could not move mouse; page or session closed")
+            return False
+        self.at = step
+        drawn = (time.monotonic() - t - round_trip) * 1000.0 > BROWSER_PATH_MS
+        if drawn:
+            _log("the browser draws its own pointer paths (camoufox humanize); handing it one move per gesture")
+        return drawn
+
     def move(self, page: Any, to: Point) -> None:
         self._seed_cursor(page)
         if _same_point(self.at, to):
             return
+        if self._browser_draws_path is None:
+            self._browser_draws_path = self._measure_browser_path(page, to)
+        if self._browser_draws_path:
+            self._trace(page, [to], [0.0])
+            return
         points, timings = trajectory(self.at, to, self._frequency)
         self._trace(page, points, timings)
 
+    def drift(self, page: Any, to: Point) -> None:
+        self._trace(page, [to], [0.0])
+
     def _trace(self, page: Any, points: Sequence[Point], timings: Sequence[float]) -> None:
-        # Clamp only when the viewport is known: a guessed edge coordinate deadlocks camoufox's juggler.
-        viewport = self._viewport(page)
         start = time.monotonic() * 1000.0
-        for (x, y), t in zip(points, timings):
-            x, y = float(x), float(y)
-            if viewport is not None:
-                x = max(1.0, min(x, viewport["width"] - 1.0))
-                y = max(1.0, min(y, viewport["height"] - 1.0))
+        for point, t in zip(points, timings):
+            x, y = self._clamp(page, point)
             try:
                 page.mouse.move(x, y)
             except Exception as exc:
@@ -393,6 +518,12 @@ class MobileHumanizer(Humanizer):
             points, timings = trajectory(self.at, to, self._frequency)
             self._touch(page).move([(x, y, timings[i] - (timings[i - 1] if i else 0.0))
                                     for i, (x, y) in enumerate(points)])
+        self.at = to
+
+    def drift(self, page: Any, to: Point) -> None:
+        to = (float(to[0]), float(to[1]))
+        if self._down:
+            self._touch(page).move([(to[0], to[1], 0.0)])
         self.at = to
 
     def press(self, page: Any) -> None:

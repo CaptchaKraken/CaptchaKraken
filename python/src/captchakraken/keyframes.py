@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import cv2
 import numpy as np
+from PIL import Image, ImageOps
 
 from .kinds import KeyframeMode
 
@@ -37,6 +38,11 @@ DEFAULT_MIN_STEADY_COVERAGE = 0.5
 
 # The one pixel threshold shared with every other movement check in the project.
 _PIXEL_DELTA = 30
+
+# Grey = (B, G, R) . weights >> 15, rounded: OpenCV's fixed-point BGR2GRAY, which every threshold above was
+# measured through. Equal to it on all 2^24 colours. Elementwise, not a matrix product: BLAS threads on a busy
+# machine made the product 20x slower than the arithmetic.
+_GRAY_WEIGHTS = (3735, 19235, 9798)
 
 # One constant for both choosing the label's frame and the live wait: the two must ask the same question.
 MATCH_REGION_HALF = 0.06
@@ -147,15 +153,64 @@ def frame_diff_ratio(a: np.ndarray, b: np.ndarray) -> float:
         return 1.0
     if a.shape != b.shape:
         return 1.0
-    diff = cv2.absdiff(a, b)
-    if diff.ndim == 3:
-        diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    _, thr = cv2.threshold(diff, _PIXEL_DELTA, 255, cv2.THRESH_BINARY)
-    h, w = thr.shape[:2]
+    diff = np.maximum(a, b) - np.minimum(a, b)
+    h, w = diff.shape[:2]
     if h * w == 0:
         return 1.0
-    return cv2.countNonZero(thr) / float(h * w)
+    # Grey > delta, compared before the shift: the same pixels, one pass fewer over the frame.
+    moved = _scaled_luma(diff) >= (_PIXEL_DELTA + 1) << 15 if diff.ndim == 3 else diff > _PIXEL_DELTA
+    return int(np.count_nonzero(moved)) / float(h * w)
 
+
+def _scaled_luma(frame: np.ndarray) -> np.ndarray:
+    """A BGR uint8 frame's luma times 2^15, rounding offset included."""
+    luma = np.multiply(frame[..., 0], _GRAY_WEIGHTS[0], dtype=np.uint32)
+    luma += np.multiply(frame[..., 1], _GRAY_WEIGHTS[1], dtype=np.uint32)
+    luma += np.multiply(frame[..., 2], _GRAY_WEIGHTS[2], dtype=np.uint32)
+    luma += 1 << 14
+    return luma
+
+
+def to_gray(frame: np.ndarray) -> np.ndarray:
+    """A BGR uint8 frame's luma, as uint8."""
+    return (_scaled_luma(frame) >> 15).astype(np.uint8)
+
+
+def read_frame(path: str | os.PathLike) -> Optional[np.ndarray]:
+    """The image at `path` as an (H, W, 3) BGR uint8 array, or None if it cannot be decoded.
+
+    BGR because every frame in the project is: recordings, keyframes and the files they are written to.
+    """
+    try:
+        with Image.open(path) as img:
+            rgb = np.asarray(ImageOps.exif_transpose(img).convert("RGB"))
+    except OSError:
+        return None
+    return np.ascontiguousarray(rgb[..., ::-1])
+
+
+def write_frame(path: str | os.PathLike, frame: np.ndarray) -> None:
+    """Write a BGR (or single-channel) uint8 frame; the format follows the extension."""
+    Image.fromarray(frame[..., ::-1] if frame.ndim == 3 else frame).save(path)
+
+
+
+#: The diffs already measured during the extraction in progress, keyed by the two frames' identities.
+#: A 100-frame clip asks ~8,000 diffs of ~1,100 distinct pairs: the medoid, merge and dedup passes keep
+#: re-comparing the same screens. `extract_keyframes` holds every frame alive for the duration, so an
+#: id cannot be reused while it is a key.
+_PAIR_CACHE: ContextVar[Optional[Dict[Tuple[int, int], float]]] = ContextVar("_PAIR_CACHE", default=None)
+
+
+def _pair_diff(a: np.ndarray, b: np.ndarray) -> float:
+    """`frame_diff_ratio`, remembered for the extraction in progress (the diff is symmetric)."""
+    cache = _PAIR_CACHE.get()
+    if cache is None:
+        return frame_diff_ratio(a, b)
+    key = (id(a), id(b)) if id(a) <= id(b) else (id(b), id(a))
+    if key not in cache:
+        cache[key] = frame_diff_ratio(a, b)
+    return cache[key]
 
 
 def _anchor_runs(frames: Sequence[np.ndarray], steady_ratio: float) -> List[Tuple[int, int]]:
@@ -165,7 +220,7 @@ def _anchor_runs(frames: Sequence[np.ndarray], steady_ratio: float) -> List[Tupl
     n = len(frames)
     while i < n:
         j = i
-        while j + 1 < n and frame_diff_ratio(frames[i], frames[j + 1]) <= steady_ratio:
+        while j + 1 < n and _pair_diff(frames[i], frames[j + 1]) <= steady_ratio:
             j += 1
         runs.append((i, j))
         i = j + 1
@@ -177,7 +232,7 @@ def _medoid(frames: Sequence[np.ndarray], indices: Sequence[int]) -> int:
         return indices[0]
     best_idx, best_cost = indices[0], float("inf")
     for a in indices:
-        cost = sum(frame_diff_ratio(frames[a], frames[b]) for b in indices if b != a)
+        cost = sum(_pair_diff(frames[a], frames[b]) for b in indices if b != a)
         if cost < best_cost:
             best_idx, best_cost = a, cost
     return best_idx
@@ -208,7 +263,7 @@ def _distinct_indices(
 
     def is_new(i: int) -> bool:
         return not any(
-            frame_diff_ratio(frames[i], frames[k]) <= params.steady_ratio for k in kept
+            _pair_diff(frames[i], frames[k]) <= params.steady_ratio for k in kept
         )
 
     for i in candidates:
@@ -241,7 +296,7 @@ def _steady_screens(
     for s, e in holds:
         rep = _medoid(frames, list(range(s, e + 1)))
         for k, existing in enumerate(state_reps):
-            if frame_diff_ratio(frames[rep], frames[existing]) <= params.steady_ratio:
+            if _pair_diff(frames[rep], frames[existing]) <= params.steady_ratio:
                 hold_state.append(k)
                 break
         else:
@@ -278,7 +333,7 @@ def _detect_cycle(
 
     for a in range(len(state_reps)):
         for b in range(a + 1, len(state_reps)):
-            if frame_diff_ratio(frames[state_reps[a]], frames[state_reps[b]]) < params.distinct_ratio:
+            if _pair_diff(frames[state_reps[a]], frames[state_reps[b]]) < params.distinct_ratio:
                 return None
 
     per_frame = [-1] * n
@@ -306,7 +361,7 @@ def _drop_smeared(
     for start, end in holds:
         rep = _medoid(frames, list(range(start, end + 1)))
         for k, existing in enumerate(reps):
-            if frame_diff_ratio(frames[rep], frames[existing]) <= params.steady_ratio:
+            if _pair_diff(frames[rep], frames[existing]) <= params.steady_ratio:
                 state_of_hold.append(k)
                 break
         else:
@@ -342,8 +397,19 @@ def extract_keyframes(
     fps: float = 10.0,
     params: Optional[KeyframeParams] = None,
 ) -> KeyframeSet:
+    # A list, so each frame is one object that lives as long as the cache keyed on its id
+    # (indexing a 4-D array would make a new, collectable view per access).
+    frames = list(frames)
     if not frames:
         raise ValueError("no frames to extract keyframes from")
+    token = _PAIR_CACHE.set({})
+    try:
+        return _extract_keyframes(frames, fps, params)
+    finally:
+        _PAIR_CACHE.reset(token)
+
+
+def _extract_keyframes(frames: Sequence[np.ndarray], fps: float, params: Optional[KeyframeParams]) -> KeyframeSet:
     p = params or KeyframeParams()
     n = len(frames)
 
@@ -412,13 +478,29 @@ def write_keyframes(
         target = out / name
         if kf.image is None:
             raise ValueError(f"keyframe {kf.number} has no image to write")
-        cv2.imwrite(str(target), kf.image)
+        write_frame(target, kf.image)
         paths.append(target)
         names.append(name)
 
     with (out / MANIFEST_NAME).open("w") as f:
         json.dump(kfset.manifest(stem=stem, filenames=names), f, indent=2)
     return paths
+
+
+def number_for_source_index(kfset: KeyframeSet, source_index: int) -> int:
+    """The keyframe a given source frame belongs to (1-based), by POSITION.
+
+    Exact in cycle mode (the frame's own state), else the nearest keyframe in time. A transition
+    frame (state -1) has no state of its own, so where the pixels are at hand, matching by
+    appearance around the action point is the better question.
+    """
+    if not kfset.keyframes:
+        raise ValueError("keyframe set is empty")
+    if kfset.mode == KeyframeMode.CYCLE and 0 <= source_index < len(kfset.frame_states):
+        state = kfset.frame_states[source_index]
+        if state >= 0:
+            return state + 1
+    return min(kfset.keyframes, key=lambda k: abs(k.source_index - source_index)).number
 
 
 
