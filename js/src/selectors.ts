@@ -63,6 +63,7 @@ export interface SelectorConfigFile {
   readonly custom?: Record<string, unknown> | null;
   readonly vendors?: Record<string, Record<string, unknown>>;
   readonly generic?: Record<string, readonly string[]>;
+  readonly detector?: DetectorModel;
   readonly [comment: `_${string}`]: unknown;
 }
 
@@ -79,7 +80,17 @@ export interface SelectorConfig {
   readonly custom: CustomSelectors | null;
   readonly vendors: ReadonlyArray<readonly [Vendor, VendorSelectors]>;
   readonly generic: Readonly<Record<GenericKey, readonly string[]>>;
+  /** Which element detector the engine runs: see `DETECTOR_MODELS`. */
+  readonly detector: DetectorModel;
 }
+
+/**
+ * The element detector's weights: `lite` keeps a board near 100 ms on one vCPU, `standard` is the larger network, and
+ * `auto` takes `lite` on a machine of two CPUs or fewer, else times one board and takes `standard` when it fits.
+ * `CAPTCHA_KRAKEN_DETECTOR_MODEL` in the environment overrides the config.
+ */
+export const DETECTOR_MODELS = ['auto', 'standard', 'lite'] as const;
+export type DetectorModel = (typeof DETECTOR_MODELS)[number];
 
 const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece'] as const;
 type GenericKey = (typeof GENERIC)[number];
@@ -140,9 +151,16 @@ function entry(where: string, raw: unknown, hostsRequired = true): VendorSelecto
 function parse(name: string, doc: unknown, base: SelectorConfig | null): SelectorConfig {
   if (!isObject(doc)) throw new SelectorConfigError(`${name}: the top level must be an object`);
   for (const key of Object.keys(doc)) {
-    if (!key.startsWith('_') && !['custom', 'vendors', 'generic'].includes(key)) {
-      throw new SelectorConfigError(`${name}: ${key}: not a config key (custom, vendors, generic)`);
+    if (!key.startsWith('_') && !['detector', 'custom', 'vendors', 'generic'].includes(key)) {
+      throw new SelectorConfigError(`${name}: ${key}: not a config key (detector, custom, vendors, generic)`);
     }
+  }
+  let detector: DetectorModel = base?.detector ?? 'auto';
+  if ('detector' in doc) {
+    if (!(DETECTOR_MODELS as readonly unknown[]).includes(doc.detector)) {
+      throw new SelectorConfigError(`${name}: detector: ${JSON.stringify(doc.detector)} is not one of ${DETECTOR_MODELS.join(', ')}`);
+    }
+    detector = doc.detector as DetectorModel;
   }
   let custom = base?.custom ?? null;
   if ('custom' in doc) custom = doc.custom === null ? null : entry(`${name}: custom`, doc.custom, false);
@@ -172,7 +190,7 @@ function parse(name: string, doc: unknown, base: SelectorConfig | null): Selecto
   }
   const absent = GENERIC.filter((k) => !generic[k]);
   if (absent.length) throw new SelectorConfigError(`${name}: generic: missing ${JSON.stringify(absent)}`);
-  return { custom, vendors: [...vendors], generic: generic as Record<GenericKey, readonly string[]> };
+  return { custom, vendors: [...vendors], generic: generic as Record<GenericKey, readonly string[]>, detector };
 }
 
 function read(file: string): unknown {

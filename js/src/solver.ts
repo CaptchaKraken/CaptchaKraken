@@ -734,6 +734,8 @@ export class CaptchaKrakenSolver {
       ...(this.solveWidgetHost ? { CAPTCHA_KRAKEN_WIDGET_HOST: this.solveWidgetHost } : {}),
       // This driver warns about a legacy model name itself, once; the engine it starts per round stays quiet.
       CAPTCHA_KRAKEN_MODEL_WARNING: '0',
+      // The config's detector choice; the caller's own environment variable still wins, as it does in Python.
+      ...(process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL ? {} : { CAPTCHA_KRAKEN_DETECTOR_MODEL: this.sel.config.detector }),
     };
   }
 
@@ -1114,7 +1116,7 @@ export class CaptchaKrakenSolver {
     }
   }
 
-  /** One capture and OpenCV, no model: a point inside the tick box, or null when none is drawn. */
+  /** One capture and the element detector, no model: a point inside the tick box, or null when none is drawn. */
   private async checkboxOnScreen(el: ElementHandle): Promise<[number, number] | null> {
     const box = await el.boundingBox();
     if (!box) throw new Error('Could not get bounding box of captcha element');

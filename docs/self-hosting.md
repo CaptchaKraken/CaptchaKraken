@@ -261,6 +261,8 @@ itself is model-agnostic):
 | `VLLM_EXTRA_ARGS` | Extra flags appended to `vllm serve` | empty |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` disables auto-starting a local server on first use | `1` |
 | `CAPTCHA_KRAKEN_STATE_DIR` | Where the pidfile, log, and credentials live | `~/.captchakraken` |
+| `CAPTCHA_KRAKEN_DETECTOR` | A local element-detector `.onnx` to run instead of the released one | the released weights |
+| `CAPTCHA_KRAKEN_DETECTOR_MODEL` | `auto`, `standard` or `lite`; overrides `detector` in `captchakraken.config.json` | the config's `detector` (`auto`: `lite` on two usable CPUs or fewer, else `standard` when one board times under 200 ms) |
 
 The model defaults come from `python/src/captchakraken/models.json`, which also
 records which **prompt generation** each model was trained on. That mapping is

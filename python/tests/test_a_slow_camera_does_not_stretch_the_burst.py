@@ -53,8 +53,7 @@ def _burst(monkeypatch, payloads, frame_cost_ms, which="record", **cfg_kw):
         clock.tick(frame_cost_ms / 1000.0)
 
     monkeypatch.setattr(solver, "_screenshot", fake_shot)
-    import cv2
-    monkeypatch.setattr(cv2, "imread", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
+    monkeypatch.setattr("captchakraken.keyframes.read_frame", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
     monkeypatch.setattr("captchakraken.keyframes.extract_keyframes",
                         lambda frames, fps: _Kf(len(frames)))
     monkeypatch.setattr("captchakraken.keyframes.write_keyframes",

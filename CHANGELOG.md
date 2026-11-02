@@ -24,8 +24,35 @@ semantic versioning; v2 is a major, **breaking** release.
   slider controls are tried before the generic ones. An entry that names no
   `widget`, `challenge` or `checkbox` is refused when the solver is built.
 
+- **A lite element detector for small machines.** Two detectors are released:
+  `standard` (ResNet-18) and `lite` (MobileNetV3, about 100 ms a board on one
+  vCPU), trained on the same data. `detector` in `captchakraken.config.json`
+  picks one: `auto` (the default) runs `lite` on two usable CPUs or fewer, a
+  container's CPU quota included, and otherwise times one board once and runs
+  `standard` when it fits in 200 ms; the verdict is cached per machine. Only
+  the chosen weights are downloaded. `CAPTCHA_KRAKEN_DETECTOR_MODEL` overrides
+  the config. `lite` does not find a box that fills the whole screenshot, such as
+  GeeTest v4's "click to verify" bar; the driver clicks that bar through its
+  `box` selector and never asks the detector.
+
 ### Changed
 
+- **Grids and checkboxes are found by a CNN, and OpenCV is gone.** `find_grid`
+  and `find_checkbox` read an element detector (a small Mask R-CNN) that runs
+  on the CPU through onnxruntime, about a quarter of a second per board. Its
+  weights (124 MB) are downloaded once on first use into the state directory
+  and checked against a pinned hash; `CAPTCHA_KRAKEN_DETECTOR` names a local
+  file instead. Image and video I/O moved to Pillow and PyAV, and the slide and
+  hold trackers to numpy and scipy, with the same measured thresholds.
+  `opencv-python-headless` is no longer a dependency; `onnxruntime`, `scipy`
+  and `av` are. onnxruntime ships no Intel-macOS wheel, so the client no longer
+  installs there.
+- **Only the grids the grid model was trained on reach it.** reCAPTCHA's 3x3
+  and 4x4 and hCaptcha's 3x3 are asked as grids; a grid from any other named
+  vendor goes to the model trained on that vendor. A caller that names no
+  vendor (the CLI, a script) keeps both shapes.
+- **Animated boards are cut faster.** Keyframe extraction measures each pair
+  of frames once; it re-compared the same screens about seven times over.
 - **`customSelectors` / `custom_selectors=` is deprecated** in favour of
   `custom` in a `selectors` file. It still works, and wins over the file's
   entry when both are given.

@@ -5,17 +5,15 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
-
-cv2 = pytest.importorskip("cv2")
 
 from captchakraken.image_processor import ImageProcessor
+from captchakraken.keyframes import write_frame
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 
 
 def _write(path: Path, arr: np.ndarray) -> str:
-    cv2.imwrite(str(path), arr)
+    write_frame(path, arr)
     return str(path)
 
 

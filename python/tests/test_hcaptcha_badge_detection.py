@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-cv2 = pytest.importorskip("cv2")
+from PIL import Image, ImageDraw
 
 from captchakraken.tool_calls.find_grid import (
     _has_badge,
@@ -23,29 +23,45 @@ from captchakraken.tool_calls.find_grid import (
     find_grid,
 )
 
-BADGE_BGR = (188, 117, 15)
+BADGE_RGB = (15, 117, 188)
 PATCH = (28, 29)
+#: Drawn this many times larger and shrunk, so edges are anti-aliased the way a browser paints them.
+AA = 4
 
 
-def _photo_patch(color=(150, 120, 90)) -> np.ndarray:
+def _photo_patch(color=(90, 120, 150)) -> np.ndarray:
     return np.full((*PATCH, 3), color, dtype=np.uint8)
 
 
+def _antialiased(patch: np.ndarray, draw) -> np.ndarray:
+    h, w = patch.shape[:2]
+    big = Image.fromarray(patch).resize((w * AA, h * AA), Image.NEAREST)
+    draw(ImageDraw.Draw(big), lambda v: v * AA + AA // 2)
+    return np.asarray(big.resize((w, h), Image.LANCZOS))
+
+
 def _draw_badge(patch: np.ndarray, diameter: int, style: str) -> np.ndarray:
-    out = patch.copy()
+    """The disc anti-aliased; the white glyph at full strength, as the vendor's 1px strokes are."""
     r = diameter // 2
-    cx, cy = out.shape[1] - r - 2, r + 2
-    cv2.circle(out, (cx, cy), r, BADGE_BGR, -1, cv2.LINE_AA)
+    cx, cy = patch.shape[1] - r - 2, r + 2
+    white = (255, 255, 255)
+
+    def disc(d, s, **kw):
+        d.ellipse([s(cx - r), s(cy - r), s(cx + r), s(cy + r)], **kw)
+    out = _antialiased(patch, lambda d, s: disc(d, s, fill=BADGE_RGB))
     if style == "ringed":
-        cv2.circle(out, (cx, cy), r, (255, 255, 255), max(1, diameter // 8), cv2.LINE_AA)
-        s, o = max(1, diameter // 7), max(1, r // 2)
-        cv2.line(out, (cx - o, cy - o), (cx + o, cy + o), (255, 255, 255), s, cv2.LINE_AA)
-        cv2.line(out, (cx - o, cy + o), (cx + o, cy - o), (255, 255, 255), s, cv2.LINE_AA)
+        out = _antialiased(out, lambda d, s: disc(d, s, outline=white, width=max(1, diameter // 8) * AA))
+    im = Image.fromarray(out)
+    d = ImageDraw.Draw(im)
+    if style == "ringed":
+        t, o = max(1, diameter // 7), max(1, r // 2)
+        d.line([cx - o, cy - o, cx + o, cy + o], fill=white, width=t)
+        d.line([cx - o, cy + o, cx + o, cy - o], fill=white, width=t)
     else:
-        s = max(1, diameter // 6)
-        cv2.line(out, (cx - r // 2, cy), (cx - r // 6, cy + r // 2), (255, 255, 255), s, cv2.LINE_AA)
-        cv2.line(out, (cx - r // 6, cy + r // 2), (cx + r // 2, cy - r // 2), (255, 255, 255), s, cv2.LINE_AA)
-    return out
+        t = max(1, diameter // 6)
+        d.line([cx - r // 2, cy, cx - r // 6, cy + r // 2], fill=white, width=t)
+        d.line([cx - r // 6, cy + r // 2, cx + r // 2, cy - r // 2], fill=white, width=t)
+    return np.asarray(im)
 
 
 @pytest.mark.parametrize("style", ["filled", "ringed"])
@@ -56,21 +72,21 @@ def test_a_real_mark_is_still_found(style, diameter):
 
 def test_sky_over_here_and_something_white_over_there_is_not_a_mark():
     patch = _photo_patch()
-    patch[:, :16] = (210, 140, 60)
+    patch[:, :16] = (60, 140, 210)
     patch[:, 24:] = (240, 240, 240)
     assert _has_hcaptcha_check(patch) is False
 
 
 def test_teal_and_white_that_merely_share_a_corner_is_not_a_mark():
     patch = _photo_patch()
-    patch[0:6, 0:6] = (200, 130, 40)
+    patch[0:6, 0:6] = (40, 130, 200)
     patch[20:, 20:] = (255, 255, 255)
     assert _has_hcaptcha_check(patch) is False
 
 
 def test_the_recaptcha_corner_chip_is_unaffected():
-    patch = np.full((52, 52, 3), (150, 120, 90), dtype=np.uint8)
-    cv2.circle(patch, (12, 12), 11, (232, 115, 27), -1, cv2.LINE_AA)
+    patch = _antialiased(np.full((52, 52, 3), (90, 120, 150), dtype=np.uint8),
+                         lambda d, s: d.ellipse([s(1), s(1), s(23), s(23)], fill=(27, 115, 232)))
     assert _has_badge(patch, (27, 115, 232)) is True
     assert _has_badge(_photo_patch(), (27, 115, 232)) is False
 

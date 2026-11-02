@@ -4,12 +4,18 @@ animating elsewhere, because those are what a diff-based tracker used to mistake
 
 import math
 
-import cv2
 import numpy as np
 import pytest
+from PIL import Image
+from scipy import ndimage
 from slide_boards import CarriedBoard, DiscBoard, JigsawBoard
 
 from captchakraken.tool_calls import slide_tracker as st
+
+
+def _save(path, bgr):
+    """A board's render written as the PNG a page screenshot would be; the boards draw in BGR."""
+    Image.fromarray(np.ascontiguousarray(bgr[..., ::-1])).save(str(path))
 
 
 def _drive(board, seed, goal, probe_s=8.0, max_moves=3, tol=2.0):
@@ -39,9 +45,9 @@ def test_the_seeded_mask_is_the_piece_not_the_handle_or_the_badge(ratio):
     mask = seg.mask.astype(bool)
     # All of the piece but its antialiased rim. Featureless ground hugging the edge looks the same carried or still,
     # so a few pixels of it may come along; nothing further out, where the handle, track and badge are.
-    core = cv2.erode(piece.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+    core = ndimage.binary_erosion(piece, np.ones((3, 3)), border_value=1)
     body = piece | shadow
-    near = cv2.dilate(body.astype(np.uint8), np.ones((11, 11), np.uint8)).astype(bool)
+    near = ndimage.binary_dilation(body, np.ones((11, 11)))
     assert (mask & core).sum() >= 0.95 * core.sum()
     assert (mask & ~near).sum() == 0
     assert (mask & ~body).sum() <= 0.05 * piece.sum()
@@ -100,7 +106,7 @@ def test_a_flat_faced_piece_is_one_body_not_its_two_edges(ratio):
     piece, _ = b.footprint()
     # Inside the rim: a flat face leaves its one-pixel rim stroke as the only detail at the edge, and a shift of a
     # fraction of a pixel smears that stroke past the pixel test, as it does not a textured face's.
-    core = cv2.erode(piece.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    core = ndimage.binary_erosion(piece, np.ones((5, 5)), border_value=1)
     for seed in (b.centre(), None):
         seg = st.segment(b.render(0), b.render(8), seed=seed, handle=b.handle())
         assert (seg.mask.astype(bool) & core).sum() >= 0.95 * core.sum(), seed
@@ -188,18 +194,16 @@ def test_where_the_picture_cannot_place_a_piece_the_motion_does():
         assert params[1] == pytest.approx(s, abs=3.0), s
 
 
-class _BlindFlow:
-    """Dense flow that sees nothing move: what DIS returned over a piece cut from the photo it rests on (Tencent) and a
-    pale piece on pale ground (GeeTest), where its forward-backward check failed almost everywhere."""
-
-    def calc(self, a, b, _):
-        return np.zeros(a.shape + (2,), np.float32)
+def _blind_flow(a, _b):
+    """Dense flow that sees nothing move: what flow returns over a piece cut from the photo it rests on (Tencent) and
+    a pale piece on pale ground (GeeTest), where its forward-backward check fails almost everywhere."""
+    return np.zeros(a.shape + (2,), np.float32)
 
 
 @pytest.mark.parametrize("ratio", [0.8, 1.0, 1.27])
 def test_a_seeded_piece_is_found_by_its_motion_where_flow_sees_none(ratio, monkeypatch):
     b = JigsawBoard(ratio=ratio)
-    monkeypatch.setattr(st.cv2, "DISOpticalFlow_create", lambda *_: _BlindFlow())
+    monkeypatch.setattr(st, "_dense_flow", _blind_flow)
     seg = st.segment(b.render(0), b.render(8), seed=b.centre(), handle=b.handle())
     px, py = b.centre()
     assert abs(seg.centroid[0] - px) < 6 and abs(seg.centroid[1] - py) < 6 and not seg.grabbed
@@ -213,7 +217,7 @@ def test_without_a_seed_the_piece_on_the_goals_row_is_found_where_flow_sees_none
     """A generation-2 answer names only the goal, but a piece slid onto it rests on its row. With the flow blind,
     only that row says where to look; before, nothing was found and the handle was released where it was."""
     b = JigsawBoard(ratio=ratio)
-    monkeypatch.setattr(st.cv2, "DISOpticalFlow_create", lambda *_: _BlindFlow())
+    monkeypatch.setattr(st, "_dense_flow", _blind_flow)
     goal = (b.goal[0], b.centre()[1])
     seg = st.segment(b.render(0), b.render(8), seed=None, handle=b.handle(), goal=goal)
     px, py = b.centre()
@@ -344,7 +348,7 @@ def test_the_cli_answers_a_slide_step_from_files(tmp_path):
     paths = []
     for name, s in (("first", 0.0), ("probe", 8.0)):
         p = tmp_path / f"{name}.png"
-        cv2.imwrite(str(p), b.render(s))
+        _save(p, b.render(s))
         paths.append(str(p))
     out = slide_step({"first": paths[0], "probe": paths[1], "current": paths[1], "probe_s": 8, "s": 8,
                       "goal": list(b.goal), "seed": list(b.centre()), "handle": list(b.handle()),
@@ -368,8 +372,8 @@ def test_the_cv_worker_answers_a_slide_step_request_line(tmp_path):
 
     b = JigsawBoard()
     first, probe = tmp_path / "first.png", tmp_path / "probe.png"
-    cv2.imwrite(str(first), b.render(0.0))
-    cv2.imwrite(str(probe), b.render(8.0))
+    _save(first, b.render(0.0))
+    _save(probe, b.render(8.0))
     req = {"id": 7, "cmd": "slide-step", "first": str(first), "probe": str(probe), "current": str(probe),
            "probe_s": 8, "s": 8, "goal": list(b.goal), "seed": list(b.centre()), "handle": list(b.handle()),
            "bounds": [-20, 300]}

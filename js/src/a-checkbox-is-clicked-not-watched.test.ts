@@ -104,7 +104,7 @@ test('a Turnstile widget that passes without drawing a box is not clicked', asyn
   assert.equal(seen.asks, 0);
 });
 
-// GeeTest v4's "Click to verify" bar draws no tick box: OpenCV found none, and the puzzle never opened.
+// GeeTest v4's "Click to verify" bar draws no tick box: looking for one found none, and the puzzle never opened.
 test('an in-page button with no tick box is clicked where it is', async () => {
   const { result, pressedAt, seen } = await round(Vendor.GEETEST, null);
   assert.equal(seen.captures, 0, `${seen.captures} capture(s) of a button the DOM already names`);
