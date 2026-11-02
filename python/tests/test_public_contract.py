@@ -93,7 +93,6 @@ def surface() -> dict:
                 "PageSolver.watch": _sig(captchakraken.PageSolver.watch),
                 "solve_captcha_on_page": _sig(captchakraken.solve_captcha_on_page),
                 "CaptchaKrakenAPIError.__init__": _sig(errors.CaptchaKrakenAPIError.__init__),
-                "add_overlays_to_image": _sig(captchakraken.add_overlays_to_image),
                 "humanize.resolve": _sig(humanize.resolve),
             },
             "page_solver_config_fields": sorted(PageSolverConfig.__dataclass_fields__),

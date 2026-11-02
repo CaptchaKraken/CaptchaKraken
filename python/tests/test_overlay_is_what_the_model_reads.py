@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from captchakraken import add_overlays_to_image
+from captchakraken.overlay import add_overlays_to_image
 
 
 def _blank(path, size=(400, 300), color=(255, 255, 255)):
