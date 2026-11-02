@@ -53,11 +53,41 @@ def test_a_4x4_is_sixteen_cells(detected):
     assert len(find_grid("board.png")) == 16
 
 
-def test_a_row_missing_a_cell_is_not_a_grid_the_solver_can_number(detected):
-    """Numbering 8 boxes as a 3x3 would shift every answer after the gap by one tile."""
+def test_a_cell_the_detector_missed_is_filled_in_its_own_slot(detected):
+    """Numbering 8 boxes as a 3x3 would shift every answer after the gap by one tile,
+    so the gap is filled where it is: the lattice the other eight sit on."""
     cells = _lattice(3, 3)
     detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:4] + cells[5:]])
+    assert find_grid("board.png") == [tuple(c) for c in cells]
+
+
+def test_two_tiles_read_as_one_cell_still_number_sixteen(detected):
+    """A real reCAPTCHA 4x4 of sky and wires came back with one box over two tiles."""
+    cells = _lattice(4, 4, tile=90)
+    merged = (cells[5][0], cells[5][1], cells[6][2], cells[6][3])
+    detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:5] + cells[7:]]
+             + [_det("cell", merged)])
+    assert find_grid("board.png") == [tuple(c) for c in cells]
+
+
+def test_a_grid_box_its_cells_barely_fill_is_not_a_lattice(detected):
+    cells = _lattice(3, 3)
+    detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:2] + cells[3:5] + cells[6:7]])
     assert find_grid("board.png") is None
+
+
+def test_an_empty_row_is_not_filled_in(detected):
+    """Every row and column must have a cell the detector saw: a lattice is not guessed."""
+    cells = _lattice(4, 4, tile=80)
+    detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:8] + cells[13:]])
+    assert find_grid("board.png") is None
+
+
+def test_wide_gutters_are_counted_from_the_spacing_not_the_tile(detected):
+    """Three 100 px tiles 50 px apart span four tiles' width: the lattice is still 3x3."""
+    cells = _lattice(3, 3, gap=50)
+    detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:4] + cells[5:]])
+    assert find_grid("board.png") == [tuple(c) for c in cells]
 
 
 def test_cells_outside_the_grid_are_not_part_of_it(detected):
@@ -106,7 +136,8 @@ def test_an_object_inside_a_tile_is_not_a_tile(detected):
     small = (cells[4][0] + 30, cells[4][1] + 30, cells[4][0] + 60, cells[4][1] + 60)
     detected([_det("grid", _grid_box(cells))] + [_det("cell", c) for c in cells[:4] + cells[5:]]
              + [_det("item", small)])
-    assert find_grid("board.png") is None
+    # The middle slot is the lattice's, not the item's box.
+    assert find_grid("board.png") == [tuple(c) for c in cells]
 
 
 def test_a_picture_inside_a_tile_read_as_a_cell_does_not_grow_a_column(detected):
