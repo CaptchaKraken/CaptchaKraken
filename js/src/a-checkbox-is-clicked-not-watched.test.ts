@@ -88,3 +88,13 @@ for (const [name, vendor, frame] of [['no DOM selector', Vendor.TURNSTILE, null]
     assert.ok(inside(pressedAt[0], { x: 33 + 16, y: 237 + 23, width: 30, height: 30 }), `clicked ${pressedAt[0]}, outside the tick box OpenCV found`);
   });
 }
+
+// GeeTest v4's "Click to verify" bar draws no tick box: OpenCV found none, and the puzzle never opened.
+test('an in-page button with no tick box is clicked where it is', async () => {
+  const { result, pressedAt, seen } = await round(Vendor.GEETEST, null);
+  assert.equal(seen.captures, 0, `${seen.captures} capture(s) of a button the DOM already names`);
+  assert.equal(seen.asks, 0);
+  assert.deepEqual(result.tokenUsage, []);
+  assert.equal(pressedAt.length, 1);
+  assert.ok(inside(pressedAt[0], WIDGET_BOX), `clicked ${pressedAt[0]}, off the button`);
+});

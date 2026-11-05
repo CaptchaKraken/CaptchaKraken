@@ -4,14 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "captchakraken"
-version = "3.3.0"
-description = "Captcha-solving engine and CLI: OpenCV grid detection plus a fine-tuned Qwen3.5-9B vision model, for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
+version = "4.0.0"
+description = "Captcha-solving engine and CLI: a v2 pointer model and CNN element detector for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"
-# Source-available, NOT GPL. The CaptchaKraken Source-Available License permits
-# commercial use as an internal component but prohibits selling the solve itself,
-# thin-wrapper resale, and bundling it into a stealth browser someone else ships
-# — see LICENSE. (GPL-3.0 would wrongly permit all three.)
 license = { file = "LICENSE" }
 authors = [{ name = "Jake Writer" }]
 keywords = [
@@ -31,7 +27,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Image Recognition",
   "Topic :: Internet :: WWW/HTTP :: Browsers",
   "Topic :: Software Development :: Testing",
-  "License :: Other/Proprietary License",
+  "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
   "Typing :: Typed",
 ]
 
@@ -71,12 +67,12 @@ dependencies = [
 [project.optional-dependencies]
 # Self-hosting: install this to RUN a local vLLM server (the setup script does
 # `pip install "captchakraken[serve]"`). Not needed to call a remote server.
-# torch is the version vllm 0.29.0 itself pins; any other value makes this
+# torch is the version vllm 0.25.1 itself pins; any other value makes this
 # extra unresolvable rather than merely different.
 serve = [
-  "vllm==0.29.0",
-  "torch==2.13.0",
-  "transformers==5.17.0",
+  "vllm==0.25.1",
+  "torch==2.11.0",
+  "transformers==5.14.1",
   "accelerate==1.15.0",
   "huggingface_hub==1.30.0",
 ]

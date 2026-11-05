@@ -18,6 +18,7 @@ import argparse
 import base64
 import io
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict
@@ -66,6 +67,8 @@ def make_handler(service):
     lock = threading.Lock()   # one engine; vLLM batches inside a call, not across threads
 
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def _send(self, code: int, obj: Dict) -> None:
             raw = json.dumps(obj).encode()
             self.send_response(code)
@@ -74,9 +77,28 @@ def make_handler(service):
             self.end_headers()
             self.wfile.write(raw)
 
+        def _authorized(self) -> bool:
+            key = os.getenv("VLLM_API_KEY", "")
+            return not key or self.headers.get("Authorization") == f"Bearer {key}"
+
+        def do_GET(self):  # noqa: N802 — http.server's name
+            path = self.path.rstrip("/")
+            if path == "/health":
+                return self._send(200, {})
+            if not self._authorized():
+                return self._send(401, {"error": "Unauthorized"})
+            if path == "/v1/models":
+                model = os.getenv("CAPTCHA_LORA_NAME", "captcha-pointer")
+                return self._send(200, {"object": "list", "data": [
+                    {"id": model, "object": "model", "created": 0, "owned_by": "captchakraken"},
+                ]})
+            return self._send(404, {"error": {"message": f"no route {self.path}"}})
+
         def do_POST(self):  # noqa: N802 — http.server's name
             if self.path.rstrip("/") != PATH:
                 return self._send(404, {"error": {"message": f"no route {self.path}"}})
+            if not self._authorized():
+                return self._send(401, {"error": "Unauthorized"})
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
                 args = parse(body)

@@ -17,11 +17,11 @@ test('our endpoint is asked for the hosted default', () => {
     `${name} should be an alias of ${REG.hosted_default}`);
 });
 
-test('and asked for the name that ROUTES, not one of its arms', () => {
+test('and asked for the v2 pointer model', () => {
   const name = resolveLoraName({ cliRoot: CLI_ROOT, env: {}, baseUrl: HOSTED });
   const entry = REG.models[REG.served_aliases[name]];
-  assert.ok(Object.keys(entry?.experts ?? {}).length > 0,
-    `${name} declares no experts, so nothing would route`);
+  assert.equal(entry?.prompt_version, '4');
+  assert.equal(entry?.kind, 'merged');
 });
 
 test("someone else's vLLM is asked for the download default", () => {
@@ -53,11 +53,10 @@ test('a staging gateway can be added, and nothing else is', () => {
   assert.equal(isHostedEndpoint('https://staging.captchakraken.com/v1', {}), false);
 });
 
-test('the hosted default is registered and hosted-only', () => {
+test('the hosted default is the registered public v2 model', () => {
   const entry = REG.models[REG.hosted_default];
   assert.ok(entry, `${REG.hosted_default} is not in the registry`);
-  assert.notEqual(entry.availability, 'public',
-    'a downloadable model does not need a separate hosted default');
+  assert.equal(entry.availability ?? 'public', 'public');
   assert.equal(entry.prompt_version, REG.models[REG.latest].prompt_version,
     'hosted and download defaults must share a prompt generation, or the two '
     + 'halves of one client send prompts their model was not trained on');

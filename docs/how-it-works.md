@@ -1,29 +1,29 @@
 # ⚙️ How it works
 
-From a browser page to a verified token: detect → grid → click → verify, with a
-couple of safeguards that keep the model from acting on a stale frame.
+From a browser page to a verified token: detect → read → act → verify, with
+safeguards that keep the model from acting on a stale frame.
 
 ## The pipeline
 
 ```
-browser ─▶ detect captcha ─▶ screenshot frame
+browser ─▶ detect captcha ─▶ screenshot or clip
                                    │
-                    OpenCV find_grid (color-agnostic line tracer)
-                                   │  tile boxes
+                    CNN element detector + numbered overlay
+                                   │
                                    ▼
-                    Qwen3.5-9B captcha LoRA on vLLM  ─▶  tile selection
+                    v2 pointer model on vLLM ─▶ action plan
                                    │
-                    click plan ─▶ execute (human-like) ─▶ re-detect / verify
+                    execute (human-like) ─▶ re-detect / verify
 ```
 
-- **`find_grid`** finds the grid lines with plain OpenCV — no model needed. It
-  lives in the Python port ([`python/`](../python/), the `captchakraken`
-  package).
-- The **grid model** runs on your local vLLM server and says which tiles to
-  click.
-- The **browser driver** (the [`js/`](../js/) TypeScript port) clicks, waits for
-  reCAPTCHA's refreshing tiles, and keeps going until the captcha is solved. It
-  shells out to the bundled Python engine for detection + planning.
+- **The CNN detector** locates interactive elements. The client numbers them so
+  the model can refer to an exact target.
+- **The pointer model** answers through `/v1/pointer` with points, paths, text,
+  timing, or a no-answer decision. The server owns the fixed prompt and evaluates
+  the model's external pointer heads.
+- **The browser driver** performs the answer, waits for refreshing challenges,
+  and keeps going until the captcha is solved. It shells out to the bundled
+  Python engine for detection and planning.
 
 ### Freshness guard (no acting on a stale frame)
 

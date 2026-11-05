@@ -9,10 +9,10 @@
   The Python engine and CLI behind <a href="https://github.com/CaptchaKraken/CaptchaKraken">CaptchaKraken</a>.
 </p>
 
-OpenCV tile detection plus a fine-tuned **Qwen3.5-9B** vision model. Give it a
-screenshot of a captcha and it returns the plan to solve it — which tiles to
-select, where to click, what to drag, how far to slide, or what text to type.
-Ships the `captchakraken` command.
+A CNN element detector plus the **Midnight V2 4B Q4** pointer model by default.
+Give it a screenshot of a captcha and it returns the plan to solve it — which
+tiles to select, where to click, what to drag, how far to slide, or what text to
+type. Ships the `captchakraken` command.
 
 Run the model on **your own hardware**, or point it at the **hosted API** and run
 nothing at all.
@@ -119,9 +119,10 @@ Everything model-specific lives in `captchakraken.config` and is env-overridable
 |---|---|---|
 | `VLLM_BASE_URL` | Inference endpoint | `~/.captchakraken/credentials`, else `http://localhost:8000/v1` |
 | `CAPTCHA_KRAKEN_API_KEY` | Bearer token (`VLLM_API_KEY` also accepted) | `~/.captchakraken/credentials`, else `EMPTY` |
-| `CAPTCHA_BASE_MODEL` | Base weights vLLM loads | `RedHatAI/Qwen3.5-9B-FP8-dynamic` |
-| `CAPTCHA_LORA_ADAPTER` | Captcha adapter (HF id or path) | `CaptchaKraken/CaptchaKraken-Lora-v1.2` |
-| `CAPTCHA_LORA_NAME` | Served adapter name the client requests | `captcha-v12` |
+| `CAPTCHA_BASE_MODEL` | Merged v2 weights vLLM loads | `CaptchaKraken/MidnightV2-4B-q4` |
+| `CAPTCHA_LORA_ADAPTER` | Model repository (HF id or path) | `CaptchaKraken/MidnightV2-4B-q4` |
+| `CAPTCHA_LORA_NAME` | Served model name the client requests | `captcha-pointer` |
+| `CAPTCHA_POINTER_DETECTOR` | CNN element detector | path written by `setup.sh` |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` disables local auto-start | `1` |
 | `CAPTCHA_HUMANIZATION` | How gestures are performed: `mouse`, `mobile` or `none` | `mouse` |
 
@@ -149,7 +150,7 @@ PageSolver(config=PageSolverConfig(
 
 ## License
 
-**CaptchaKraken Source-Available License v1.1** — see [LICENSE](./LICENSE).
+**GNU Lesser General Public License v3.0 only** — see [LICENSE](./LICENSE).
 Build *with* it (scrapers, QA tooling) and run it against **any** browser you
 like, stealth or not. You may **not sell the solve itself**, ship a thin wrapper
 (browser extension, hosted solving API), or **bundle it as a built-in feature of

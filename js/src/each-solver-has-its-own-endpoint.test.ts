@@ -49,7 +49,7 @@ test('without the option the process endpoint and key still apply', () => {
 
 test('the model is resolved for the solver\'s own endpoint, not the process one', () => {
   const hostedName = resolveLoraName({ cliRoot: CLI_ROOT, env: {}, baseUrl: HOSTED });
-  assert.notEqual(hostedName, resolveLoraName({ cliRoot: CLI_ROOT, env: {}, baseUrl: LOCAL }), 'the registry must tell the two apart');
+  assert.equal(hostedName, resolveLoraName({ cliRoot: CLI_ROOT, env: {}, baseUrl: LOCAL }), 'v2 uses the same public model in both places');
   withEnv({ VLLM_BASE_URL: LOCAL }, () => {
     assert.equal((new CaptchaKrakenSolver({ baseUrl: HOSTED }) as any).modelName(CLI_ROOT), hostedName);
   });

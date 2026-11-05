@@ -3,7 +3,15 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [Unreleased]
+## [4.0.0] - 2026-11-05
+
+### Changed
+
+- **Midnight V2 4B Q4 is the default self-hosted and hosted model.** The
+  one-command installer downloads the merged Q4 checkpoint and CNN detector;
+  `./setup.sh --quant bf16` selects full precision.
+- **CaptchaKraken and all v2 models are LGPL-3.0-only.** The former custom
+  license no longer applies to this release or the v2 weights.
 
 ### Added
 

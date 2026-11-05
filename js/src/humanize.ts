@@ -23,17 +23,62 @@ const log = (m: string) => console.log(`[captchakraken] ${m}`);
 const uniform = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 // moveAndClick clicks at the landing point; without this every click would dispatch one redundant move.
 const samePoint = (a: Point, b: Point) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
-const gauss = (sigma: number) => {
+export const gauss = (sigma: number) => {
   let u = 0;
   while (u === 0) u = Math.random();
   return sigma * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
 };
 const closedError = (e: unknown) => /Target closed|Session closed/.test(e instanceof Error ? e.message : String(e));
 
-/** A recorded human movement morphed onto the endpoints; timings are cumulative ms. */
+// What one mouse event may cover. cursory's samples are up to 250 ms and 560 px apart, which the page sees as a
+// cursor that vanishes and reappears: a teleport. A real mouse reports every 8 ms (125 Hz).
+export const MAX_EVENT_GAP_MS = 8;
+export const MAX_EVENT_STEP_PX = 16;
+// How far a reach may swing off the straight line between its endpoints: a fraction of its length, at least a few
+// pixels. cursory morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px wide and a
+// 140 px one 300 px.
+export const MAX_DEVIATION = 0.15;
+export const MIN_DEVIATION_PX = 3;
+
+function nearestOnSegment(p: Point, a: Point, b: Point): Point {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const length2 = dx * dx + dy * dy;
+  if (length2 === 0) return a;
+  const k = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2));
+  return [a[0] + k * dx, a[1] + k * dy];
+}
+
+/** Shrink the path's swing off the segment, shape kept, until it stays within MAX_DEVIATION of it. */
+function tame(points: Point[], start: Point, end: Point): Point[] {
+  const limit = Math.max(MIN_DEVIATION_PX, MAX_DEVIATION * Math.hypot(end[0] - start[0], end[1] - start[1]));
+  const near = points.map((p) => nearestOnSegment(p, start, end));
+  const worst = points.reduce((m, p, i) => Math.max(m, Math.hypot(p[0] - near[i][0], p[1] - near[i][1])), 0);
+  if (worst <= limit) return points;
+  const k = limit / worst;
+  return points.map((p, i) => [near[i][0] + (p[0] - near[i][0]) * k, near[i][1] + (p[1] - near[i][1]) * k] as Point);
+}
+
+/** Fill every gap wider than one mouse report with evenly timed samples along it. */
+function densify(points: Point[], timings: number[]): [Point[], number[]] {
+  const outP: Point[] = points.slice(0, 1), outT = timings.slice(0, 1);
+  for (let j = 1; j < points.length; j++) {
+    const a = points[j - 1], b = points[j], ta = timings[j - 1], tb = timings[j];
+    const n = Math.max(1, Math.ceil((tb - ta) / MAX_EVENT_GAP_MS), Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / MAX_EVENT_STEP_PX));
+    for (let i = 1; i <= n; i++) {
+      const f = i / n;
+      outP.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+      outT.push(ta + (tb - ta) * f);
+    }
+  }
+  return [outP, outT];
+}
+
+/** A recorded human movement morphed onto the endpoints, held near the line between them and sampled at least
+ * once per mouse report; timings are cumulative ms. */
 export function trajectory(start: Point, end: Point, frequency: number): [Point[], number[]] {
   const { points, timings } = generateTrajectory(start, end, { frequency });
-  return [points.map((q) => [Number(q[0]), Number(q[1])] as Point), timings.map(Number)];
+  const s: Point = [Number(start[0]), Number(start[1])], e: Point = [Number(end[0]), Number(end[1])];
+  return densify(tame(points.map((q) => [Number(q[0]), Number(q[1])] as Point), s, e), timings.map(Number));
 }
 
 /** Every inter-gesture wait the driver takes, named, so each device supplies its own table. */

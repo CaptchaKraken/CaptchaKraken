@@ -142,3 +142,26 @@ def test_a_chip_on_a_tile_we_did_not_click_is_not_a_verdict():
         _FakePage(), _FakeElement(), _session(), [5]
     )
     assert chipped is False
+
+
+def test_waiting_on_reloading_tiles_rests_on_one_and_moves_rarely():
+    """Reaching for a different reloading tile on every 250 ms poll read as a cursor darting about the board."""
+    solver, _log = _driver(None, [])
+    hovered: List[int] = []
+    solver._hover_cell = lambda _page, _session, cell: hovered.append(cell)
+    hover = solver._hover_loop(_FakePage(), _session(), [4, 7, 9])
+    for _ in range(20):
+        hover()
+    assert hovered == [4]
+
+
+def test_a_rested_hand_drifts_a_few_pixels_and_stays_on_its_tile():
+    solver, _log = _driver(None, [])
+    moves: List[Any] = []
+    solver._human.hovers = True
+    solver._smooth_move = lambda _page, x, y: moves.append((x, y))
+    solver._last_mouse = (150.0, 150.0)
+    for _ in range(200):
+        PageSolver._hover_cell(solver, _FakePage(), _session(), 5)
+    assert all(100.0 < x < 200.0 and 100.0 < y < 200.0 for x, y in moves)
+    assert max(abs(x - 150.0) + abs(y - 150.0) for x, y in moves) < 30.0

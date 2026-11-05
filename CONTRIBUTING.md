@@ -5,7 +5,7 @@ detection, solver robustness, docs, and especially **real labeled samples** for
 the puzzle types we're still weak on.
 
 By contributing you agree that your contributions are licensed under the
-repository's [LICENSE](LICENSE) (the CaptchaKraken Source-Available License).
+repository's [LICENSE](LICENSE) (GNU Lesser General Public License v3.0).
 
 **This file is the one to read before changing this code — agent or human.**
 [AGENTS.md](AGENTS.md) is the product's own documentation, written for people
@@ -126,8 +126,9 @@ requirements → one agent.
 
 ## Ground rules
 
-- **The model is Qwen3.5-9B.** Never reference Qwen2 / Qwen2.5 / Qwen-VL anywhere;
-  grep before any change that touches serving or the planner.
+- **v2 is the pointer architecture.** Generation-4 models use the CNN element
+  detector, the pointer server, and `/v1/pointer`; older registered models retain
+  their chat-completion protocol. Do not mix their prompts or serving flags.
 - **`find_grid` is the foundation.** It's pure OpenCV (no model) and the most
   heavily gated code here: every geometry gate in
   `python/tests/test_grid_geometry_gates.py` exists because one specific false
@@ -309,6 +310,5 @@ permanent supply-chain surface.
   driven; these are the ones where the model is least reliable.
 - Smaller / faster quantizations so lower-VRAM hardware can self-host.
 
-Questions? Open an issue. Please don't open PRs that add a paid captcha-solving
-API or thin wrapper — those are outside what the license permits (see
-[LICENSE](LICENSE) §3).
+Questions? Open an issue. CaptchaKraken is licensed under LGPL-3.0-only; keep
+license and copyright notices intact.

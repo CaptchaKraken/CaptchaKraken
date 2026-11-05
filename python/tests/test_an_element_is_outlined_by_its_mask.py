@@ -53,6 +53,28 @@ def test_a_point_in_the_box_but_off_the_mask_names_nothing():
     assert E.element_at([150 / 400 * 1000, 115 / 400 * 1000], size, els) is None
 
 
+def test_an_answer_in_an_open_letters_hole_moves_to_the_nearest_letter_pixel():
+    letter = square(30)
+    letter[9:21, 9:] = False
+    letter[:9, 9:21] = False
+    letter[21:, 9:21] = False
+    els = [el("item", 35, 35, letter)]
+
+    ans = E.ids_for({"action": "click", "points": [[500, 500]]}, (100, 100), els)
+
+    assert ans["ids"] == [1]
+    assert ans["points"][0] != [500, 500]
+    x, y = ans["points"][0]
+    px, py = round(x / 1000 * 100), round(y / 1000 * 100)
+    assert letter[py - 35, px - 35]
+    yy, xx = np.nonzero(letter)
+    expected = np.min((xx + 35 - 50) ** 2 + (yy + 35 - 50) ** 2)
+    assert (px - 50) ** 2 + (py - 50) ** 2 == expected
+
+    empty = E.ids_for({"action": "click", "points": [[100, 100]]}, (100, 100), els)
+    assert empty == {"action": "click", "points": [[100, 100]], "ids": [None]}
+
+
 def test_a_ring_holds_its_own_centre_and_an_edge_holds_a_near_miss():
     ring = square(40)
     ring[10:30, 10:30] = False

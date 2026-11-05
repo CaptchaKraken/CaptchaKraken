@@ -142,3 +142,13 @@ def test_a_box_the_dom_cannot_reach_is_found_on_one_capture_with_no_model(frame:
     assert performed and len(page.mouse.pressed_at) == 1
     assert _inside(page.mouse.pressed_at[0], {"x": 33 + 16, "y": 237 + 23, "width": 30, "height": 30}), (
         f"clicked {page.mouse.pressed_at[0]}, outside the tick box OpenCV found")
+
+
+def test_an_in_page_button_with_no_tick_box_is_clicked_where_it_is() -> None:
+    """GeeTest v4's "Click to verify" bar draws no tick box: OpenCV found none, and the puzzle never opened."""
+    performed, usage, page, seen = _round(Vendor.GEETEST, None)
+
+    assert seen["captures"] == 0, f"{seen['captures']} capture(s) of a button the DOM already names"
+    assert seen["asks"] == 0 and usage == []
+    assert performed and len(page.mouse.pressed_at) == 1
+    assert _inside(page.mouse.pressed_at[0], WIDGET_BOX), f"clicked {page.mouse.pressed_at[0]}, off the button"

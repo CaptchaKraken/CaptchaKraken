@@ -7,7 +7,9 @@ head on inputs of that scale, and it must beat a constant zero."""
 import os
 import sys
 
-import torch
+import pytest
+
+torch = pytest.importorskip("torch", reason="torch is only installed with the serving stack")
 import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))

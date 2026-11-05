@@ -10,7 +10,9 @@ by one, linked across the clip (`elements.track`, so an element keeps one number
 and drawn on every frame. With no detector, or `marked=False`, the board goes
 plain. The prompt text is the same for every board (`layout.chat`). The answer is
 generation 3's shape, plus the 1-based number of the element under each point
-(`elements.ids_for`) when the board was marked.
+(`elements.ids_for`) when the board was marked, and `checks`: how sure each
+decision was, and whether each point's element is the one the model read off
+the marks (`cross_check`).
 
 Needs the `serve` extra (vLLM, torch, torchvision).
 """
@@ -29,6 +31,26 @@ from . import marks as M
 from . import vllm_plugin
 
 
+def cross_check(ans: Dict, size, els: Sequence[Optional[Dict]]) -> Dict:
+    """Put the element under each point beside the one the model read off the marks.
+
+    Each `checks` slot gains `under`: the 1-based element its (final) point lands on, or None. `checks["agree"]`
+    is whether every slot's two answers name the same element, or None on a board with no elements, where there
+    is nothing to read. Two answers decided apart that differ mean the board was misread."""
+    checks = ans.get("checks")
+    if checks is None:
+        return ans
+    has_elements = any(e is not None for e in els)
+    for s in checks["slots"]:
+        at = L.slot_point(ans, s["slot"])
+        i = E.element_at(at, size, els) if has_elements and at is not None else None
+        s["under"] = None if i is None else i + 1
+    checks["agree"] = all(s["under"] == s["element"] for s in checks["slots"]) if has_elements else None
+    return ans
+
+
+VLLM_VIDEO = "<|vision_start|><|video_pad|><|vision_end|>"
+
 class PointerService:
     def __init__(self, checkpoint: Union[str, Path], detector: Union[str, Path, None] = None,
                  gpu_memory_utilization: float = 0.45, max_model_len: int = 8192, **llm_kwargs):
@@ -41,7 +63,10 @@ class PointerService:
         self.llm = LLM(model=str(checkpoint), runner="pooling", max_model_len=max_model_len,
                        gpu_memory_utilization=gpu_memory_utilization,
                        limit_mm_per_prompt={"image": 1 + L.MAX_HISTORY, "video": 1},
-                       mm_processor_kwargs={"min_pixels": 64 * 64, "max_pixels": L.MAX_PIXELS}, **llm_kwargs)
+                       mm_processor_kwargs={"min_pixels": 64 * 64, "max_pixels": L.MAX_PIXELS},
+                       # The heads read every token's hidden state; vLLM returns none for a
+                       # prefix it served from cache, so a repeated prompt came back short.
+                       enable_prefix_caching=False, **llm_kwargs)
         self.detector = None
         if detector is not None:
             from .detector import Detector
@@ -59,7 +84,7 @@ class PointerService:
                 marked: bool = True, history: Sequence[Image.Image] = ()) -> Dict:
         """The request vLLM gets, and what decoding its answer needs. `history`:
         the puzzle's earlier screens, oldest first, as they were sent (marked the
-        same way), so the prompt up to them is the one already cached."""
+        same way). The prefix is recomputed each time: the heads need its hidden states."""
         if (image is None) == (frames is None):
             raise ValueError("give exactly one of image or frames")
         if frames is not None and history:
@@ -78,7 +103,12 @@ class PointerService:
                 if tracks:
                     fr = np.stack([np.asarray(M.draw(im, E.on_frame(tracks, k)))
                                    for k, im in enumerate(ims)])
-            return {"request": {"prompt": L.chat(self.processor, True),
+            # vLLM (0.25.1) expands a video only where it finds the template's whole
+            # <|vision_start|><|video_pad|><|vision_end|>; `chat` sends transformers
+            # the bare pad. Both then give the same tokens but one: training merges the
+            # instruction's last "." with the first timestamp's "<", vLLM splits them.
+            prompt = L.chat(self.processor, True).replace(L.VIDEO_PAD, VLLM_VIDEO)
+            return {"request": {"prompt": prompt,
                                 "multi_modal_data": {"video": (fr, meta)},
                                 "mm_processor_kwargs": {"do_sample_frames": False}},
                     "size": (w, h), "elements": tracks, "shown": None,
@@ -105,7 +135,7 @@ class PointerService:
         els = prep["elements"]
         if prep["timestamps"] is not None and els:
             els = E.on_frame(els, E.moment_frame(d["moment"], len(els[0]["frames"])))
-        return E.ids_for(ans, prep["size"], els)
+        return cross_check(E.ids_for(ans, prep["size"], els), prep["size"], els)
 
     def solve(self, image: Optional[Image.Image] = None, frames: Optional[Sequence[np.ndarray]] = None,
               marked: bool = True, history: Sequence[Image.Image] = ()) -> Dict:

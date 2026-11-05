@@ -70,13 +70,14 @@ answers with a frame number the driver then waits for on screen.
 | `CONTRIBUTING.md` | The rules for anyone — agent or human — changing this code: general rules, dev setup, the gates, and how PRs land. |
 | `contract.json` | The recorded public surface of both ports: exports, signatures, config keys, and the MCP tools' inputs. A new divergence between the ports fails the build; regenerate with `CONTRACT_WRITE=1 npm test` in `js/` and commit the diff. |
 | `FILE_PURPOSES.md` | This file. |
-| `LICENSE` | The CaptchaKraken Source-Available License v1.1. Copied verbatim into each published package. |
+| `LICENSE` | GNU Lesser General Public License v3.0. Copied verbatim into each published package. |
+| `COPYING` | GNU General Public License v3.0, whose terms LGPLv3 incorporates. |
 | `package.json` | **Repository tooling only — not the published package.** `private: true`, published nowhere, and the reason it exists is that repomix and the codebase-map gate need somewhere to live that is not one of the three shipped manifests. `npm i captchakraken` installs `js/`; `pip install captchakraken` installs `python/`. |
 | `package-lock.json` | The exact tooling tree for that root manifest, so `npm ci` at the root resolves what a developer resolved. |
 | `repomix.config.json` | What goes into `repomix-output.md`: the source of all three ports, comments stripped, `.gitignore` honoured so no build output can reach the map. |
 | `README.md` | The landing page: what it is, the demo clips and their counts, install, quickstart, and where the docs are. |
 | `TRIBAL_KNOWLEDGE.md` | The decisions taken in this repo and why they were taken. |
-| `setup.sh` | One command to self-host: detect accelerator memory, pick a quantization that fits, install `captchakraken[serve]` into `python/.venv`, download the base model and adapter, and write a sourceable `captchakraken.env`. |
+| `setup.sh` | One command to self-host Midnight V2 4B Q4: install `captchakraken[serve]` into `python/.venv`, download the merged checkpoint and element detector, and write a sourceable `captchakraken.env`. |
 
 ## `.github/`
 
@@ -318,6 +319,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_the_offset_head_learns.py` | The point offset head learns from hidden states at the base model's scale instead of saturating on its first step. |
 | `python/tests/test_the_pointer_reads_its_answer_from_one_prefill.py` | The heads find their 46 questions and the video moments in one prompt, and the packed decision round-trips. |
 | `python/tests/test_earlier_screens_are_context_before_the_board.py` | A pointer request may carry a puzzle's earlier screens: they go before the board, oldest first, as context, and points are read off the board alone. |
+| `python/tests/test_vllm_is_sent_every_token_of_a_pointer_prompt.py` | The pointer service asks vLLM for every prompt token's hidden state (no prefix cache) and sends a video where vLLM expands it. |
 | `python/tests/test_every_captcha_is_asked_the_same_prompt.py` | Every captcha is asked one fixed prompt with its board after it; a video's elements keep one number across frames; an element number is read from what lies under each point. |
 | `python/tests/test_a_blank_board_is_not_photographed.py` | The load gate in front of every inference screenshot, and the fences that stop it stalling a legitimately sparse puzzle. |
 | `python/tests/test_a_board_that_will_not_film_may_already_be_solved.py` | A burst that caught no frame is not a verdict about the board; it must not discard a board the vendor already took. |
@@ -353,6 +355,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_outcome_reporting.py` | The outcome report's contract: endpoint, body and timeout, a self-hosted 404 switching it off, a hosted failure warned about every time, and the vendor, site and widget-host headers. |
 | `python/tests/test_the_legacy_model_warning_is_one_text.py` | A hosted model name with no route is warned about once per process, and both ports print the same words. |
 | `python/tests/test_endpoint_is_dialled_once.py` | Connections are reused instead of a fresh handshake per inference. |
+| `python/tests/test_the_pointer_server_is_a_managed_endpoint.py` | The default Q4 checkpoint starts through the pointer server, health is open to the load balancer, and model routes require the server key. |
 | `python/tests/test_solver.py` | The still-image engine end to end against a stubbed endpoint. |
 | `python/tests/test_page_solver.py` | The Python page driver: detection, the round loop, and which error each dead end raises. |
 | `python/tests/fake_dom.py` | The one locator-shaped fake DOM the page-driver tests share, mirror of `js/src/fake-dom.test.ts`. |

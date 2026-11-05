@@ -3,17 +3,13 @@
 Send screenshots to `https://api.captchakraken.com/v1`. No GPU, no model
 download, no server to run.
 
-The hosted API answers the current client with **Abyss** — trained against the
-failures of the open weights, and routed across four specialist adapters on the
-same Qwen3.5-9B base as Twilight and Sunlight. It is hosted-only: the weights are
-not published and there is nothing to download. Every hosted account gets it;
-the client names an expert on each request and there is nothing to hold or buy
-first.
+The hosted API answers the current client with **Midnight V2 4B Q4**, the same
+public weights installed by `setup.sh`. It uses the v2 pointer endpoint,
+`POST /v1/pointer`, and the downloadable CNN element detector.
 
-An older client, or a request that names no model, is answered by **Twilight
-v1.2**, running on the same fleet — the same weights we publish, merged from the
-same LoRA on the same base — because its prompts belong to that generation.
-Never a silent substitution the other way.
+An older client keeps using its registered chat-completion model because its
+prompts and inference protocol belong to that generation. There is no silent
+substitution between chat-completion and pointer models.
 
 The client code is identical to the self-hosted path. Only the endpoint changes.
 

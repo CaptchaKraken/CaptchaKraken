@@ -221,6 +221,26 @@ def _norm_xy(x: Any, y: Any) -> Optional[tuple]:
     return (fx, fy)
 
 
+# Closer than this (0-1 of the board) and two pointer clicks are one target. Small enough that neighbouring icons in a
+# click-in-order puzzle stay two targets.
+REPEATED_POINT = 0.004
+
+
+def _without_repeated_points(action: Dict[str, Any]) -> Dict[str, Any]:
+    """A pointer click without its repeats. Two click slots that pick the same token answer the same point, and on a
+    tile board the second click deselects what the first selected."""
+    points = action.get("points")
+    if action.get("kind") != PixelAnswerKind.CLICK or not points:
+        return action
+    keep = [i for i, p in enumerate(points)
+            if all(abs(p[0] - q[0]) > REPEATED_POINT or abs(p[1] - q[1]) > REPEATED_POINT for q in points[:i])]
+    if len(keep) == len(points):
+        return action
+    ids = action.get("ids") or []
+    return {**action, "points": [points[i] for i in keep],
+            "ids": [ids[i] for i in keep] if len(ids) == len(points) else ids}
+
+
 class ActionPlanner:
 
     def __init__(
@@ -535,7 +555,8 @@ class ActionPlanner:
         """Generation 4 on a still: the screenshot as it is, PNG; the server sizes it and marks it."""
         with open(image_path, "rb") as f:
             raw = f.read()
-        actions = self._normalize_general(self._ask_pointer({"image": base64.b64encode(raw).decode()}))
+        actions = [_without_repeated_points(a) for a in
+                   self._normalize_general(self._ask_pointer({"image": base64.b64encode(raw).decode()}))]
         self._log(f"pointer actions -> {actions}")
         return actions
 

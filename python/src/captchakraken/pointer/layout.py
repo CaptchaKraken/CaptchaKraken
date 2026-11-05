@@ -77,8 +77,9 @@ QUESTION_TEXT = " ".join(f"{q}{Q_END}" for q in QUESTIONS)
 
 # ── the packed decision vector ──────────────────────────────────────────────
 #: Per slot: vision token index (within the chosen moment), dx, dy (offset from
-#: the token's centre, in tokens), p(token).
-SLOT_WIDTH = 4
+#: the token's centre, in tokens), p(token), the element number read off the
+#: marks (0 for none), p(element).
+SLOT_WIDTH = 6
 N_COUNTS = MAX_CLICKS + 1          # clicks 0..16
 N_DRAG_COUNTS = MAX_DRAGS          # drags 1..4
 PACKED = (len(ACTIONS) + N_COUNTS + N_DRAG_COUNTS + SLOT_WIDTH * len(SLOTS)
@@ -142,8 +143,9 @@ def unpack(v: Sequence[float]) -> Dict:
     out = {"action_p": take(len(ACTIONS)), "count_p": take(N_COUNTS),
            "drag_count_p": take(N_DRAG_COUNTS), "slots": {}}
     for name, _ in SLOTS:
-        tok, dx, dy, pt = take(SLOT_WIDTH)
-        out["slots"][name] = {"token": int(tok), "dx": dx, "dy": dy, "p_point": pt}
+        tok, dx, dy, pt, el, pe = take(SLOT_WIDTH)
+        out["slots"][name] = {"token": int(tok), "dx": dx, "dy": dy, "p_point": pt,
+                              "element": int(el), "p_element": pe}
     out["text_ids"] = [int(t) for t in take(MAX_TEXT)]
     out["moment"], out["moment_p"] = int(v[i]), v[i + 1]
     return out
@@ -162,30 +164,60 @@ def answer(decision: Dict, grid: Tuple[int, int], *, text: Optional[str] = None,
            timestamps: Optional[Sequence[float]] = None) -> Dict:
     """Unpacked decisions -> the generation-3 answer shape, points only
     (`elements.ids_for` adds the element numbers). `text` is the decoded typed
-    string (the caller owns the tokenizer); `timestamps` are a video's pair times."""
+    string (the caller owns the tokenizer); `timestamps` are a video's pair times.
+
+    `checks` says how sure each decision was: the action's, the count's and the
+    moment's probability, and per slot used, in answer order, p(point) and the
+    element number read off the marks with its probability (None: no number)."""
     def p(name):
         return to_point(decision["slots"][name], grid)
-    act = ACTIONS[max(range(len(ACTIONS)), key=lambda k: decision["action_p"][k])]
+    a = max(range(len(ACTIONS)), key=lambda k: decision["action_p"][k])
+    act = ACTIONS[a]
     out: Dict = {}
+    checks: Dict = {"action_p": round(decision["action_p"][a], 4)}
     if timestamps:
         out["t"] = float(timestamps[min(decision["moment"], len(timestamps) - 1)])
+        checks["moment_p"] = round(decision["moment_p"], 4)
     out["action"] = act
+    names: List[str] = []
     if act in ("click", "refresh"):
         n = max(range(N_COUNTS), key=lambda k: decision["count_p"][k])
+        checks["count_p"] = round(decision["count_p"][n], 4)
         if act == "refresh":
             n = min(n, 1)
         names = [f"click{k}" for k in range(1, n + 1)]
         out["points"] = [p(s) for s in names]
     elif act == "drag":
-        n = 1 + max(range(N_DRAG_COUNTS), key=lambda k: decision["drag_count_p"][k])
+        k = max(range(N_DRAG_COUNTS), key=lambda k: decision["drag_count_p"][k])
+        checks["count_p"] = round(decision["drag_count_p"][k], 4)
         drags = []
-        for k in range(1, n + 1):
-            drags.append({"from": p(f"drag{k} from"), "to": p(f"drag{k} to")})
+        for j in range(1, k + 2):
+            drags.append({"from": p(f"drag{j} from"), "to": p(f"drag{j} to")})
+            names += [f"drag{j} from", f"drag{j} to"]
         out["drags"] = drags
     elif act == "slide":
+        names = ["slide handle", "slide from", "slide to"]
         out.update({"handle": p("slide handle"), "from": p("slide from"), "to": p("slide to")})
     elif act == "hold":
+        names = ["hold press", "hold from", "hold to"]
         out.update({"press": p("hold press"), "from": p("hold from"), "to": p("hold to")})
     else:
         out["text"] = text or ""
+    checks["slots"] = [{"slot": s, "p_point": round(decision["slots"][s]["p_point"], 4),
+                        "element": decision["slots"][s]["element"] or None,
+                        "p_element": round(decision["slots"][s]["p_element"], 4)} for s in names]
+    out["checks"] = checks
     return out
+
+
+def slot_point(ans: Dict, slot: str) -> Optional[List[int]]:
+    """Where `answer`'s `slot` put its point (after any later move of it), or None."""
+    if slot.startswith("click"):
+        pts = ans.get("points") or []
+        k = int(slot[5:]) - 1
+        return pts[k] if k < len(pts) else None
+    if slot.startswith("drag"):
+        k, end = slot[4:].split()
+        drags = ans.get("drags") or []
+        return drags[int(k) - 1][end] if int(k) <= len(drags) else None
+    return ans.get(slot.split()[1])

@@ -1071,14 +1071,13 @@ motionless tap is the one thing no digitizer produces. If drags start failing
 on the drop or a vendor starts scoring swipe spectra, this is where to look
 first, and the numbers above are the baseline.
 
-THE LICENCE IS THE PART TO BE CAREFUL WITH. Both packages are
-LGPL-3.0-or-later and this product is source-available proprietary. That
-combination is fine, and it is fine BECAUSE they are ordinary installed
-dependencies: declared in `pyproject.toml` and `package.json`, resolved by the
-user's package manager, never vendored, inlined, or bundled. `tsc` leaves
+THE LICENCE IS THE PART TO BE CAREFUL WITH. CaptchaKraken and the v2 models are
+LGPL-3.0-only; Cursory's packages remain LGPL-3.0-or-later. They are ordinary
+installed dependencies: declared in `pyproject.toml` and `package.json`, resolved
+by the user's package manager, never vendored, inlined, or bundled. `tsc` leaves
 `require('cursory-js')` as a runtime import rather than inlining it, and
-`copy-python.mjs` copies only our own tree. Vendoring either one is the change
-that would move this obligation somewhere else, so do not, and see NOTICE.
+`copy-python.mjs` copies only our own tree. Vendoring either one would change the
+distribution and notice obligations, so do not, and see NOTICE.
 
 TWO PACKAGING CONSEQUENCES, both deliberate and both part of the major bump.
 The Python client's `numpy` pin moves from 2.2.6 to 2.3.5, because Cursory
