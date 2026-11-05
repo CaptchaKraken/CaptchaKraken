@@ -5,7 +5,7 @@ detection, solver robustness, docs, and especially **real labeled samples** for
 the puzzle types we're still weak on.
 
 By contributing you agree that your contributions are licensed under the
-repository's [LICENSE](LICENSE) (the CaptchaKraken Source-Available License).
+repository's [LICENSE](LICENSE) (the GNU Lesser General Public License, version 3 only).
 
 **This file is the one to read before changing this code — agent or human.**
 [AGENTS.md](AGENTS.md) is the product's own documentation, written for people

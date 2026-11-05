@@ -152,9 +152,7 @@ PageSolver(config=PageSolverConfig(
 
 ## License
 
-**CaptchaKraken Source-Available License v1.1** — see [LICENSE](./LICENSE).
-Build *with* it (scrapers, QA tooling) and run it against **any** browser you
-like, stealth or not. You may **not sell the solve itself**, ship a thin wrapper
-(browser extension, hosted solving API), or **bundle it as a built-in feature of
-a stealth/antidetect browser you distribute** — using it with one is fine. Those
-three are licensable, not categorically refused: open an issue to ask.
+**LGPL-3.0-only** — see [LICENSE](./LICENSE). Use, modify and redistribute it,
+including in commercial and hosted services. If you distribute a modified
+version, keep the licence and copyright notices and make your changes available
+under LGPLv3.
