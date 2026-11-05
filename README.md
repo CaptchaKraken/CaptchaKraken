@@ -530,7 +530,7 @@ these as they ship.
 
 ## License
 
-CaptchaKraken and the published v2 models are **LGPL-3.0-only** — see
+CaptchaKraken and all its models are **LGPL-3.0-only** — see
 **[LICENSE](./LICENSE)**, **[COPYING](./COPYING)**, and the plain-English
 **[licensing guide](./docs/licensing.md)**. Commercial use, modification, and
 redistribution are permitted under LGPLv3, including use in browsers, automation

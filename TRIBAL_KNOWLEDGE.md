@@ -992,7 +992,7 @@ motionless tap is the one thing no digitizer produces. If drags start failing
 on the drop or a vendor starts scoring swipe spectra, this is where to look
 first, and the numbers above are the baseline.
 
-THE LICENCE IS THE PART TO BE CAREFUL WITH. CaptchaKraken and the v2 models are
+THE LICENCE IS THE PART TO BE CAREFUL WITH. CaptchaKraken and all its models are
 LGPL-3.0-only; Cursory's packages remain LGPL-3.0-or-later. They are ordinary
 installed dependencies: declared in `pyproject.toml` and `package.json`, resolved
 by the user's package manager, never vendored, inlined, or bundled. `tsc` leaves

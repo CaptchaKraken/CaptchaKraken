@@ -20,7 +20,7 @@ guides. Start here.
 | [📊 Benchmarks](./benchmarks.md) | The canonical numbers — real captchas driven in a browser, and per-puzzle model accuracy on held-out real captures, with what each measures and why they differ. |
 | [⚡ Performance](./performance.md) | The memory-bandwidth speed model + per-device throughput, and IP-reputation guidance. |
 | [🗺️ Roadmap](./roadmap.md) | What shipped recently, what's in progress, and what's planned (more captcha types). |
-| [⚖️ Licensing](./licensing.md) | Plain-English explainer of LGPLv3 for the client and v2 models. |
+| [⚖️ Licensing](./licensing.md) | Plain-English explainer of LGPLv3 for the client and all models. |
 
 ## ✅ What it solves today
 

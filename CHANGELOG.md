@@ -10,7 +10,7 @@ semantic versioning; v2 is a major, **breaking** release.
 - **Midnight V2 4B Q4 is the default self-hosted and hosted model.** The
   one-command installer downloads the merged Q4 checkpoint and CNN detector;
   `./setup.sh --quant bf16` selects full precision.
-- **CaptchaKraken and all v2 models are LGPL-3.0-only.** The former custom
+- **CaptchaKraken and all its models are LGPL-3.0-only.** The former custom
   license no longer applies to this release or the v2 weights.
 
 Version 4.0.0.

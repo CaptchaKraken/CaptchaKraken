@@ -75,7 +75,7 @@ checkpoints can be selected by editing `CAPTCHA_BASE_MODEL` and
 
 The CNN detector is downloaded from
 [`CaptchaKraken/CaptchaKrakenV2-CNN-large`](https://huggingface.co/CaptchaKraken/CaptchaKrakenV2-CNN-large).
-The client and all v2 models are LGPL-3.0-only.
+The client and all CaptchaKraken models are LGPL-3.0-only.
 
 ## Updating
 

@@ -99,7 +99,7 @@ where one exists. Retrying a `403` that means "no licence" will never succeed.
 - **Midnight V2 4B Q4 is the default self-hosted and hosted model.** The v2
   weights are downloadable under LGPL-3.0-only. Older clients keep using their
   registered chat-completion model because the protocols are not interchangeable.
-- **Respect the licence.** CaptchaKraken and its v2 models are LGPL-3.0-only;
+- **Respect the licence.** CaptchaKraken and all its models are LGPL-3.0-only;
   commercial use and integration are permitted under those terms. See
   [LICENSE](./LICENSE) and
   [docs/licensing.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/licensing.md).

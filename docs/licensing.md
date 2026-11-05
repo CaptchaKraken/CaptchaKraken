@@ -1,6 +1,6 @@
 # Licensing
 
-CaptchaKraken and its published v2 models are licensed under the **GNU Lesser
+CaptchaKraken and all its models are licensed under the **GNU Lesser
 General Public License, version 3 only (LGPL-3.0-only)**. See the full
 [LGPLv3 text](../LICENSE) and the [GPLv3 text it incorporates](../COPYING).
 This page is a short summary, not legal advice.

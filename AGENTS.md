@@ -391,7 +391,7 @@ client unless you have a reason not to.
 - **Never print an API key** into a transcript, a log, or a commit. Use the MCP
   flow, which writes it to disk instead.
 - **Do not commit `captchakraken.env`.** It holds a key and is gitignored.
-- **Respect the license.** CaptchaKraken and its v2 models are LGPL-3.0-only;
+- **Respect the license.** CaptchaKraken and all its models are LGPL-3.0-only;
   commercial use and integration are permitted under those terms. See
   [docs/licensing.md](./docs/licensing.md).
 
