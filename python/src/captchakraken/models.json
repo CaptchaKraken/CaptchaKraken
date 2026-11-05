@@ -120,7 +120,7 @@
     "an expert name only ever reaches the wire for a caller who asked for a",
     "routed model in the first place."
   ],
-  "latest": "CaptchaKraken/CaptchaKraken-Lora-v1.2",
+  "latest": "CaptchaKraken/MidnightV2-4B-q4",
   "_comment_hosted_default": [
     "WHAT THE HOSTED ENDPOINT IS ASKED FOR, which is not what gets DOWNLOADED.",
     "",
@@ -141,9 +141,33 @@
     "before, because it serves whatever its operator loaded and asking it for",
     "`abyss` would 404."
   ],
-  "hosted_default": "CaptchaKraken/Abyss",
+  "hosted_default": "CaptchaKraken/MidnightV2-4B-q4",
   
   "models": {
+    "CaptchaKraken/MidnightV2-4B-q4": {
+      "prompt_version": "4",
+      "kind": "merged",
+      "base_model": "CaptchaKraken/MidnightV2-4B-q4",
+      "lora_revision": "main",
+      "lora_name": "captcha-pointer",
+      "pixel_budget": {
+        "min": 4096,
+        "max": 518400
+      },
+      "note": "Midnight V2 4B, GPTQ W4A16, with the pointer heads. The default self-hosted and hosted model. The server owns the fixed prompt and reads the answer from one prefill at /v1/pointer."
+    },
+    "CaptchaKraken/MidnightV2-4B": {
+      "prompt_version": "4",
+      "kind": "merged",
+      "base_model": "CaptchaKraken/MidnightV2-4B",
+      "lora_revision": "main",
+      "lora_name": "captcha-pointer",
+      "pixel_budget": {
+        "min": 4096,
+        "max": 518400
+      },
+      "note": "Midnight V2 4B at bf16. The full-precision alternative to the default Q4 checkpoint."
+    },
     "CaptchaKraken/CaptchaKraken-Lora-v1.2": {
       "prompt_version": "2",
       "kind": "lora",
@@ -309,6 +333,7 @@
     "abyss-general": "CaptchaKraken/Abyss-general",
     "abyss-video": "CaptchaKraken/Abyss-video",
     "abyss-text": "CaptchaKraken/Abyss-text",
-    "abyss-27b": "CaptchaKraken/Abyss-27B"
+    "abyss-27b": "CaptchaKraken/Abyss-27B",
+    "captcha-pointer": "CaptchaKraken/MidnightV2-4B-q4"
   }
 }

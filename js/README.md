@@ -10,8 +10,8 @@
 </p>
 
 Hand it a Playwright or Puppeteer `Page`. It finds the captcha, reads the whole
-puzzle with a fine-tuned **Qwen3.5-9B** vision model, and clicks, drags, slides
-or types human-like through to a token.
+puzzle with the **v2 pointer model**, and clicks, drags, slides or types
+human-like through to a token.
 
 Run the model on **your own hardware**, or point it at the **hosted API** and run
 nothing at all.
@@ -155,9 +155,10 @@ Full details, including writing your own humanizer:
 | `VLLM_BASE_URL` | Inference endpoint (local vLLM, a server you run, or `https://api.captchakraken.com/v1`) | credentials file, else `http://localhost:8000/v1` |
 | `CAPTCHA_KRAKEN_API_KEY` | Bearer token (`VLLM_API_KEY` also accepted) | credentials file, else `EMPTY` |
 | `CAPTCHA_HUMANIZATION` | How gestures are performed: `mouse`, `mobile` or `none`. Loses to anything set in code | `mouse` |
-| `CAPTCHA_BASE_MODEL` | Base weights vLLM loads | `RedHatAI/Qwen3.5-9B-FP8-dynamic` |
-| `CAPTCHA_LORA_ADAPTER` | Captcha adapter (HF id or path) | `CaptchaKraken/CaptchaKraken-Lora-v1.2` |
-| `CAPTCHA_LORA_NAME` | Served adapter name sent as `model` | `captcha-v12` |
+| `CAPTCHA_BASE_MODEL` | Merged v2 weights vLLM loads | `CaptchaKraken/MidnightV2-4B-q4` |
+| `CAPTCHA_LORA_ADAPTER` | Model repository (HF id or path) | `CaptchaKraken/MidnightV2-4B-q4` |
+| `CAPTCHA_LORA_NAME` | Served model name sent as `model` | `captcha-pointer` |
+| `CAPTCHA_POINTER_DETECTOR` | CNN element detector | path written by `setup.sh` |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` never auto-starts a local server | `1` |
 | `CAPTCHA_KRAKEN_PYTHON` | Interpreter used for the bundled engine | the package's venv, else `python3` |
 | `CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP` | `1` skips the `postinstall` bootstrap | unset |
@@ -175,7 +176,7 @@ the vLLM server knobs, are in
 
 ## License
 
-**CaptchaKraken Source-Available License v1.1** — see [LICENSE](./LICENSE).
+**GNU Lesser General Public License v3.0 only** — see [LICENSE](./LICENSE).
 Build *with* it (scrapers, QA tooling) and run it against **any** browser you
 like, stealth or not. You may **not sell the solve itself**, ship a thin wrapper
 (browser extension, hosted solving API), or **bundle it as a built-in feature of

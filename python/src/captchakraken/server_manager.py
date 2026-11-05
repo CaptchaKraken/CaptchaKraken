@@ -69,6 +69,18 @@ def _read_pid() -> "int | None":
 
 
 def build_serve_command() -> "list[str]":
+    from . import prompts
+
+    if prompts.resolve(config.lora_adapter()).pointer:
+        detector = os.environ["CAPTCHA_POINTER_DETECTOR"]
+        return [
+            sys.executable, "-m", "captchakraken.pointer.server",
+            "--model", config.base_model(),
+            "--detector", detector,
+            "--host", os.getenv("CAPTCHA_POINTER_HOST", "127.0.0.1"),
+            "--port", str(config.port()),
+            "--gpu-memory-utilization", str(config.gpu_memory_utilization()),
+        ]
     return [
         _vllm_bin() or "vllm", "serve", config.base_model(),
         "--reasoning-parser", "qwen3",

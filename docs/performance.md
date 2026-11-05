@@ -10,7 +10,7 @@ the real-captcha browser runs and the per-puzzle model accuracy side by side,
 because neither answers the other's question. The headline is the browser table:
 nine puzzle types, each driven on the vendor's own public demo page through
 the hosted API, every attempt scored, recorded
-2026-08-19 against the adapter the hosted API serves today. Counts rather than
+2026-08-19 against the legacy `captcha-v12` adapter. Counts rather than
 percentages, and a median whole-solve time taken from the run rather than from
 the footage.
 

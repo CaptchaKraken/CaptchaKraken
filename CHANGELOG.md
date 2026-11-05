@@ -3,7 +3,15 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [Unreleased]
+## [4.0.0] - 2026-11-05
+
+### Changed
+
+- **Midnight V2 4B Q4 is the default self-hosted and hosted model.** The
+  one-command installer downloads the merged Q4 checkpoint and CNN detector;
+  `./setup.sh --quant bf16` selects full precision.
+- **CaptchaKraken and all its models are LGPL-3.0-only.** The former custom
+  license no longer applies to this release or the v2 weights.
 
 Version 4.0.0.
 
@@ -221,6 +229,13 @@ Version 4.0.0.
   with the solver's own `apiKey`. One process can now drive solvers that talk to
   different servers with different keys without one environment variable
   routing them all. Nothing changes when the option is absent.
+
+### Changed
+
+- **The pointer overlay's numbers are drawn at 3x.** Each tag's digits are
+  15x21 px with 3 px strokes, so a digit spans more than one vision patch. The
+  look is part of a pointer model's input: models trained on the old overlay
+  must be retrained.
 
 ### Changed
 

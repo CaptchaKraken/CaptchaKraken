@@ -21,11 +21,9 @@ The model runs in one of two places. **Pick one before you install anything.**
 
 | Your machine | Use | Setup time |
 |---|---|---|
-| No GPU | **Hosted API** | ~1 min |
-| 22 GB+ VRAM or Apple unified memory | **Self-host** | ~20 min (model download) |
-| 11–22 GB VRAM or Apple unified memory | **Self-host** | ~15 min |
-| Under 11 GB | **Hosted API** | ~1 min |
-| You already run a vLLM server | **Point at it** | ~1 min |
+| No suitable GPU | **Hosted API** | ~1 min |
+| 8 GB+ free CUDA VRAM | **Self-host: Midnight V2 4B Q4** | One command plus download |
+| You already run a v2 pointer server | **Point at it** | ~1 min |
 
 Both options run the **same client code**. Only the endpoint changes. You can
 switch later by changing one environment variable.
@@ -91,31 +89,17 @@ round is billed separately.
 
 ## 2B. Self-host
 
-One command. It reads your GPU/Apple memory, picks a model size that fits,
-downloads it, and writes a config file.
+One command installs **Midnight V2 4B Q4**, its element detector, and the tested
+vLLM stack. Use a CUDA GPU with at least 8 GB of free VRAM.
 
 ```bash
 git clone https://github.com/CaptchaKraken/CaptchaKraken
 cd CaptchaKraken
 ./setup.sh
-```
-
-| Detected memory | What it installs |
-|---|---|
-| 22 GB+ | 8-bit base (`RedHatAI/Qwen3.5-9B-FP8-dynamic`, ~14 GB) — best accuracy |
-| 11–22 GB | 4-bit base (`cyankiwi/Qwen3.5-9B-AWQ-4bit`, ~6 GB) — lighter |
-| Under 11 GB | Stops and explains your options |
-
-Both sizes serve the same captcha LoRA adapter on top.
-
-Then load the config:
-
-```bash
 source captchakraken.env
 ```
 
-**You do not start a server.** vLLM starts by itself on your first solve and
-stays up. To manage it anyway:
+The server starts automatically on the first solve and stays up. To manage it:
 
 ```bash
 captchakraken server start    # background, waits until healthy
@@ -127,46 +111,16 @@ Useful flags:
 
 | Command | Effect |
 |---|---|
-| `./setup.sh --quant fp8\|awq\|bf16` | Force a size instead of detecting |
-| `./setup.sh --download-only` | Only download weights (stage for a bigger box) |
-| `./setup.sh --update` | Pull latest weights + upgrade vLLM |
-| `captchakraken fetch` | Same update, from the installed CLI |
+| `./setup.sh --quant q4\|bf16` | Select Q4 (default) or full precision |
+| `./setup.sh --download-only` | Only download weights |
+| `./setup.sh --start` | Start the server during installation |
+| `./setup.sh --update` | Upgrade the serving stack |
+| `captchakraken fetch` | Update from the installed CLI |
 
-### Merged models — one file, any runtime
+The merged model serves `POST /v1/pointer`. GGUF builds are for advanced
+llama.cpp integrations: stock Ollama cannot evaluate v2's external pointer heads.
 
-`setup.sh` installs a **LoRA adapter**, which vLLM applies at serve time. That
-needs vLLM and the `--enable-tower-connector-lora` flag.
-
-If the user does not run vLLM, or just wants one self-contained download, serve
-a **merged** model instead. Both are public:
-
-| Model | Precision | Size | Min VRAM | Hub id |
-|---|---|---|---|---|
-| **Sunlight v1.2** | 4-bit (AWQ) | 11 GB | ~14 GB | `CaptchaKraken/Sunlight-v1.2-AWQ-4bit` |
-| **Twilight v1.2** | 8-bit (FP8) | 13 GB | ~22 GB | `CaptchaKraken/Twilight-v1.2-FP8` |
-
-```bash
-vllm serve CaptchaKraken/Twilight-v1.2-FP8 \
-  --max-model-len 8192 --gpu-memory-utilization 0.85 \
-  --trust-remote-code --port 8000
-
-export VLLM_BASE_URL=http://localhost:8000/v1
-export CAPTCHA_KRAKEN_API_KEY=EMPTY
-export CAPTCHA_LORA_NAME=CaptchaKraken/Twilight-v1.2-FP8   # must match the served name
-```
-
-No `--enable-lora`, no adapter flags — the adapter is already merged in.
-
-**These are generation-2 merges of the same v1.2 adapter `setup.sh` installs**,
-so there is no accuracy-versus-convenience trade any more — only 4-bit vs 8-bit.
-The older v1.1 merges (`Sunlight-AWQ-4bit`, `Twilight-FP8`) are still published
-but cover image-grid puzzles only.
-
-If you write a client against a merged model directly: send
-`chat_template_kwargs: {"enable_thinking": false}`, and expect coordinates
-normalized 0–1000, not pixels.
-
-### 2C. You already run a vLLM server
+### 2C. You already run a v2 pointer server
 
 Point at it and skip everything local:
 
@@ -175,9 +129,8 @@ export VLLM_BASE_URL=https://your-server:8000/v1
 export CAPTCHA_KRAKEN_API_KEY=your-server-key
 ```
 
-A non-localhost URL is never auto-started or managed for you. Your server must
-serve the captcha adapter under the name in `CAPTCHA_LORA_NAME` (default
-`captcha-v12`).
+A non-localhost URL is never auto-started or managed for you. Generation 4 uses
+`/v1/pointer`, not an older server's `/v1/chat/completions`.
 
 ---
 
@@ -322,14 +275,14 @@ Advanced — only to change **which** model is served:
 
 | Variable | What it is | Default |
 |---|---|---|
-| `CAPTCHA_BASE_MODEL` | Base weights vLLM loads | `RedHatAI/Qwen3.5-9B-FP8-dynamic` |
-| `CAPTCHA_LORA_ADAPTER` | Captcha adapter served on top | `CaptchaKraken/CaptchaKraken-Lora-v1.2` |
-| `CAPTCHA_LORA_REVISION` | Adapter git revision | `main` |
-| `CAPTCHA_LORA_NAME` | Name the client sends as `model` | `captcha-v12` |
+| `CAPTCHA_BASE_MODEL` | Merged v2 weights vLLM loads | `CaptchaKraken/MidnightV2-4B-q4` |
+| `CAPTCHA_LORA_ADAPTER` | Model repository used for downloads and metadata | `CaptchaKraken/MidnightV2-4B-q4` |
+| `CAPTCHA_LORA_REVISION` | Model git revision | `main` |
+| `CAPTCHA_LORA_NAME` | Name the client sends as `model` | `captcha-pointer` |
+| `CAPTCHA_POINTER_DETECTOR` | v2 CNN element detector | path written by `setup.sh` |
 | `VLLM_PORT` | Local server port | `8000` |
 | `VLLM_GPU_MEMORY_UTILIZATION` | Fraction of VRAM vLLM may use | `0.80` |
-| `VLLM_MAX_MODEL_LEN` | Context length | `65536` |
-| `VLLM_EXTRA_ARGS` | Extra flags for `vllm serve` | empty |
+| `VLLM_EXTRA_ARGS` | Extra flags for the local server | empty |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` never auto-starts a local server | `1` |
 | `CAPTCHA_KRAKEN_STATE_DIR` | Where the pidfile, log, and credentials live | `~/.captchakraken` |
 | `CAPTCHA_KRAKEN_DETECTOR` | A local element-detector `.onnx` to run instead of the released one | the released weights |
@@ -432,18 +385,14 @@ client unless you have a reason not to.
   static-image rates over held-out real captures. Quote those or quote nothing.
   Do not convert a count into a percentage, and do not read a static-image rate
   as a promise about a browser — the page says why they differ.
-- **Abyss is what our hosted API serves, and it is never downloadable.** The
-  current client names an Abyss expert on every request to our endpoint and is
-  answered by Abyss; an older client, or a request that names no model, gets
-  Twilight v1.2, because its prompts belong to that generation. Nothing about it
-  is gated on the account. Do not suggest weights, a download or a workaround
-  for it, and do not quote accuracy figures for it — none are published. Verify
-  what is serving with `GET /v1/models`.
+- **Midnight V2 4B Q4 is the default self-hosted and hosted model.** The v2
+  weights are downloadable under LGPL-3.0-only. Older clients keep using their
+  registered chat-completion model because the protocols are not interchangeable.
 - **Never print an API key** into a transcript, a log, or a commit. Use the MCP
   flow, which writes it to disk instead.
 - **Do not commit `captchakraken.env`.** It holds a key and is gitignored.
-- **Respect the license.** Building automation with this is fine. Selling the
-  solve, or shipping it inside a browser or automation product, is not. See
+- **Respect the license.** CaptchaKraken and all its models are LGPL-3.0-only;
+  commercial use and integration are permitted under those terms. See
   [docs/licensing.md](./docs/licensing.md).
 
 ---

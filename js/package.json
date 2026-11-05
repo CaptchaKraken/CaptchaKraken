@@ -1,7 +1,7 @@
 {
   "name": "captchakraken",
   "version": "4.0.0",
-  "description": "Captcha solver for Playwright and Puppeteer. Finds the captcha, reads the puzzle with a fine-tuned Qwen3.5-9B vision model, and clicks, drags, slides or types through to a token \u2014 reCAPTCHA, GeeTest, NetEase Yidun, Tencent, Lemin, Prosopo, Turnstile and distorted text. Hosted API or self-hosted.",
+  "description": "Captcha solver for Playwright and Puppeteer. Finds the captcha, reads it with the v2 pointer model, and clicks, drags, slides or types through to a token \u2014 reCAPTCHA, GeeTest, NetEase Yidun, Tencent, Lemin, Prosopo, Turnstile and distorted text. Hosted API or self-hosted.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -46,7 +46,7 @@
     "qwen"
   ],
   "author": "Jake Writer",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "LGPL-3.0-only",
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/CaptchaKraken/CaptchaKraken/issues"

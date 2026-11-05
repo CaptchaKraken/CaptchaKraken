@@ -111,15 +111,11 @@ generation and the weights drift apart.
 - **Never print an API key** into a transcript, a log, or a commit. Use
   `create_api_key`, which writes it to disk instead. `captchakraken.env` and
   `.env` hold keys and are never committed.
-- **Abyss is what our hosted API serves, and it is never downloadable.** The
-  current client names an Abyss expert on every request to our endpoint and is
-  answered by Abyss; an older client, or a request that names no model, gets
-  Twilight v1.2, because its prompts belong to that generation. Nothing about it
-  is gated on the account. Do not suggest weights, a download or a workaround
-  for it, and do not quote accuracy figures for it — none are published. Verify
-  what is serving with `GET /v1/models`.
-- **Respect the licence.** Building automation with this is fine; selling the
-  solve, or shipping it inside a browser or automation product, is not. See
+- **Midnight V2 4B Q4 is the default self-hosted and hosted model.** The v2
+  weights are downloadable under LGPL-3.0-only. Older clients keep using their
+  registered chat-completion model because the protocols are not interchangeable.
+- **Respect the licence.** CaptchaKraken and all its models are LGPL-3.0-only;
+  commercial use and integration are permitted under those terms. See
   [LICENSE](./LICENSE) and
   [docs/licensing.md](https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/licensing.md).
 - **Changing this package's own code?** Its rules are in

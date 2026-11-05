@@ -141,7 +141,12 @@ def _served_fixtures() -> Iterator[str]:
 def recorded_page() -> Iterator[Any]:
     sync_playwright = pytest.importorskip("playwright.sync_api", reason="playwright not installed").sync_playwright
     with _served_fixtures() as url, sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        try:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        except Exception as e:
+            if "Executable doesn't exist" not in str(e):
+                raise
+            pytest.skip("the Playwright browser is not installed")
         try:
             page = browser.new_page(viewport={"width": 1280, "height": 900})
             page.goto(url)

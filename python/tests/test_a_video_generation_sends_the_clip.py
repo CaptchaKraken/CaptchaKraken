@@ -152,10 +152,11 @@ def test_a_pinned_prompts_file_takes_its_input_from_the_generation(registry, mon
     assert ps.version == "3" and ps.sends_video and ps.video_prompt() == "overridden"
 
 
-def test_the_managed_server_reads_the_clip_as_sent():
-    """The server the client starts must take one video and keep every frame at the rate it was cut at."""
+def test_the_managed_server_reads_the_clip_as_sent(monkeypatch):
+    """The legacy chat server must take one video and keep every frame at the rate it was cut at."""
     from captchakraken import server_manager
 
+    monkeypatch.setenv("CAPTCHA_LORA_ADAPTER", "CaptchaKraken/CaptchaKraken-Lora-v1.2")
     cmd = server_manager.build_serve_command()
     flags = dict(zip(cmd, cmd[1:]))
     assert json.loads(flags["--media-io-kwargs"]) == clipvideo.media_io_kwargs()

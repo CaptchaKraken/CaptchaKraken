@@ -9,8 +9,8 @@
 
 <p align="center">
   <b>A captcha solver for browser automation.</b><br>
-  Give it a page — it finds the captcha, reads the puzzle with a fine-tuned
-  <b>Qwen3.5-9B</b> vision model, and clicks through to a token.<br>
+  Give it a page — it finds the captcha, reads the puzzle with the v2 pointer
+  model, and clicks through to a token.<br>
   Run the model on <b>your own hardware</b>, or call the <b>hosted API</b> and
   run nothing at all.
 </p>
@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/captchakraken"><img src="https://img.shields.io/npm/v/captchakraken?logo=npm&label=npm" alt="npm"></a>
   <a href="https://pypi.org/project/captchakraken/"><img src="https://img.shields.io/pypi/v/captchakraken?logo=pypi&logoColor=white&label=PyPI" alt="PyPI"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Source--Available-blue" alt="License: Source-Available"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-LGPL--3.0-blue" alt="License: LGPL-3.0-only"></a>
   <a href="https://github.com/CaptchaKraken/CaptchaKraken/actions/workflows/ci.yml"><img src="https://github.com/CaptchaKraken/CaptchaKraken/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
@@ -47,7 +47,7 @@
 Nine puzzle types, each driven on the vendor's own **public demo page**
 through the hosted API, with every attempt scored. These clips also run on
 [captchakraken.com](https://captchakraken.com) — recorded 2026-08-19 against
-**captcha-v12**, the adapter the hosted API serves today.
+**captcha-v12**, the legacy adapter used for these historical measurements.
 
 Three things worth knowing before you read the numbers:
 
@@ -157,9 +157,9 @@ changes, so you can switch later by editing one variable.
 
 | | ☁️ **Hosted API** | 🖥️ **Self-hosted** |
 |---|---|---|
-| You need | Nothing | 11 GB+ of VRAM or Apple unified memory |
-| Takes | ~1 minute | ~20 minutes (model download) |
-| Runs | **Twilight v1.2** on our fleet, served for you | The same weights, on your card |
+| You need | Nothing | 8 GB+ of free CUDA VRAM |
+| Takes | ~1 minute | One command plus the model download |
+| Runs | **Midnight V2 4B Q4** on our fleet | The same weights, on your card |
 | Cost | $0.30 per 1,000 image responses. Checkbox and Turnstile are free. | Your electricity |
 | Screenshots | Sent to our gateway | Never leave your machine |
 
@@ -197,8 +197,8 @@ stubborn captcha cannot run up an unbounded bill.
 
 ### Option 2 — Self-host
 
-One command. It checks your GPU or Apple memory, picks a model size that fits,
-downloads it, and writes a config file:
+One command installs the v2 pointer server and downloads **Midnight V2 4B Q4**
+by default, together with its element detector:
 
 ```bash
 git clone https://github.com/CaptchaKraken/CaptchaKraken
@@ -207,21 +207,15 @@ cd CaptchaKraken
 source captchakraken.env
 ```
 
-| Your memory | What it installs |
-|---|---|
-| **22 GB+** | 8-bit base (~14 GB) — best accuracy |
-| **11–22 GB** | 4-bit base (~6 GB) — lighter |
-| **Under 11 GB** | Stops and explains your options |
-
-**You never start a server.** vLLM starts by itself on your first solve and
-stays up. Hardware notes, server commands, and updating:
+Use a CUDA GPU with at least **8 GB of free VRAM**. Choose the bf16 checkpoint
+with `./setup.sh --quant bf16`. The server starts automatically on the first
+solve and stays up. Hardware notes, server commands, and updating:
 **[docs/self-hosting.md](./docs/self-hosting.md)**.
 
-> `setup.sh` installs a **LoRA adapter**, which needs vLLM. If you use another
-> runtime — or just want one file and no adapter flags — serve the merged
-> **Sunlight v1.2** (4-bit) or **Twilight v1.2** (8-bit) builds instead. On
-> **Ollama**, or with no GPU at all, take the **GGUF** build. All are public.
-> See [The models](#the-models).
+> v2 uses a merged pointer model and `/v1/pointer`, not the older chat LoRA
+> protocol. GGUF weights are published for advanced llama.cpp integrations;
+> stock Ollama cannot evaluate v2's external pointer heads. See
+> [The models](#the-models).
 
 **Already run your own vLLM server?** Point at it and skip all of the above. A
 non-local URL is never auto-started or managed for you:
@@ -343,7 +337,7 @@ set, so they are the likeliest to move.
 that puzzle driven on the vendor's own public demo page through the hosted API,
 with every attempt scored — counts, not percentages, and a median solve time
 computed from the run rather than from the footage. Recorded 2026-08-19 against
-`captcha-v12`, the adapter the hosted API serves today.
+`captcha-v12`, the legacy adapter used for these historical measurements.
 
 That is deliberately the *end-to-end* number: detect, read, click, verify, and
 the vendor accepting. It is the one you can hold us to, because it is the one
@@ -385,82 +379,40 @@ accuracy: **[docs/performance.md](./docs/performance.md)**.
 
 ## The models
 
-Two public releases. Within each, the same weights in several shapes: the
-**LoRA adapter** (strongest, needs vLLM and two downloads), two **merged**
-builds that are one self-contained file any safetensors runtime will serve,
-and — for v1.2 — a **GGUF** build for Ollama, LM Studio and llama.cpp that
-needs no vLLM
-and no GPU.
+### v2 — current
 
-### v1.2 — current
+The v2 architecture combines an element detector with a vision-language pointer
+model. The server owns the fixed prompt and exposes `POST /v1/pointer`; clients
+send a board and receive points, paths, text, or a no-answer decision.
 
-**Covers every vendor we solve**: 44 puzzle types across ten vendors, among
-them reCAPTCHA, GeeTest, NetEase Yidun, BotDetect, MTCaptcha, Yandex, Tencent,
-Lemin and Prosopo — and it is the first generation to handle **animated
-challenges** and **typed text**. Prompt generation 2; needs `captchakraken >= 2.5.0`.
+| Family | Parameters | Formats |
+|---|---|---|
+| **Sunlight V2** | 0.8B | bf16, Q4, LoRA, GGUF |
+| **Twilight V2** | 2B | bf16, LoRA, GGUF |
+| **Midnight V2** | 4B | bf16, Q4, LoRA, GGUF |
 
-| | Precision | Size | Min VRAM | Weights |
-|---|---|---|---|---|
-| **LoRA adapter** | bf16 on a stock base | ~0.4 GB + base | depends on base | [`CaptchaKraken-Lora-v1.2`](https://huggingface.co/CaptchaKraken/CaptchaKraken-Lora-v1.2) |
-| 🟦 **Twilight** | 8-bit (FP8) | 13 GB | ~22 GB | [`Twilight-v1.2-FP8`](https://huggingface.co/CaptchaKraken/Twilight-v1.2-FP8) |
-| 🟦 **Sunlight** | 4-bit (AWQ) | 11 GB | ~14 GB | [`Sunlight-v1.2-AWQ-4bit`](https://huggingface.co/CaptchaKraken/Sunlight-v1.2-AWQ-4bit) |
-| 🟩 **GGUF** | 4-bit / 8-bit / F16 | 5.6–17.9 GB | none — CPU works | [`CaptchaKraken-v1.2-GGUF`](https://huggingface.co/CaptchaKraken/CaptchaKraken-v1.2-GGUF) |
+Every repository is in the [CaptchaKraken v2 collection](https://huggingface.co/collections/CaptchaKraken/captchakraken-v2).
+The default for both self-hosting and the hosted API is **Midnight V2 4B Q4**.
+The separate [CNN element detectors](https://huggingface.co/CaptchaKraken/CaptchaKrakenV2-CNN-large)
+are included in the same collection.
 
-All of them are **Qwen3.5-9B** — the adapter, and the builds made from it.
+`./setup.sh` installs the merged Q4 model, its pointer heads, and the detector.
+The LoRA repositories are for further training. GGUF repositories include the
+vision projector and pointer heads for custom llama.cpp integrations; stock
+Ollama and `llama-server` alone cannot evaluate those heads and are not a
+supported CaptchaKraken server.
 
-The GGUF repo holds every quantisation plus `mmproj-F16.gguf`, the vision half
-of the model. **It is required**: without it a runtime loads a text-only model
-that answers without ever seeing the puzzle. See
-[Self-hosting → GGUF](./docs/self-hosting.md#gguf-for-ollama-and-llamacpp).
-
-`./setup.sh` installs the LoRA adapter. **Twilight v1.2 is what the hosted API
-answers with** — the same LoRA on the same base, merged.
-
-### v1.1 — previous
-
-**Image-grid puzzles only.** Not "worse at" everything else — it was
-never shown it, and will not attempt a GeeTest slider or a typed-text captcha
-at all. Prompt generation 1. Still published and supported; take it if that is
-all you face and you want the smaller stack.
-
-| | Precision | Size | Min VRAM | Weights |
-|---|---|---|---|---|
-| **LoRA adapter** | bf16 on a stock base | ~0.4 GB + base | depends on base | [`CaptchaKrakenV1_Lora`](https://huggingface.co/CaptchaKraken/CaptchaKrakenV1_Lora) |
-| 🟦 **Twilight** | 8-bit (FP8) | ~14 GB | ~22 GB | [`Twilight-FP8`](https://huggingface.co/CaptchaKraken/Twilight-FP8) |
-| 🟦 **Sunlight** | 4-bit (AWQ) | ~9 GB | ~11 GB | [`Sunlight-AWQ-4bit`](https://huggingface.co/CaptchaKraken/Sunlight-AWQ-4bit) |
-
-### ⬛ Abyss — what the hosted API serves, never downloadable
-
-**Serving now, to every hosted account.** It shares the public models' base —
-Qwen3.5-9B — but it is not a bigger quantisation of them and nothing about its
-VRAM follows from theirs: it is a **routed mixture of specialist adapters**,
-one each for grids, pixel-precision work, animation and text, chosen per
-request by the shape of the puzzle. Trained against the failures of the open
-weights, and **hosted-only**. Every puzzle the open model gets wrong on the held-out set is a
-labelled example of a weakness, and Abyss is trained specifically to close
-them, starting with the non-grid click and drag puzzles. Keeping it on our own fleet
-is what lets it keep learning from production failures without shipping a
-customer's puzzle set to everyone who runs `hf download`.
-
-**It is what the hosted API answers with, and there is nothing to download.**
-The current client names an Abyss expert on every request to our endpoint; an
-older client, or a request that names no model, is answered by Twilight v1.2,
-because its prompts belong to that generation — never a quiet substitution the
-other way, so you always know which model answered. No weights are published for it, and no
-accuracy figures are either: every number on this page is Twilight v1.2's. Open
-an issue to ask about a licence.
-
-Which one you want:
+Earlier chat-completion releases remain registered for existing pinned clients.
+They use a different prompt protocol and cannot serve a v2 client.
 
 | If | Use |
 |---|---|
 | You have no GPU | the [hosted API](./docs/hosted-api.md) |
-| You want the best open weights, and run vLLM | the **v1.2 LoRA adapter** — `./setup.sh` |
-| You want one file and the simplest serve, 22 GB+ | **Twilight v1.2** |
-| You want one file and the simplest serve, 14–22 GB | **Sunlight v1.2** |
-| You only face image-grid captchas and want the older, smaller stack | **v1.1** |
+| You want the supported one-command setup | **Midnight V2 4B Q4** — `./setup.sh` |
+| You want full precision | `./setup.sh --quant bf16` |
+| You are building a custom llama.cpp runtime | a **v2 GGUF** repository |
 
-Serving details for every option: **[docs/self-hosting.md](./docs/self-hosting.md)**.
+Serving details: **[docs/self-hosting.md](./docs/self-hosting.md)**.
 
 ---
 
@@ -468,37 +420,16 @@ Serving details for every option: **[docs/self-hosting.md](./docs/self-hosting.m
 
 ### What a solve actually looks like
 
-One inference round. The screenshot goes up, cell numbers come back — that is
-the whole protocol, and it is why anything that speaks the OpenAI
-chat-completions API can drive this.
+One inference round sends a board to `POST /v1/pointer`. The server owns the
+prompt, runs the detector and pointer heads, and returns an action plan:
 
-Every grid request carries the screenshot **with the cell numbers drawn on it**
-by `get_numbered_grid_overlay` — see the note under Accuracy. The model reads
-those labels; it does not infer a numbering.
-
-**reCAPTCHA 3×3** — nine separate photographs, pick the matching ones:
-
-```jsonc
-// prompt (abbreviated) ────────────────────────────────────────────────
-"Solve the captcha grid by choosing the cell numbers that match the
- description from the captcha image prompt.
-
- Grid: 3x3 (9 cells)
- Hint: Separate images. Select only clear matches.
- ...
- Return JSON Array: [list of cell numbers (1-9)]"
-
-// response ────────────────────────────────────────────────────────────
-[2, 8, 9]
-// ground truth [2, 8, 9] ✓   1,796 ms   336 prompt / 10 completion tokens
+```json
+{"action": "click", "points": [[375, 262], [625, 262]]}
 ```
 
-**reCAPTCHA 4×4** — one large image cut into sixteen tiles, "select ALL parts":
-
-```jsonc
-[5, 9, 12, 16]
-// ground truth [5, 9, 12, 16] ✓   1,385 ms   341 prompt / 15 completion tokens
-```
+The response also includes the detected elements and the board dimensions.
+Grids and interactive elements carry numbers drawn on the image so the client
+can connect each point to the element it belongs to.
 
 The browser driver wraps this: it finds the grid, converts cell numbers into
 click coordinates, clicks, waits for tiles to refresh, and re-solves until the
@@ -580,12 +511,11 @@ Most of the detail lives in the docs hub — start at **[docs/](./docs/README.md
 - 🟢 **Shipped** — the **hosted API** (`api.captchakraken.com`, self-serve
   signup), a mid-inference **freshness guard** (never act on a stale frame),
   and a one-command **`captchakraken fetch`** updater.
-- 🟢 **Shipped** — **v1.2**: every vendor we solve (44 puzzle types across 10),
-  animated challenges, typed text — as a LoRA and as **Sunlight** / **Twilight**
-  merges, all public on [HuggingFace](https://huggingface.co/CaptchaKraken).
-- 🟢 **Shipped** — **Abyss**, hosted-only: what the hosted API serves the current
-  client, never downloadable. An older client, or a request that names no model,
-  still gets **Twilight v1.2**.
+- 🟢 **Shipped** — **v2**: the CNN element detector and pointer architecture,
+  one-command vLLM hosting, and public Sunlight 0.8B, Twilight 2B, and Midnight
+  4B weights in the [v2 collection](https://huggingface.co/collections/CaptchaKraken/captchakraken-v2).
+- 🟢 **Shipped** — **Midnight V2 4B Q4** as the default for both self-hosting
+  and the hosted API.
 - ⚪ **Planned** — 🎯 higher accuracy on the **freehand drag and path puzzles**
   (connect-the-path and the numbered-line / missing-piece drags), which are the
   families the model is least reliable on. Every family we ship is already
@@ -600,22 +530,12 @@ these as they ship.
 
 ## License
 
-Source-available under the **CaptchaKraken Source-Available License v1.1** — see
-**[LICENSE](./LICENSE)** (plain-English: **[docs/licensing.md](./docs/licensing.md)**).
-
-- ✅ **Build _with_ it** — scrapers, data pipelines, QA tooling: commercial use is
-  fine when captcha solving is an internal, enabling component.
-- ✅ **Use it with any browser you like** — Camoufox, Puppeteer, Playwright, any
-  stealth browser. Running the solver against your own automation is unrestricted.
-- ⛔ **Don't sell _the solve_** — no captcha-solving-as-a-service, no thin wrappers
-  (browser extensions, hosted endpoints, CLIs) whose main purpose is solving, and
-  no relaying the model's outputs through a paid solving API.
-- ⛔ **Don't _ship_ the solve** — you may not bundle, preinstall, or advertise this
-  as a built-in captcha feature of a stealth browser, antidetect/profile manager,
-  or automation platform you distribute to other people. Using it with one is
-  fine; shipping it as part of one needs a license.
-
-For otherwise-prohibited uses, open an issue about a commercial license.
+CaptchaKraken and all its models are **LGPL-3.0-only** — see
+**[LICENSE](./LICENSE)**, **[COPYING](./COPYING)**, and the plain-English
+**[licensing guide](./docs/licensing.md)**. Commercial use, modification, and
+redistribution are permitted under LGPLv3, including use in browsers, automation
+products, and hosted APIs. Distributed modifications to CaptchaKraken itself must
+remain available under LGPLv3.
 
 ---
 

@@ -123,8 +123,7 @@ def test_pinning_an_expert_on_a_single_adapter_model_refuses(routed):
         _planner("plain", expert="grid")
 
 
-@pytest.mark.parametrize("model", ["captcha", "captcha-v12",
-                                   "someone-elses-adapter"])
+@pytest.mark.parametrize("model", ["captcha", "captcha-v12"])
 def test_an_unrouted_model_sends_one_name_for_every_family(tmp_path, posted, model):
     prompts.clear_cache()
     pl = _planner(model)

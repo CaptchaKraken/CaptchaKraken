@@ -50,7 +50,8 @@ def test_a_small_image_is_upscaled_to_the_training_floor(tmp_path, captured):
     Image.new("RGB", (277, 285), "white").save(small)
     assert 277 * 285 < prompts.DEFAULT_PIXEL_BUDGET.minimum, "fixture must start below the floor"
 
-    P.ActionPlanner(api_key="k", base_url="http://x/v1")._chat_with_images(
+    P.ActionPlanner(api_key="k", base_url="http://x/v1",
+                    model="CaptchaKraken/CaptchaKraken-Lora-v1.2")._chat_with_images(
         "prompt", [str(small)])
 
     (sent,) = _sent_images(captured["payload"])

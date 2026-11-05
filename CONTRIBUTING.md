@@ -315,6 +315,5 @@ permanent supply-chain surface.
   driven; these are the ones where the model is least reliable.
 - Smaller / faster quantizations so lower-VRAM hardware can self-host.
 
-Questions? Open an issue. Please don't open PRs that add a paid captcha-solving
-API or thin wrapper — those are outside what the license permits (see
-[LICENSE](LICENSE) §3).
+Questions? Open an issue. CaptchaKraken is licensed under LGPL-3.0-only; keep
+license and copyright notices intact.

@@ -68,4 +68,3 @@ test('vendor hint, retry mode and text mode still reach the CLI', () => {
   assert.ok(args.includes('--text-mode'));
   assert.ok(args.includes('captcha-v12'));
 });
-

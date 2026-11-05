@@ -272,7 +272,8 @@
     ],
     "CAPTCHA_LORA_NAME": [
       "js/src/solver.ts",
-      "python/src/captchakraken/config.py"
+      "python/src/captchakraken/config.py",
+      "python/src/captchakraken/pointer/server.py"
     ],
     "CAPTCHA_LORA_REVISION": [
       "python/src/captchakraken/config.py"
@@ -285,6 +286,9 @@
     ],
     "CAPTCHA_PIXEL_BOX_HALF": [
       "python/src/captchakraken/solver.py"
+    ],
+    "CAPTCHA_POINTER_HOST": [
+      "python/src/captchakraken/server_manager.py"
     ],
     "CAPTCHA_PROMPTS_FILE": [
       "python/src/captchakraken/prompts.py"
@@ -311,7 +315,8 @@
     ],
     "VLLM_API_KEY": [
       "js/src/solver.ts",
-      "python/src/captchakraken/config.py"
+      "python/src/captchakraken/config.py",
+      "python/src/captchakraken/pointer/server.py"
     ],
     "VLLM_BASE_URL": [
       "js/src/solver.ts",
@@ -337,7 +342,7 @@
     ]
   },
   "model_resolution": {
-    "latest": "CaptchaKraken/CaptchaKraken-Lora-v1.2",
+    "latest": "CaptchaKraken/MidnightV2-4B-q4",
     "registered_models": [
       "CaptchaKraken/Abyss",
       "CaptchaKraken/Abyss-27B",
@@ -349,6 +354,8 @@
       "CaptchaKraken/CaptchaKraken-v1.2-GGUF",
       "CaptchaKraken/CaptchaKrakenV1_Lora",
       "CaptchaKraken/CaptchaKraken_v1.1",
+      "CaptchaKraken/MidnightV2-4B",
+      "CaptchaKraken/MidnightV2-4B-q4",
       "CaptchaKraken/Sunlight-AWQ-4bit",
       "CaptchaKraken/Sunlight-v1.2-AWQ-4bit",
       "CaptchaKraken/Twilight-FP8",

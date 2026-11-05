@@ -65,6 +65,9 @@ def _model_class():
                     # A real prompt without its markers still fails in Positions.
                     out.append(torch.zeros(L.PACKED + TRAILER, device=h.device))
                     continue
+                if h.shape[0] != ids.shape[0]:
+                    raise RuntimeError(f"{h.shape[0]} hidden states for a {ids.shape[0]}-token prompt: "
+                                       "the heads need them all (is prefix caching on?)")
                 pos = Positions(ids, m.pointer_token_ids)
                 v = m.pointer_heads.decide(h, pos, m.language_model.lm_head.weight)
                 out.append(torch.cat([v, torch.tensor([float(pos.per_moment), float(pos.n_moments)],

@@ -71,13 +71,14 @@ answers with a frame number the driver then waits for on screen.
 | `CONTRIBUTING.md` | The rules for anyone — agent or human — changing this code: general rules, dev setup, the gates, and how PRs land. |
 | `contract.json` | The recorded public surface of both ports: exports, signatures, config keys, and the MCP tools' inputs. A new divergence between the ports fails the build; regenerate with `CONTRACT_WRITE=1 npm test` in `js/` and commit the diff. |
 | `FILE_PURPOSES.md` | This file. |
-| `LICENSE` | The CaptchaKraken Source-Available License v1.1. Copied verbatim into each published package. |
+| `LICENSE` | GNU Lesser General Public License v3.0, copied verbatim into each published package. |
+| `COPYING` | GNU General Public License v3.0, whose terms LGPLv3 incorporates. |
 | `package.json` | **Repository tooling only — not the published package.** `private: true`, published nowhere, and the reason it exists is that repomix and the codebase-map gate need somewhere to live that is not one of the three shipped manifests. `npm i captchakraken` installs `js/`; `pip install captchakraken` installs `python/`. |
 | `package-lock.json` | The exact tooling tree for that root manifest, so `npm ci` at the root resolves what a developer resolved. |
 | `repomix.config.json` | What goes into `repomix-output.md`: the source of all three ports, comments stripped, `.gitignore` honoured so no build output can reach the map. |
 | `README.md` | The landing page: what it is, the demo clips and their counts, install, quickstart, and where the docs are. |
 | `TRIBAL_KNOWLEDGE.md` | The decisions taken in this repo and why they were taken. |
-| `setup.sh` | One command to self-host: detect accelerator memory, pick a quantization that fits, install `captchakraken[serve]` into `python/.venv`, download the base model and adapter, and write a sourceable `captchakraken.env`. |
+| `setup.sh` | One command to self-host: install the tested vLLM stack, download Midnight V2 4B Q4 and its detector, and write a sourceable `captchakraken.env`. |
 
 ## `.github/`
 
@@ -323,6 +324,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_old_config_names_still_work.py` | A config written for an older release still loads: a renamed option is read under its new name, retired ones are accepted. |
 | `python/tests/test_the_offset_head_learns.py` | The point offset head learns from hidden states at the base model's scale instead of saturating on its first step. |
 | `python/tests/test_the_pointer_reads_its_answer_from_one_prefill.py` | The heads find their 46 questions and the video moments in one prompt, and the packed decision round-trips. |
+| `python/tests/test_the_pointer_server_is_a_managed_endpoint.py` | The default local server is the Q4 pointer endpoint, with an open health check and authenticated model listing. |
 | `python/tests/test_earlier_screens_are_context_before_the_board.py` | A pointer request may carry a puzzle's earlier screens: they go before the board, oldest first, as context, and points are read off the board alone. |
 | `python/tests/test_every_captcha_is_asked_the_same_prompt.py` | Every captcha is asked one fixed prompt with its board after it; a video's elements keep one number across frames; an element number is read from what lies under each point. |
 | `python/tests/test_a_blank_board_is_not_photographed.py` | The load gate in front of every inference screenshot, and the fences that stop it stalling a legitimately sparse puzzle. |

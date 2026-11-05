@@ -5,13 +5,9 @@ build-backend = "hatchling.build"
 [project]
 name = "captchakraken"
 version = "4.0.0"
-description = "Captcha-solving engine and CLI: CPU element detection plus a fine-tuned Qwen3.5-9B vision model, for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
+description = "Captcha-solving engine and CLI: a v2 pointer model and CNN element detector for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"
-# Source-available, NOT GPL. The CaptchaKraken Source-Available License permits
-# commercial use as an internal component but prohibits selling the solve itself,
-# thin-wrapper resale, and bundling it into a stealth browser someone else ships
-# — see LICENSE. (GPL-3.0 would wrongly permit all three.)
 license = { file = "LICENSE" }
 authors = [{ name = "Jake Writer" }]
 keywords = [
@@ -31,7 +27,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Image Recognition",
   "Topic :: Internet :: WWW/HTTP :: Browsers",
   "Topic :: Software Development :: Testing",
-  "License :: Other/Proprietary License",
+  "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
   "Typing :: Typed",
 ]
 
