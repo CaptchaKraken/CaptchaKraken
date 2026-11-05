@@ -13,7 +13,6 @@ from virtual_clock import install
 
 
 def _burst(monkeypatch, screen_for_frame):
-    import cv2
     import numpy as np
 
     clock = install(monkeypatch, page_solver)
@@ -27,7 +26,7 @@ def _burst(monkeypatch, screen_for_frame):
         Path(path).write_bytes(b"screen-%d" % screen_for_frame(frame["n"]) + b"\x00" * 64)
 
     monkeypatch.setattr(solver, "_screenshot", fake_shot)
-    monkeypatch.setattr(cv2, "imread", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
+    monkeypatch.setattr("captchakraken.keyframes.read_frame", lambda p: np.zeros((4, 4, 3), dtype=np.uint8))
     _frames, order, moved, _ms, _cycled = solver._burst(object())
     return order, moved
 

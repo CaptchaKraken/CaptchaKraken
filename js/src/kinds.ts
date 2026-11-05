@@ -3,7 +3,7 @@
  * `as const` objects rather than `enum`: a literal off the wire (`'click'`) type-checks against them, an `enum` would not.
  */
 
-/** `puzzleSource` everywhere. UNKNOWN must stay permissive: GeeTest and Prosopo report it, and so does the offline grader. */
+/** `puzzleSource` everywhere. UNKNOWN must stay permissive: the CLI, scripts and the offline grader report it. */
 export const Vendor = {
   HCAPTCHA: 'hcaptcha',
   RECAPTCHA: 'recaptcha',
@@ -74,7 +74,9 @@ export const Phase = {
   GRID_LOAD: 'grid-load',
   FADE_WAIT: 'fade-wait',
   BOARD_PAINT: 'board-paint',
-  HCAPTCHA_IMAGES: 'hcaptcha-images',
+  BOARD_IMAGES: 'board-images',
+  /** @deprecated Use `BOARD_IMAGES`. */
+  HCAPTCHA_IMAGES: 'board-images',
   AWAIT_NEXT_ROUND: 'await-next-round',
   AWAIT_VERDICT: 'await-verdict',
   POST_SUBMIT_DELAY: 'post-submit-delay',

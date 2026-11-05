@@ -8,7 +8,6 @@ is performed by the same code.
 import base64
 import json
 
-import cv2
 import numpy as np
 import pytest
 from PIL import Image
@@ -16,6 +15,7 @@ from PIL import Image
 from captchakraken import prompts
 from captchakraken import planner as P
 from captchakraken import solver as S
+from captchakraken.keyframes import write_frame
 from captchakraken.solver import CaptchaSolver, cut_recording
 
 REGISTRY = {
@@ -63,8 +63,8 @@ def grid_board(path):
     im = np.full((400, 400, 3), 255, np.uint8)
     for r in range(3):
         for c in range(3):
-            cv2.rectangle(im, (20 + 120 * c, 20 + 120 * r), (130 + 120 * c, 130 + 120 * r), (60, 120, 40), -1)
-    cv2.imwrite(str(path), im)
+            im[20 + 120 * r:131 + 120 * r, 20 + 120 * c:131 + 120 * c] = (60, 120, 40)
+    write_frame(path, im)
     return str(path)
 
 
@@ -107,7 +107,7 @@ def test_a_video_goes_as_its_cut_frames_and_its_moment_comes_back(registry, wire
     frames = []
     for i in range(30):
         f = np.full((120, 160, 3), 255, np.uint8)
-        cv2.rectangle(f, (5 + 4 * i, 40), (25 + 4 * i, 60), (0, 0, 200), -1)
+        f[40:61, 5 + 4 * i:26 + 4 * i] = (0, 0, 200)
         frames.append(f)
     wire["answer"] = {"t": 0.9, "action": "click", "points": [[500, 400]]}
     rec = cut_recording(frames, 10.0, str(tmp_path))

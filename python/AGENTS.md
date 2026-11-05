@@ -1,6 +1,6 @@
 # captchakraken (PyPI)
 
-The Python **engine and CLI**: OpenCV grid detection plus a planner that asks a
+The Python **engine and CLI**: CPU element detection plus a planner that asks a
 fine-tuned vision model what to do, and a page driver that performs it in a
 Playwright browser.
 
@@ -64,7 +64,7 @@ captchakraken path/to/captcha.png    # prints a JSON click plan
 
 Other CLI modes, all printing JSON: `captchakraken server start|stop|status|run`
 manages a local vLLM server, `captchakraken fetch` updates weights and the
-serving stack together, and the OpenCV tool calls (`find-grid`, `find-checkbox`,
+serving stack together, and the detector tool calls (`find-grid`, `find-checkbox`,
 `get-numbered-grid`, `detect-selected`, …) are exposed one per subcommand. The
 module docstring of `captchakraken/cli.py` lists every mode with its arguments.
 

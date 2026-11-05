@@ -3,7 +3,6 @@ import type { PromptFamily, RetryMode, Vendor } from './kinds.js';
 // The key travels in env, never argv: argv is world-readable on Linux via /proc/<pid>/cmdline and `ps`. See TRIBAL_KNOWLEDGE.md.
 export const API_KEY_ENV = 'CAPTCHA_KRAKEN_API_KEY';
 
-export const RESAMPLE_LEVEL_ENV = 'CAPTCHA_RESAMPLE_LEVEL';
 
 export const API_PROVIDER = 'captchaKrakenApi';
 
@@ -34,18 +33,8 @@ export function buildSolveArgs(invocation: SolveInvocation): string[] {
   return args;
 }
 
-/** The resample LEVEL travels, not a temperature: the schedule lives once in planner.RESAMPLE_TEMPERATURES, and a fresh CLI process cannot know the round count. */
-export function solveEnv(
-  base: NodeJS.ProcessEnv,
-  apiKey?: string,
-  resampleLevel?: number,
-): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = apiKey ? { ...base, [API_KEY_ENV]: apiKey } : { ...base };
-
-  if (resampleLevel && resampleLevel > 0) {
-    out[RESAMPLE_LEVEL_ENV] = String(resampleLevel);
-  }
-  return out;
+export function solveEnv(base: NodeJS.ProcessEnv, apiKey?: string): NodeJS.ProcessEnv {
+  return apiKey ? { ...base, [API_KEY_ENV]: apiKey } : { ...base };
 }
 
 export function redactCommand(command: string, apiKey?: string): string {

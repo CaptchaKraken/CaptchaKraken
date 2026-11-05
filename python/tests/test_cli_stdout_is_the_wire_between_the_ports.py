@@ -2,16 +2,16 @@
 
 import json
 
-import cv2
 import numpy as np
 import pytest
 
 from captchakraken import cli
+from captchakraken.keyframes import write_frame
 
 
 def _png(path, value=255, size=(80, 60)):
     img = np.full((size[1], size[0], 3), value, dtype=np.uint8)
-    cv2.imwrite(str(path), img)
+    write_frame(path, img)
     return str(path)
 
 

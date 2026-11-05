@@ -31,7 +31,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 
-# Core = the lightweight CLIENT: OpenCV grid detection + the HTTP planner that
+# Core = the lightweight CLIENT: CPU element detection + the HTTP planner that
 # talks to a vLLM server (local or remote). This is all you need to SOLVE
 # captchas against an existing endpoint. The heavy serving stack (vllm/torch)
 # is deliberately NOT here — see the `serve` extra.
@@ -51,10 +51,22 @@ dependencies = [
   "pydantic==2.13.5",
   "pillow==13.0.0",
   # 2.3.x rather than 2.2.6 because `cursory` requires `numpy~=2.3.3` and the
-  # old pin was ours, not opencv's — opencv-python-headless asks only for
-  # `numpy>=2`. Moved deliberately as part of the major bump.
+  # old pin was ours. Moved deliberately as part of the major bump.
   "numpy==2.3.5",
-  "opencv-python-headless==5.0.0.93",
+  # Runs the element detector (find_grid, find_checkbox) on the CPU. Its
+  # wheels cover CPython 3.11-3.14 on Linux x86_64/aarch64, Windows and Apple
+  # silicon macOS; there is NO Intel-macOS wheel, so the client does not
+  # install there. Weights are fetched at first use, not shipped (detector.py).
+  "onnxruntime==1.31.1",
+  # The slide and hold trackers' image arithmetic: smoothing, morphology,
+  # labelling, distance transforms and FFT correlation. 1.17.1 is the newest
+  # release whose Requires-Python (>=3.11) covers the floor; 1.18 needs 3.12.
+  "scipy==1.17.1",
+  # Decodes the first frame of a video passed to `solve` (.mp4, .avi, .webm).
+  # 18.1.0 is the newest release whose wheels (cp311-abi3) install on the
+  # 3.11 floor; 19.x declares `Requires-Python >=3.12`. It has no runtime
+  # dependencies, so it does not constrain numpy.
+  "av==18.1.0",
   "requests==2.34.2",
   "python-dotenv==1.2.3",
   # The mouse. LGPL-3.0-or-later, used as an ordinary installed dependency and
@@ -67,12 +79,12 @@ dependencies = [
 [project.optional-dependencies]
 # Self-hosting: install this to RUN a local vLLM server (the setup script does
 # `pip install "captchakraken[serve]"`). Not needed to call a remote server.
-# torch is the version vllm 0.25.1 itself pins; any other value makes this
+# torch is the version vllm 0.29.0 itself pins; any other value makes this
 # extra unresolvable rather than merely different.
 serve = [
-  "vllm==0.25.1",
-  "torch==2.11.0",
-  "transformers==5.14.1",
+  "vllm==0.29.0",
+  "torch==2.13.0",
+  "transformers==5.17.0",
   "accelerate==1.15.0",
   "huggingface_hub==1.30.0",
 ]

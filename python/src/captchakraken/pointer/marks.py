@@ -15,10 +15,12 @@ here changes the model's input and needs a retrain.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Set, Tuple
 
 import numpy as np
 from PIL import Image
+
+from .elements import fill_holes
 
 _GLYPHS = {
     "0": ("01110", "10001", "10011", "10101", "11001", "10001", "01110"),
@@ -64,14 +66,59 @@ def tag_size(n: int) -> Tuple[int, int]:
     return d.shape[1] + 2 * PAD, d.shape[0] + 2 * PAD
 
 
+# Chain-code directions (dx, dy), counter-clockwise from east, as OpenCV's border follower numbers them.
+_STEPS = ((1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1))
+
+
+def _trace(m: np.ndarray, x0: int, y0: int) -> List[Tuple[int, int]]:
+    """The outer border that starts at (x0, y0), its component's first pixel in raster order.
+
+    Suzuki-Abe border following exactly as OpenCV's findContours walks it (CHAIN_APPROX_NONE): the drawn line
+    fills each diagonal step on one side, so the walk's direction and its revisits are part of the picture.
+    """
+    def lit(s: int, x: int, y: int) -> bool:
+        return bool(m[y + _STEPS[s][1], x + _STEPS[s][0]])
+
+    s = 4
+    while True:
+        s = (s - 1) & 7
+        if lit(s, x0, y0) or s == 4:
+            break
+    if not lit(s, x0, y0):
+        return [(x0, y0)]
+    second = (x0 + _STEPS[s][0], y0 + _STEPS[s][1])
+    pts: List[Tuple[int, int]] = []
+    x, y = x0, y0
+    while True:
+        s += 1
+        while not lit(s & 7, x, y):
+            s += 1
+        s &= 7
+        pts.append((x, y))
+        nxt = (x + _STEPS[s][0], y + _STEPS[s][1])
+        if nxt == (x0, y0) and (x, y) == second:
+            return pts
+        (x, y), s = nxt, (s + 4) & 7
+
+
 def outline(mask: Tuple[Tuple[int, int], np.ndarray]) -> List[np.ndarray]:
-    """The mask's outer contours, as (N, 2) int arrays of board pixels."""
-    import cv2
+    """The mask's outer contours, as (N, 2) int arrays of board pixels.
+
+    A hole's edge is not drawn, nor is anything inside a hole, so the holes are filled before tracing.
+    """
     (x, y), m = mask
     if not m.size or not m.any():
         return []
-    cs, _ = cv2.findContours(np.pad(m.astype(np.uint8), 1), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    return [c.reshape(-1, 2) + np.array([x - 1, y - 1]) for c in cs]
+    p = fill_holes(np.pad(m.astype(bool), 1))
+    seen: Set[Tuple[int, int]] = set()
+    cs = []
+    for row, col in np.argwhere(p[:, 1:] & ~p[:, :-1]):
+        start = (int(col) + 1, int(row))
+        if start not in seen:
+            c = _trace(p, *start)
+            seen.update(c)
+            cs.append(np.array(c) + np.array([x - 1, y - 1]))
+    return cs
 
 
 def _anchors(cs: Sequence[np.ndarray], tw: int, th: int) -> List[Tuple[int, int]]:

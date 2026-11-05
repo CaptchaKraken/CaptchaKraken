@@ -18,8 +18,7 @@ from captchakraken.page_solver import CaptchaSolveError, PageSolver, PageSolverC
 
 def _drive(replaces_board: bool, loops: int = 4):
     """Run the solve loop over a widget that never passes; returns the probe's arm state at each round's start."""
-    solver = PageSolver(config=PageSolverConfig(max_solve_loops=loops, post_solve_outcome_timeout_ms=1,
-                                                post_solve_delay_ms=1))
+    solver = PageSolver(config=PageSolverConfig(max_solve_loops=loops, post_solve_outcome_timeout_ms=1))
     solver._reset_animated_state()
     armed_at_round = []
 

@@ -282,7 +282,6 @@ class PromptSet:
     grid_template: Optional[str]
     video_template: Optional[str]
     text_template: Optional[str]
-    grid_by_type: Dict[str, str]
     source: str
     general: Optional[str] = None
     sends_video: bool = False
@@ -301,10 +300,7 @@ class PromptSet:
     def pixel_prompt(self) -> str:
         return self._family(self.action_prompt, "click-and-drag")
 
-    def grid_prompt(self, *, rows: int, cols: int, grid_hint: str = "",
-                    puzzle_type: Optional[str] = None) -> str:
-        if puzzle_type and puzzle_type in self.grid_by_type:
-            return self.grid_by_type[puzzle_type]
+    def grid_prompt(self, *, rows: int, cols: int, grid_hint: str = "") -> str:
         return self._family(self.grid_template, "grid").format(rows=rows, cols=cols,
                                                                total=rows * cols, grid_hint=grid_hint)
 
@@ -336,7 +332,6 @@ def builtin(version: str) -> Optional[PromptSet]:
         grid_template=spec.get("grid"),
         video_template=spec.get("video"),
         text_template=spec.get("text"),
-        grid_by_type={},
         source=f"built-in v{version}",
         general=spec.get("general"),
         sends_video=str(version) in VIDEO_GENERATIONS,
@@ -348,15 +343,12 @@ def _from_doc(doc: Dict[str, Any], source: str) -> PromptSet:
     version = str(doc.get("prompt_version", LATEST_PROMPT_VERSION))
     base = builtin(version) or builtin(LATEST_PROMPT_VERSION)
     templates = doc.get("templates") or {}
-    grid_by_type = {k.split("grid::", 1)[1]: v for k, v in templates.items()
-                    if k.startswith("grid::") and isinstance(v, str)}
     return PromptSet(
         version=version,
         action_prompt=templates.get("action_pixel") or base.action_prompt,
         grid_template=templates.get("grid") or base.grid_template,
         video_template=templates.get("video") or base.video_template,
         text_template=templates.get("text") or base.text_template,
-        grid_by_type=grid_by_type,
         source=source,
         general=templates.get("general") or base.general,
         # From the generation, never from the document: a template can be overridden, the way it is asked cannot.

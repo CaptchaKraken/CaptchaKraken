@@ -31,7 +31,6 @@ function driver(barren: number, videoSolveEnabled = true) {
     speculativeBurstEnabled: false,
     maxSolveLoops: 4,
     postSolveOutcomeTimeoutMs: 60,
-    postSolveDelayMs: 1,
     staleElementBackoffMs: 0,
     videoSolveEnabled,
   });

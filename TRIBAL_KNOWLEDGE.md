@@ -134,11 +134,9 @@ because the model reads those labels and was never trained to invent a numbering
 Skip the overlay and reCAPTCHA 4×4 scores zero without raising anything — it
 looks exactly like a broken model.
 
-**`find_grid` is pure OpenCV, with no model in it, and is the most heavily gated
-code in the repo.** Every grid solve rests on it, and each geometry gate exists
-because a specific false positive happened: a lattice whose gutters separated
-nothing, a shape no vendor ships, a footer counted as a row. Read the test named
-for the gate before changing one.
+**`find_grid` reads the element detector, not the pixels.** Every grid solve
+rests on the CNN's grid and cell boxes (`pointer/detector.py`); a board it
+misreads is fixed by training the detector, not by a geometry rule here.
 
 **One page carries every published number.** `docs/benchmarks.md` holds the
 end-to-end browser counts and the static-image rates, deliberately as counts
@@ -152,14 +150,11 @@ they drifted once: the runtime attribute said one release while the wheel on PyP
 said another, so every caller branching on it — and every bug report quoting it —
 named a version that had not been current for weeks.
 
-**Resampling is greedy-only, by measurement.** `RESAMPLE_TEMPERATURES` is
-`(0.0,)`. Trying `(0.0, 0.35, 0.7)` on repeated answers scored 0/5 against 4/5,
-and the median failed attempt cost 24.0 s against 13.9 s: making each re-ask
-differ resets the no-progress counter, so the attempt stops bailing at round 3.
-The level and seed plumbing stays for a network-refusal trigger. The driver
-sends the resample LEVEL, never a temperature, so the schedule lives in one
-place and the two ports cannot drift; the CLI is a fresh process per round and
-cannot know the round count.
+**Re-asks are greedy, by measurement.** Heating repeated answers to
+`(0.0, 0.35, 0.7)` scored 0/5 against 4/5, and the median failed attempt cost
+24.0 s against 13.9 s: making each re-ask differ resets the no-progress counter,
+so the attempt stops bailing at round 3. A repeated answer instead turns on
+`avoid_refused`, and the pointer answers with its likeliest other answer.
 
 **`BUILTIN_PROMPTS`, `AVAILABILITIES` and `PROMPT_FAMILIES` are pure literals,
 and stay strings even though `kinds.py` has the enums.** The training repo's
@@ -172,9 +167,9 @@ to that gate, and the gate going quiet is how prompt drift shipped on
 entry is the single `general` prompt: the puzzle's type is never named, and a
 generation-3 model is never routed by family, even if its registry entry
 declares `experts`. The driver still decides how the board is SHOWN — a grid
-that `find_grid`, `_grid_dims` and `_is_real_grid` accept is sent with its
+that `find_grid` and `_grid_dims` accept is sent with its
 cells numbered, anything else as the plain picture — because the model was
-trained on exactly what those three would number. Its `ids` name cells; when
+trained on exactly what those two would number. Its `ids` name cells; when
 they name none, the cells its points land in do.
 
 **An animated board on generation 3 is a video, and the answer names WHEN in
@@ -217,7 +212,7 @@ on a licensed model replaces a `RepositoryNotFoundError` that reads as "you are
 not logged in" with the truth, but doing the same to a private model would stop
 our own admin token from pulling weights it is entitled to.
 
-**`MIN_PIXELS` is a floor on area, not a resize.** On a 277x285 GeeTest board,
+**`DEFAULT_PIXEL_BUDGET` is a floor on area, not a resize.** On a 277x285 GeeTest board,
 predictions landed 80-105 px from the hand label at native size and 1-4 px once
 upscaled. The area is clamped rather than the dimensions because squashing the
 aspect moves every tile centre.
@@ -409,7 +404,12 @@ sleep.
 **Humanisation is an interface because two humanisers compose badly.**
 camoufox's `humanize` juggler re-humanises every `mouse.move()` it is handed,
 and running ours on top measured 82.1 s against 13.4 s on one GeeTest v4
-slider solve. A touch widget needs touch events: dispatching mousemove there is
+slider solve. `mouse` mode detects such a browser itself rather than asking the
+user to pick `none`, because nobody did: one 3 px step is timed against a
+zero-length move, which pays the same round trip, so a remote browser's latency
+is not read as humanisation. There is no page-visible probe to use instead, and
+a zero-length move alone does not tell (camoufox passes it straight through).
+A touch widget needs touch events: dispatching mousemove there is
 the wrong event type, the page's touch handlers never fire, and the report
 reads as a model that cannot solve mobile puzzles. Mode precedence is code,
 then env, then mouse, the opposite of the model-identity settings, because an
@@ -476,70 +476,10 @@ install` reads, and a test reads the real `npm pack` list.
 
 ## Grid detection
 
-Every constant in `find_grid.py` was measured on the real capture corpus, and
-the number now sits beside it. What follows is the reasoning that does not fit
-on a line.
-
-**The colour comb and the seal test are `find_grid`'s second cue.** The tracer
-is a local walk and loses a gutter whose neighbours are nearly its colour: on
-one capture, pure-white gutters at x=103/200/297 came back as 66/96/215. The
-comb asks whether a whole straight line is the gutter colour end to end; the
-seal asks whether every separator of a candidate lattice runs its full extent.
-Both only ever look for a colour the tracer already proved painted, so neither
-can conjure a lattice from a flat image. Measured over 1423 real grid captures:
-misses 15 to 3, end-to-end false positives 23 to 16. The comb wins on position
-only and takes its extent from the trace (it once reported a full-width 520 px
-gutter as a 43 px stub), and the page margin is dropped at the comb source or a
-3x3 is reported as a 4x3. `SEALED_FLANK_MIN_DE = 6.0` admits 86 geetest_v4_svg
-line-art boards that all die downstream in `_is_real_grid` by 0.31, so it is
-free on the false-positive side; at 8.0 two real sky-backed 4x4s (which measure
-6.x to 7.1) stayed undetected.
-
-**Noisy gutters: tolerances scale with the measured noise floor; they are not
-widened.** Bridging bad pixels took the fixtures from 3/20 to 10/20 but
-collapsed real reCAPTCHA 3x3 from 40/40 to 7/40. Flat wider thresholds of 10/8
-for `SEED_L`/`STEP_L` cost one pristine sample and 14/12 cost four. Scaling
-leaves a compositor-painted gutter (noise about 0) at exactly the old
-thresholds: 13/20 fixtures, corpus 144/144, false positives 6/355 unchanged.
-
-**Flank contrast is a mean over both sides, gated on the chosen grid only.**
-Under `min` the lowest true nine-photo grid scored 2.7 against false positives at
-9.0 and 7.2, so no cutoff existed; the mean gives 17.4 against 18.0 and 14.1.
-Applied as a per-line filter it removed the strays the off-lattice gate counts
-and false positives went 2, 4, 6. The probe distance scales with pitch because
-a fixed offset landed inside that grid's 13 px gutters and read gutter against
-gutter as zero contrast.
-
-**`_pick` takes the gutter colour from the cleanest comparable-support member
-of a cluster, not the longest trace.** On 2026-08-11 an ice-cream board kept a
-trace 11 px off the gutter on a watermark, colour std 2.80 against 0.55-0.80
-for the on-centre traces, which withheld the `CLEAN_GUTTER_STD` relaxation and
-failed a correct 3x3. Nearest-to-centre instead swapped a 0.00 trace for a 3.43
-one on a reCAPTCHA capture, so it is cleanliness among comparable support.
-
-**`_corroborate` estimates the pitch over gaps at least `MIN_CELL` wide but
-guards on the raw median.** Comb-reported footer bands took a 3x3's pitch from
-87 to 55.8, the bottom border corroborated, a 4x3 won and died on
-`_boxes_are_regular` with no fallback: 20/20 to 5/20 on one generator.
-Filtering before the guard instead skipped the perpendicular rescue and cost a
-reCAPTCHA 4x4 its fourth row (raw 34.5, filtered 80.9, perpendicular 97.0, and
-only the last is the cell).
-
-**Candidate scoring has three asymmetries, each from an incident.** The unused
-count is clamped at zero per axis, which is how a half-pitch 5x4 once outscored
-a 4x4; only sealed lines count as unused; the virtual-node refund applies to
-interior nodes only, because the true 4x4 on every sky-backed reCAPTCHA lost by
-about 470 without it and an extrapolated refund turned a correct 3x3 into a
-3x4. `UNSEALED_PENALTY` (700) must exceed `UNUSED_LINE_PENALTY` (400) or a sky
-belt outscores the true lattice. The off-lattice gate counts clusters with a
-20 px window because the plateau on the corpus is 17..23 (1091/1106 targets at
-2/458 false) and at 24 a textured drag puzzle becomes a false positive.
-
-**`MIN_IMAGE_AREA_COVERAGE` is 0.348 and deliberately not 0.33.** It was first
-named `MIN_GRID_COVERAGE`, which already existed, so the area check silently
-ran at 0.72 and detection went to 0/2210 across the corpus. 0.33 would also
-catch an observed video-keyframe false positive at 0.322 but leaves 5%
-headroom; the floor is measured over 2239 real grids.
+`find_grid` reads the CNN element detector's grid and cell boxes; it has no
+thresholds of its own beyond the lattice fallback for a board the detector
+under-reads (`LATTICE_MIN_FILLED`). The selection marks below are still pixel
+tests on the cells it returns.
 
 **The teal selected-badge detector requires white within 2 px of the teal
 hull.** Sky with a white pole in it satisfied the old test: 74 phantom
@@ -570,7 +510,7 @@ viewport, which no viewport capture can hold; an element merely off screen is
 scrolled in once, not per shot.
 
 **A checkbox is never a board.** It used to take the board round: the paint
-poll, the classifier's film and — when OpenCV missed the box on a half-drawn
+poll, the classifier's film and — when the detector missed the box on a half-drawn
 frame — an inference on the checkbox picture, which the model answered with a
 drag. The box is clicked through the DOM (`SELECTORS[v].box`), and found by
 `find_checkbox` on ONE capture only where the DOM cannot reach it (Turnstile's
@@ -670,8 +610,7 @@ that plays once and stops films like.
 
 **The camera does not stop when the answer is sent.** A burst can only show the
 model the screens that fell inside its window, and the answer it produces is
-identical next round by construction: sampling is greedy (`RESAMPLE_TEMPERATURES
-= (0.0,)`), so the same frames give the same answer. A board whose answer lived
+identical next round by construction: sampling is greedy, so the same frames give the same answer. A board whose answer lived
 on a screen the window missed therefore had no second chance — the stored plan
 was re-pressed until the no-progress fence tripped at round 3 of 6, with half
 the budget unspent. Measured live on 2026-09-15 against the vendors' own pages,
@@ -912,24 +851,6 @@ its parent did not choose is an upgrade rather than a pin, and this is the one
 package with no test suite to catch what it breaks. Re-check when the SDK
 releases.
 
-**A grid is a lattice, and the detector was only ever asked what was inside the
-cells.** `find_grid` traces separator lines "of any border colour and small
-tilt" and recovers the slant on its own, so a TILTED lattice is one of its
-legitimate outputs. No vendor ships one — every grid we solve is laid out with
-CSS, on the pixel — so that tolerance is headroom no true board needs and a
-photographic backdrop's own edges walk straight through it. `_is_real_grid`
-then passed the result, because every check it had asks about cell CONTENT
-(colour spread, the shared-background test that tells a sprite board from
-tiles) and a click puzzle drawn over a photograph answers all of them honestly.
-A grid answer is a LIST OF CELLS, so the mis-route does not read as a wrong
-answer; it reads as the driver pressing six things on a board whose answer is
-one press. The shape check now runs first and costs nothing — it needs no
-pixels. Measured over the real captures, six per family: every true grid the
-detector finds is regular to the pixel (25 detections, all 0.000) against 0.128
-for the false one, so the bar is a floor with a 2x margin rather than a tuned
-number. It is not zero only because an antialiased separator traced on a 100px
-cell can honestly land a pixel out.
-
 **Filming while the model is asked is only free if the camera stops first.**
 The speculative burst reads the still and records the widget at once, and the
 claim that makes that free is that the recording happens inside a wait the solve
@@ -1009,8 +930,8 @@ today, and the day it stops is the day the list goes blind, which is what the
 live check is for.
 
 **Every selector lives in one typed table, and the driver speaks locators.**
-`SELECTORS` (`selectors.ts` / `selectors.py`) is a `Record<Vendor, VendorSelectors>`
-with one row per vendor: hosts on the wire, challenge and checkbox iframes,
+`SELECTORS` (loaded from `captchakraken.config.json` by `selectors.ts` / `selectors.py`) is a
+`Record<Vendor, VendorSelectors>` with one row per vendor: hosts on the wire, challenge and checkbox iframes,
 inline widget shapes, the response field, the accepted and checked markers,
 submit controls, text inputs, slider handles and pieces. Detection, the solved
 test, the fresh-round test and the banner read are each one generic pass over
@@ -1053,7 +974,7 @@ WHAT IT COST, AND WHAT IT DID NOT. Move durations track the old model at the
 median (193 vs 197 ms over 30 px, 681 vs 708 over 1000) with a much longer tail
 — max 1354 ms against 819 — which is what real people look like and is the
 thing to watch against the per-board clock. Import is ~60 ms and the first call
-5 ms, against a numpy the client already loads for OpenCV, so the per-solve cost
+5 ms, against a numpy the client already loads, so the per-solve cost
 is noise. Touch uses the same recordings at 90 Hz; a tap adds a one-pixel contact
 wobble, because a motionless tap is a synthetic one.
 

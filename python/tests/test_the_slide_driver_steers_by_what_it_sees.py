@@ -7,8 +7,9 @@ generation-2 sourceless drag still lands with the handle found by one.
 
 from typing import Any, List, Optional, Tuple
 
-import cv2
+import numpy as np
 import pytest
+from PIL import Image
 from slide_boards import CarriedBoard, DiscBoard, JigsawBoard
 
 from captchakraken.action_types import DragAction, SlideAction
@@ -71,7 +72,8 @@ def _rig(board, scope: Any = None):
 
     def screenshot(_element: Any, path: str, **_kw: Any) -> None:
         shots.append(travel())
-        assert cv2.imwrite(path, board.render(travel()))
+        # The boards draw in BGR; a page screenshot is RGB.
+        Image.fromarray(np.ascontiguousarray(board.render(travel())[..., ::-1])).save(path)
 
     solver._screenshot = screenshot
     box = {"x": ORIGIN[0], "y": ORIGIN[1], "width": board.w / k, "height": board.h / k}

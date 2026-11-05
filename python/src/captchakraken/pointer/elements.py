@@ -126,14 +126,12 @@ def on_frame(tracks: Sequence[Dict], f: int) -> List[Optional[Dict]]:
 
 def scale(els: Sequence[Dict], fx: float, fy: float) -> List[Dict]:
     """Elements detected on one size of a board, moved onto another (fx, fy = new/old)."""
-    import cv2
     out = []
     for e in els:
         (x, y), m = e["mask"]
         x0, y0 = int(round(x * fx)), int(round(y * fy))
         w, h = max(1, int(round(m.shape[1] * fx))), max(1, int(round(m.shape[0] * fy)))
-        mm = (cv2.resize(m.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
-              if m.size else np.zeros((0, 0), bool))
+        mm = _nearest(m.astype(bool), w, h) if m.size else np.zeros((0, 0), bool)
         b = e["box"]
         out.append({**e, "box": [b[0] * fx, b[1] * fy, b[2] * fx, b[3] * fy], "mask": ((x0, y0), mm)})
     return out
@@ -142,16 +140,50 @@ def scale(els: Sequence[Dict], fx: float, fy: float) -> List[Dict]:
 def _solid(mask) -> Tuple[Tuple[int, int], np.ndarray]:
     """The mask with its enclosed holes filled (a ring's centre is ON the ring) and
     grown by EDGE_PX. An open gap (a chain's break) is not enclosed, so it stays out."""
-    import cv2
     (x, y), m = mask
-    m = np.pad(m.astype(np.uint8), EDGE_PX + 1)
-    filled = m.copy()
-    ff = np.zeros((m.shape[0] + 2, m.shape[1] + 2), np.uint8)
-    cv2.floodFill(filled, ff, (0, 0), 1)
-    m = m | (filled == 0)
-    k = np.ones((2 * EDGE_PX + 1, 2 * EDGE_PX + 1), np.uint8)
-    m = cv2.dilate(m.astype(np.uint8), k) > 0
+    m = _grow(fill_holes(np.pad(m.astype(bool), EDGE_PX + 1)), EDGE_PX)
     return (x - EDGE_PX - 1, y - EDGE_PX - 1), m
+
+
+def _nearest(m: np.ndarray, w: int, h: int) -> np.ndarray:
+    """`m` resized to (w, h) by nearest neighbour, sampling the pixels OpenCV's INTER_NEAREST does."""
+    def index(src: int, dst: int) -> np.ndarray:
+        return np.minimum(np.floor(np.arange(dst) * (1.0 / (dst / src))).astype(np.int64), src - 1)
+    return m[index(m.shape[0], h)][:, index(m.shape[1], w)]
+
+
+def _grow(m: np.ndarray, r: int) -> np.ndarray:
+    """`m` dilated by a (2r+1)-pixel square."""
+    win = np.lib.stride_tricks.sliding_window_view
+    p = win(np.pad(m, r), 2 * r + 1, axis=0).any(-1)
+    return win(p, 2 * r + 1, axis=1).any(-1)
+
+
+def _spread_along_rows(reached: np.ndarray, free: np.ndarray) -> np.ndarray:
+    """`reached` extended over every run of `free` pixels in a row that it touches."""
+    starts = free & ~np.pad(free, ((0, 0), (1, 0)))[:, :-1]
+    run = np.cumsum(starts).reshape(free.shape) * free
+    hit = np.zeros(int(run.max()) + 1, bool)
+    hit[run[reached & free]] = True
+    hit[0] = False
+    return hit[run]
+
+
+def fill_holes(m: np.ndarray) -> np.ndarray:
+    """`m` with its holes filled: every background pixel not 4-connected to the array's edge.
+
+    Spreads along whole rows and columns of background at a time, so it converges in as many passes as the
+    background's path to the edge has turns, not pixels.
+    """
+    free = ~m
+    reached = np.zeros_like(free)
+    reached[[0, -1], :] = free[[0, -1], :]
+    reached[:, [0, -1]] |= free[:, [0, -1]]
+    while True:
+        grown = _spread_along_rows(_spread_along_rows(reached, free).T, free.T).T
+        if np.array_equal(grown, reached):
+            return ~reached
+        reached = grown
 
 
 def element_at(pt: Sequence[float], size: Tuple[int, int], els: Sequence[Dict]) -> Optional[int]:

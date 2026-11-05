@@ -110,8 +110,7 @@ vllm serve "$CAPTCHA_BASE_MODEL" \
 - **Connection refused:** run `captchakraken server start` and inspect
   `~/.captchakraken/vllm.log`.
 - **Unsupported pointer architecture:** use the environment created by
-  `setup.sh`; it keeps `VLLM_ENABLE_V1_MULTIPROCESSING=0`, required by vLLM
-  0.25.1's plugin loading.
+  `setup.sh`; it installs the tested vLLM and torch versions together.
 - **404 on `/v1/chat/completions`:** this is the v2 pointer server; use the
   shipped client or `POST /v1/pointer`.
 - **Out of memory:** stop other GPU jobs or lower

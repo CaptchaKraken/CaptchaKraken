@@ -13,6 +13,160 @@ semantic versioning; v2 is a major, **breaking** release.
 - **CaptchaKraken and all v2 models are LGPL-3.0-only.** The former custom
   license no longer applies to this release or the v2 weights.
 
+Version 4.0.0.
+
+### Breaking
+
+- **The package root exports only what a caller writes.** Both ports now
+  publish what you construct, configure, receive or implement, so internal
+  helpers can change without a major release.
+  - TypeScript drops `ActionKind`, `RetryMode`, `SettleVerdict`,
+    `PaintVerdict`, `KeyframeMode`, `RecaptchaBanner`, `Phase`, `isOneOf`,
+    `SELECTORS`, `DETECTOR_MODELS`, `resolveLoraName`, `BaseHumanizer`,
+    `resolveHumanizer`, `touchBackendFor`, the three touch backends,
+    `PAUSE_KINDS`, `HUMANIZATION_MODES`, `Widget`, `HumanizerOptions`,
+    `TouchSample`, and the action and CLI types from `types.ts`. It now
+    exports the `Point` type a custom `Humanizer` is written against.
+  - Python drops `ActionPlanner`, `ImageProcessor`, `add_overlays_to_image`,
+    `SELECTORS`, `Availability`, `KeyframeMode` and the three touch backends
+    from `captchakraken`, and adds `PageSolverConfig` and `CaptchaSolveError`,
+    which the docs already imported from `captchakraken.page_solver`.
+  - Submodules (`captchakraken.page_solver`, `js/src/*`) are internal.
+
+### Added
+
+- **`HF_TOKEN` fetches the detector weights from a private repository.** The
+  download sends it as a bearer token when it is set, and nothing otherwise.
+
+- **Every selector and URL pattern is in one config file.**
+  `captchakraken.config.json` at the repository root holds each vendor's
+  `hosts` and selectors in detection order, the generic fallbacks, and a
+  `custom` entry of your own; both ports load it by default (`selectors` in
+  `PageSolverConfig` / `CaptchaKrakenConfig`, default `DEFAULT_CONFIG_PATH`).
+  Pass the path of a file of your own, or the parsed object: it is laid over
+  the default, so it holds only what it changes. A bad key raises
+  `SelectorConfigError` naming the file and the key. `load_config` /
+  `loadConfig` load one. The table is byte-for-byte the one the code held.
+
+- **Your own selectors.** `customSelectors` (`custom_selectors=` in Python, a
+  `VendorSelectors`) is one vendor entry of your own, in the built-in table's
+  shape, for a captcha the table does not know. It is detected before every
+  built-in vendor, reported as `unknown`, and its submit, text box, refresh and
+  slider controls are tried before the generic ones. An entry that names no
+  `widget`, `challenge` or `checkbox` is refused when the solver is built.
+
+- **A lite element detector for small machines.** Two detectors are released:
+  `standard` (ResNet-18) and `lite` (MobileNetV3, about 100 ms a board on one
+  vCPU), trained on the same data. `detector` in `captchakraken.config.json`
+  picks one: `auto` (the default) runs `lite` on two usable CPUs or fewer, a
+  container's CPU quota included, and otherwise times one board once and runs
+  `standard` when it fits in 200 ms; the verdict is cached per machine. Only
+  the chosen weights are downloaded. `CAPTCHA_KRAKEN_DETECTOR_MODEL` overrides
+  the config. `lite` does not find a box that fills the whole screenshot, such as
+  GeeTest v4's "click to verify" bar; the driver clicks that bar through its
+  `box` selector and never asks the detector.
+
+### Changed
+
+- **Grids and checkboxes are found by a CNN, and OpenCV is gone.** `find_grid`
+  and `find_checkbox` read an element detector (a small Mask R-CNN) that runs
+  on the CPU through onnxruntime, about a quarter of a second per board. Its
+  weights (124 MB) are downloaded once on first use into the state directory
+  and checked against a pinned hash; `CAPTCHA_KRAKEN_DETECTOR` names a local
+  file instead. Image and video I/O moved to Pillow and PyAV, and the slide and
+  hold trackers to numpy and scipy, with the same measured thresholds.
+  `opencv-python-headless` is no longer a dependency; `onnxruntime`, `scipy`
+  and `av` are. onnxruntime ships no Intel-macOS wheel, so the client no longer
+  installs there.
+- **Only the grids the grid model was trained on reach it.** reCAPTCHA's 3x3
+  and 4x4 and hCaptcha's 3x3 are asked as grids; a grid from any other named
+  vendor goes to the model trained on that vendor. A caller that names no
+  vendor (the CLI, a script) keeps both shapes.
+- **Animated boards are cut faster.** Keyframe extraction measures each pair
+  of frames once; it re-compared the same screens about seven times over.
+- **`customSelectors` / `custom_selectors=` is deprecated** in favour of
+  `custom` in a `selectors` file. It still works, and wins over the file's
+  entry when both are given.
+
+- **A pointer answer carries both the point and the element id, and how sure
+  each is.** Every slot now also reads the number drawn on its element, decided
+  apart from the point. `checks` in the answer gives the action's, count's and
+  moment's probabilities, and per slot its point's probability, the element it
+  read with that read's probability, and `under`: the element its point lands
+  on. `checks.agree` says whether the two name the same element on every slot
+  (None on a plain board). The packed decision vector grows to six values per
+  slot, so a checkpoint must be trained with this head to be served.
+
+- **`mouse` mode hands a browser that humanises its own pointer one move per
+  gesture.** The first move of each solve times one 3 px step against a
+  zero-length move; under camoufox's `humanize` the step takes hundreds of
+  milliseconds, and from then on the browser draws the path instead of
+  re-drawing each of ours. Pauses and per-key typing are unchanged. A checkbox
+  click under camoufox `humanize=True` went from 14-23 s to under 4 s.
+
+### Fixed
+
+- **A wrong reCAPTCHA answer is asked fresh, not as missed tiles.** The
+  "Please try again" banner set the missed-tiles retry, the same as "Please
+  select all matching images", so the next ask told the model it had
+  under-selected on a board it had answered wrongly. Only the under-selection
+  banner sets it now.
+- **A grid whose cells the detector half-misses is still a grid.** On two real
+  reCAPTCHA 4x4 photo boards it read 14 and 17 cells: a faint gutter merged
+  two tiles, or split none. When the cells do not make whole rows, `find_grid`
+  takes the lattice they mostly fill (three in four slots, every row and
+  column seen), counted from the spacing between cells, and puts each tile in
+  its slot. Boards whose cells fill no lattice are refused as before.
+- **A HUMAN or FunCaptcha press-and-hold is held until it says it is done.**
+  These buttons complete on their own once full and verify only after drawing
+  their done state; let go at full and they reset. When the answer named the
+  fill's end, both drivers let go the moment the fill reached it, and a correct
+  answer usually failed. They now hold until the widget reports success,
+  closes, or its finished picture sits still. A hold graded on where it is let
+  go, such as a line filled to a mark, is still released at the mark; a
+  `customSelectors` / `custom_selectors` entry is that kind unless it sets
+  `holdCompletes` / `hold_completes`.
+- **Cloudflare Turnstile's tick box is found.** The on-screen finder looked only
+  for a dark outline on a light panel, so a dark-theme widget (and `auto` on a
+  dark-mode system) reported "no tick box to click" on every attempt. It now
+  reads both themes. And a widget still showing "Verifying…" is looked at again
+  until `detectionTimeoutMs` instead of failing on the first capture; one that
+  passes without drawing a box is not clicked.
+- **The mouse never jumps.** The recorded movements a reach is drawn from were
+  sampled up to 250 ms and 560 px apart, so the page saw the cursor vanish and
+  reappear, and a short reach swung far off its line (a 5 px move went 61 px
+  wide). Both drivers now send an event at least every 8 ms and 16 px, and keep
+  a reach within 15% of its length of the straight line.
+- **Waiting on a reCAPTCHA tile is calm.** The driver reached for a different
+  reloading tile on every 250 ms poll. It now rests on one tile and drifts a few
+  pixels every second or two.
+- **A reCAPTCHA board is asked about once it has loaded.** The grid gate gave up
+  after `gridLoadTimeoutMs` and asked about a half-painted board. A tile still
+  painting is now waited on up to three times that, or the solve's deadline; a
+  blank tile that has stopped changing counts as loaded.
+- **A pointer click is never sent twice.** Two of the pointer's click slots
+  picking one token answer one point, and on a tile board the second click
+  deselected the first. Repeated points are dropped (Python).
+- **GeeTest v4 opens its own puzzle.** The "Click to verify" bar is clicked as a
+  checkbox, where it is, and only while no puzzle is open; it was not detected,
+  and the puzzle waited for a person to open it.
+
+### Changed
+
+- **`hcaptcha_images_timeout_ms` is `board_images_timeout_ms`**
+  (`boardImagesTimeoutMs`), and its phase is `board-images`: the wait runs for
+  any vendor whose config lists `images`, not only hCaptcha. The old option
+  name is still read, and `Phase.HCAPTCHA_IMAGES` is an alias; only the key in
+  a result's phase timings reads `board-images` instead of `hcaptcha-images`.
+- **`CAPTCHA_RESAMPLE_LEVEL` is no longer read.** Re-asks were greedy at every
+  level, so it never changed a request; a repeated answer still makes the
+  pointer avoid the answers already refused.
+
+- **`grid::<type>` templates in a `prompts.json` are not read.** No caller
+  ever passed a puzzle type, so they never replaced the grid prompt.
+
+## [3.3.0] - 2026-10-27
+
 ### Added
 
 - **Prompt generation 4: the pointer.** A generation-4 model is a pointer, not a
@@ -68,6 +222,20 @@ semantic versioning; v2 is a major, **breaking** release.
   `funcaptcha` and `proton` instead of `unknown`.
 - **A button labelled Confirm submits a round**, after Verify, Next, Submit and
   Skip. AWS WAF's card has no other submit control.
+- **Each JS solver can have its own endpoint.** `new CaptchaKrakenSolver({ baseUrl })`
+  sets the OpenAI-compatible base for that solver; it defaults to
+  `VLLM_BASE_URL`. It decides the model name sent (`--model`), and the engine
+  each solve and outcome report starts is given it as `VLLM_BASE_URL`, together
+  with the solver's own `apiKey`. One process can now drive solvers that talk to
+  different servers with different keys without one environment variable
+  routing them all. Nothing changes when the option is absent.
+
+### Changed
+
+- **The pointer overlay's numbers are drawn at 3x.** Each tag's digits are
+  15x21 px with 3 px strokes, so a digit spans more than one vision patch. The
+  look is part of a pointer model's input: models trained on the old overlay
+  must be retrained.
 
 ### Changed
 
@@ -98,18 +266,6 @@ semantic versioning; v2 is a major, **breaking** release.
 
 - **The `track-piece` CLI command** and the diff-based piece finder behind it.
   `slide-step` replaces it, for generation-2 answers too.
-
-## [3.3.0] - 2026-10-24
-
-### Added
-
-- **Each JS solver can have its own endpoint.** `new CaptchaKrakenSolver({ baseUrl })`
-  sets the OpenAI-compatible base for that solver; it defaults to
-  `VLLM_BASE_URL`. It decides the model name sent (`--model`), and the engine
-  each solve and outcome report starts is given it as `VLLM_BASE_URL`, together
-  with the solver's own `apiKey`. One process can now drive solvers that talk to
-  different servers with different keys without one environment variable
-  routing them all. Nothing changes when the option is absent.
 
 ### Security
 

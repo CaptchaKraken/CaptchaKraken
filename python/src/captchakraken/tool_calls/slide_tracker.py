@@ -31,8 +31,9 @@ import math
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-import cv2
 import numpy as np
+from PIL import Image as PILImage
+from scipy import fft, ndimage
 
 Image = Union[str, np.ndarray]
 Point = Tuple[float, float]
@@ -44,14 +45,14 @@ Offset = Union[float, Sequence[float]]
 SLIDE = "slide"
 TURN = "turn"
 
-# Below this a pixel is still: DIS flow on a static textured board stays well under it.
+# Below this a pixel is still: the flow (`_dense_flow`) on a static textured board stays well under it.
 _MOVING_PX = 0.5
 # Forward-backward disagreement allowed, absolute and as a fraction of the motion: what fails it is ground the
 # object covered or uncovered, which has no counterpart in the other shot.
 _FB_ABS_PX = 0.8
 _FB_REL = 0.25
 # Grey levels within which carrying a pixel with the object's own motion must reproduce the probe for the pixel to
-# be the object's. DIS spreads the object's flow several pixels onto the ground around it and the backward flow
+# be the object's. Dense flow spreads the object's flow several pixels onto the ground around it and the backward flow
 # agrees, so only the pixels can say which side of the edge they are on. Comparing against standing still does not
 # work: a smooth piece hardly changes when it moves, and an edge running along the motion not at all. Both shots
 # are smoothed first, because a page composited at a fraction of a pixel softens the object's sharpest edge.
@@ -59,6 +60,16 @@ _FB_REL = 0.25
 # the same carried or still and so cannot be told apart by any pixel.
 _CARRY_GREY = 6.0
 _CARRY_SMOOTH = 1.0
+# The dense flow (`_dense_flow`) is fitted on the pyramid level whose short side is the first at or under
+# `_FLOW_SIDE` px, so a device-scale shot is followed at the same detail as a plain one; coarser levels, down to
+# `_FLOW_MIN_SIDE`, catch motion larger than the window. Each pixel's motion is fitted over a Gaussian window
+# (sigma, px of the level) in `_FLOW_PASSES` passes per level, damped by `_FLOW_DAMP` (grey^2 per px^2) so that flat
+# ground, which shows no motion, keeps what the level above gave it.
+_FLOW_SIDE = 200
+_FLOW_MIN_SIDE = 24
+_FLOW_WINDOW = 2.0
+_FLOW_PASSES = 3
+_FLOW_DAMP = 1.0
 # A part smaller than this is flow noise on an edge, not something the handle moves.
 _MIN_PART_PX = 25
 _MIN_PART_FRACTION = 1e-4
@@ -163,16 +174,142 @@ def _kabsch(src: np.ndarray, dst: np.ndarray, c0: Point) -> Params:
     return math.degrees(th), float(t[0]), float(t[1])
 
 
+def _inverse(m: np.ndarray) -> np.ndarray:
+    """The 2x3 matrix that undoes `m`; a pure shift stays one exactly, which `_warp` reads off slices."""
+    (p, q), (u, v) = m[:, :2]
+    det = p * v - q * u
+    inv = np.array([[v, -q], [-u, p]]) / det
+    return np.hstack([inv, -(inv @ m[:, 2])[:, None]])
+
+
+def _from(m: np.ndarray, x0: int, y0: int) -> np.ndarray:
+    """`m` for a crop whose top-left is (x0, y0): its output pixel (x, y) is the shot's (x + x0, y + y0)."""
+    out = m.astype(float)
+    out[:, 2] += m[:, :2] @ np.array([x0, y0], dtype=float)
+    return out
+
+
 # ── images and masks ─────────────────────────────────────────────────────────
 
 
 def _gray(img: Image) -> np.ndarray:
-    a = cv2.imread(img, cv2.IMREAD_COLOR) if isinstance(img, str) else img
-    if a is None:
-        raise TrackingError(f"unreadable image: {img}")
+    """A shot as 8-bit grey: a path is read from disk, an array is taken as BGR, the order the drivers' own
+    renders use. Both convert with the same BT.601 weights."""
+    if isinstance(img, str):
+        try:
+            with PILImage.open(img) as f:
+                return np.asarray(f.convert("L"), dtype=np.uint8)
+        except OSError as exc:
+            raise TrackingError(f"unreadable image: {img}") from exc
+    a = np.asarray(img)
     if a.ndim == 3:
-        a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
+        a = np.rint(a[..., :3].astype(np.float32) @ np.float32([0.114, 0.587, 0.299]))
     return np.ascontiguousarray(a, dtype=np.uint8)
+
+
+def _smooth(img: np.ndarray, sigma: float) -> np.ndarray:
+    return ndimage.gaussian_filter(img.astype(np.float32), sigma, mode="mirror")
+
+
+def _warp(img: np.ndarray, m: np.ndarray, shape: Tuple[int, int], order: int = 1,
+          mode: str = "constant") -> np.ndarray:
+    """`img` sampled at `m` applied to every output pixel: out(x, y) = img(m (x, y, 1)), as float32. Outside the
+    image is 0 (`constant`) or the nearest edge pixel (`nearest`); `order` 1 is bilinear, 0 the nearest pixel. A
+    third axis, if any, is channels warped alike.
+
+    Sampled by hand rather than through `scipy.ndimage.affine_transform`, which is several times slower at the
+    sizes the loop warps hundreds of times per look.
+    """
+    h, w = shape
+    hi, wi = img.shape[:2]
+    if m[0, 0] == 1 and m[1, 1] == 1 and m[0, 1] == 0 and m[1, 0] == 0:
+        tx, ty = (math.floor(t + 0.5) if order == 0 else t for t in m[:, 2])
+        ix, iy = math.floor(tx), math.floor(ty)
+        if ix >= 0 and iy >= 0 and ix + w + 1 <= wi and iy + h + 1 <= hi:
+            # A shift that stays inside the image is a blend of four slices.
+            part = img[iy:iy + h + 1, ix:ix + w + 1].astype(np.float32)
+            fx, fy = np.float32(tx - ix), np.float32(ty - iy)
+            rows = part[:, :w] * (1 - fx) + part[:, 1:] * fx
+            return rows[:h] * (1 - fy) + rows[1:] * fy
+    xs, ys = np.arange(w, dtype=np.float64), np.arange(h, dtype=np.float64)[:, None]
+    x, y = m[0, 0] * xs + m[0, 1] * ys + m[0, 2], m[1, 0] * xs + m[1, 1] * ys + m[1, 2]
+    if order == 0:
+        xi, yi = np.floor(x + 0.5).astype(np.intp), np.floor(y + 0.5).astype(np.intp)
+        out = img[np.clip(yi, 0, hi - 1), np.clip(xi, 0, wi - 1)].astype(np.float32)
+        if mode == "constant":
+            out[(xi < 0) | (xi >= wi) | (yi < 0) | (yi >= hi)] = 0
+        return out
+    if mode == "nearest":
+        x, y = np.clip(x, 0, wi - 1), np.clip(y, 0, hi - 1)
+    else:
+        x, y = np.clip(x, -1, wi), np.clip(y, -1, hi)
+    x0, y0 = np.floor(x), np.floor(y)
+    # Only the part of the image the samples read is copied, with a pixel of border all round (two after) so every
+    # corner a sample reads exists: the edge's own value, or 0 past the image.
+    cx, cy = max(int(x0.min()), 0), max(int(y0.min()), 0)
+    src = img[cy:min(int(y0.max()) + 2, hi), cx:min(int(x0.max()) + 2, wi)].astype(np.float32)
+    border = ((1, 2), (1, 2)) + ((0, 0),) * (src.ndim - 2)
+    pad = np.pad(src, border, mode="edge") if mode == "nearest" else np.pad(src, border)
+    fx, fy = ((v - v0).astype(np.float32).reshape(v.shape + (1,) * (src.ndim - 2)) for v, v0 in ((x, x0), (y, y0)))
+    stride = src.shape[1] + 3
+    i = (y0.astype(np.intp) - cy + 1) * stride + x0.astype(np.intp) - cx + 1
+    flat = pad.reshape((-1,) + src.shape[2:])
+    top = flat.take(i, axis=0) * (1 - fx) + flat.take(i + 1, axis=0) * fx
+    bottom = flat.take(i + stride, axis=0) * (1 - fx) + flat.take(i + stride + 1, axis=0) * fx
+    return top * (1 - fy) + bottom * fy
+
+
+# Every step that tests pixels near a mask works on the mask's box grown by this (px): past the smoothing's reach
+# (4 sigma of `_CARRY_SMOOTH`) and every closing's, so the crop gives exactly what the whole shot would.
+_MARGIN = 8
+
+
+def _region(mask: np.ndarray, margin: int = _MARGIN) -> Tuple[slice, slice]:
+    """The rows and columns of `mask`'s bounding box grown by `margin`, within the shot."""
+    rows, cols = np.flatnonzero(mask.any(axis=1)), np.flatnonzero(mask.any(axis=0))
+    h, w = mask.shape
+    return (slice(max(int(rows[0]) - margin, 0), min(int(rows[-1]) + 1 + margin, h)),
+            slice(max(int(cols[0]) - margin, 0), min(int(cols[-1]) + 1 + margin, w)))
+
+
+def _paste(crop: np.ndarray, at: Tuple[slice, slice], shape: Tuple[int, int]) -> np.ndarray:
+    out = np.zeros(shape, crop.dtype)
+    out[at] = crop
+    return out
+
+
+def _grow(mask: np.ndarray, size: int) -> np.ndarray:
+    """Dilation by a `size` square; the border adds nothing."""
+    return ndimage.maximum_filter(mask.astype(np.uint8), size, mode="nearest")
+
+
+def _shrink(mask: np.ndarray, size: int) -> np.ndarray:
+    """Erosion by a `size` square; the border removes nothing."""
+    return ndimage.minimum_filter(mask.astype(np.uint8), size, mode="nearest")
+
+
+def _open(mask: np.ndarray, size: int) -> np.ndarray:
+    return _grow(_shrink(mask, size), size)
+
+
+def _close(mask: np.ndarray, size: int) -> np.ndarray:
+    return _shrink(_grow(mask, size), size)
+
+
+_EIGHT = np.ones((3, 3), bool)
+
+
+def _components(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """8-connected parts: the label image and each label's area (label 0 is the background)."""
+    labels, _ = ndimage.label(mask, structure=_EIGHT)
+    return labels, np.bincount(labels.ravel())
+
+
+def _within(mask: np.ndarray, radius: float) -> np.ndarray:
+    """The pixels within `radius` (Euclidean, px) of `mask`."""
+    r = int(math.floor(radius))
+    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
+    return ndimage.binary_dilation(mask.astype(bool), xx * xx + yy * yy <= radius * radius)
 
 
 def _pair(first: Image, other: Image) -> Tuple[np.ndarray, np.ndarray]:
@@ -183,21 +320,35 @@ def _pair(first: Image, other: Image) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def _centroid(mask: np.ndarray) -> Point:
-    m = cv2.moments(mask.astype(np.uint8), binaryImage=True)
-    return m["m10"] / m["m00"], m["m01"] / m["m00"]
+    ys, xs = np.nonzero(mask)
+    return float(xs.mean()), float(ys.mean())
 
 
 def _fill(part: np.ndarray) -> np.ndarray:
-    """The part with its holes filled: a turning disc's centre barely moves and a flat patch carries no flow."""
-    contours, _ = cv2.findContours(part.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    out = np.zeros(part.shape, np.uint8)
-    cv2.drawContours(out, contours, -1, 1, thickness=cv2.FILLED)
-    return out
+    """The part with its holes filled: a turning disc's centre barely moves and a flat patch carries no flow.
+
+    A hole is ground the part encloses, 4-connected as ground next to an 8-connected part is; labelling it once is
+    much faster than `binary_fill_holes`' repeated dilation.
+    """
+    ground, _ = ndimage.label(np.pad(~part.astype(bool), 1, constant_values=True))
+    return (ground[1:-1, 1:-1] != ground[0, 0]).astype(np.uint8)
 
 
-def _outline(part: np.ndarray) -> np.ndarray:
-    contours, _ = cv2.findContours(part.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    return max(contours, key=len)
+def _inside(part: np.ndarray, p: Point) -> float:
+    """How far `p` lies inside the outline of `part`'s largest piece (px): negative outside it.
+
+    The outline runs through the centres of the piece's rim pixels, those with a background pixel beside them.
+    """
+    labels, areas = _components(part)
+    largest = labels == int(np.argmax(areas[1:])) + 1
+    at = _region(largest, 1)
+    piece = _fill(largest[at]).astype(bool)
+    ys, xs = np.nonzero(piece & ~ndimage.binary_erosion(piece, border_value=1))
+    ys, xs = ys + at[0].start, xs + at[1].start
+    d = float(np.sqrt(((xs - p[0]) ** 2 + (ys - p[1]) ** 2).min()))
+    x, y = int(round(p[0])) - at[1].start, int(round(p[1])) - at[0].start
+    on = 0 <= y < piece.shape[0] and 0 <= x < piece.shape[1] and piece[y, x]
+    return d if on else -d
 
 
 def _carried(a: np.ndarray, b: np.ndarray, part: np.ndarray, params: Params, c0: Point,
@@ -206,36 +357,72 @@ def _carried(a: np.ndarray, b: np.ndarray, part: np.ndarray, params: Params, c0:
 
     `along`, a slide's shift: what changed is joined along it (`_spans`) before the unchanged ground is trimmed.
     """
-    h, w = a.shape
-    grow = cv2.dilate(part.astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
-    landed = cv2.warpAffine(b.astype(np.float32), _rigid(params, c0), (w, h),
-                            flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
-    move = np.abs(cv2.GaussianBlur(landed, (0, 0), _CARRY_SMOOTH)
-                  - cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH))
-    explained = grow & (move < _CARRY_GREY)
+    shape = a.shape
+    at = _region(part, 3 + _MARGIN)     # 3: the reach of the 7x7 grow below
+    landed = _warp(b, _from(_rigid(params, c0), at[1].start, at[0].start), a[at].shape, mode="nearest")
+    a, b, part = a[at], b[at], part[at]
+    grow = _grow(part, 7) > 0
+    sa = _smooth(a, _CARRY_SMOOTH)
+    explained = grow & (np.abs(_smooth(landed, _CARRY_SMOOTH) - sa) < _CARRY_GREY)
     # Ground that happens to match itself one shift along leaves thin threads, never a body.
-    keep = cv2.morphologyEx(explained.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(keep, connectivity=8)
-    ours = [i for i in range(1, n) if (part & (labels == i)).sum() > 0.5 * stats[i, cv2.CC_STAT_AREA]]
-    keep = cv2.morphologyEx(np.isin(labels, ours).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    labels, areas = _components(_open(explained, 5))
+    hits = np.bincount(labels[part.astype(bool)], minlength=len(areas))
+    ours = [i for i in range(1, len(areas)) if hits[i] > 0.5 * areas[i]]
+    keep = _close(np.isin(labels, ours), 5)
     # The opening also shaves the object's rim, its sharpest edge; take back the rim pixels the motion explains.
-    keep = keep | (cv2.dilate(keep, np.ones((3, 3), np.uint8)).astype(bool) & explained).astype(np.uint8)
+    keep = keep | (_grow(keep, 3).astype(bool) & explained).astype(np.uint8)
     # Ground the shot shows unchanged is explained by standing still as well as by the motion: it is the object's
     # only where it lies within reach of what changed, or inside its outline.
-    still = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
-                   - cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH))
-    core = keep.astype(bool) & (still >= _CARRY_GREY)
+    core = keep.astype(bool) & (np.abs(_smooth(b, _CARRY_SMOOTH) - sa) >= _CARRY_GREY)
     if along is not None:
         core = _spans(core, keep, along)
-    core = cv2.morphologyEx(core.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
-    reach = cv2.distanceTransform((core == 0).astype(np.uint8), cv2.DIST_L2, 3) <= _CORE_REACH
-    keep = _fill((keep.astype(bool) & reach | core.astype(bool)).astype(np.uint8))
+    core = _close(core, _CORE_CLOSE)
+    keep = _fill(keep.astype(bool) & _within(core, _CORE_REACH) | core.astype(bool))
     if keep.sum() < min_area:
         raise TrackingError("the moving part has no texture or edge that its own motion explains")
-    return keep
+    return _paste(keep, at, shape)
 
 
 # ── what moves ───────────────────────────────────────────────────────────────
+
+
+def _dense_flow(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Where each pixel of `a` went in `b`, as an (h, w, 2) field of (dx, dy) in shot pixels: pyramidal Lucas-Kanade.
+
+    Each level starts from the motion of the level above, doubled, and refines it by fitting, over a Gaussian
+    window, the one shift that best lays `b` back on `a`.
+    """
+    pa, pb = [a.astype(np.float32)], [b.astype(np.float32)]
+    while min(pa[-1].shape) // 2 >= _FLOW_MIN_SIDE:
+        pa.append(_smooth(pa[-1], 1.0)[::2, ::2])
+        pb.append(_smooth(pb[-1], 1.0)[::2, ::2])
+    finest = next(i for i, level in enumerate(pa) if min(level.shape) <= _FLOW_SIDE or i == len(pa) - 1)
+    flow = np.zeros(pa[-1].shape + (2,), np.float32)
+    for la, lb in reversed(list(zip(pa, pb))[finest:]):
+        flow = _upsampled(flow, la.shape)
+        h, w = la.shape
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        ga_y, ga_x = np.gradient(la)
+        for _ in range(_FLOW_PASSES):
+            lw = ndimage.map_coordinates(lb, [ys + flow[..., 1], xs + flow[..., 0]], order=1, mode="nearest")
+            gw_y, gw_x = np.gradient(lw)
+            gx, gy, gt = 0.5 * (ga_x + gw_x), 0.5 * (ga_y + gw_y), lw - la
+            sxx, syy = _smooth(gx * gx, _FLOW_WINDOW) + _FLOW_DAMP, _smooth(gy * gy, _FLOW_WINDOW) + _FLOW_DAMP
+            sxy, sxt, syt = (_smooth(v, _FLOW_WINDOW) for v in (gx * gy, gx * gt, gy * gt))
+            det = sxx * syy - sxy * sxy
+            flow[..., 0] -= (syy * sxt - sxy * syt) / det
+            flow[..., 1] -= (sxx * syt - sxy * sxt) / det
+    return _upsampled(flow, a.shape)
+
+
+def _upsampled(flow: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+    """A flow field resampled to `shape`, its vectors scaled with it."""
+    if flow.shape[:2] == tuple(shape):
+        return flow
+    k = shape[1] / flow.shape[1]
+    zoom = (shape[0] / flow.shape[0], k)
+    return k * np.stack([ndimage.zoom(flow[..., i], zoom, order=1, mode="nearest", grid_mode=True)
+                         for i in (0, 1)], axis=-1).astype(np.float32)
 
 
 def _near_handle(handle: Optional[Point], h: int, w: int) -> Optional[np.ndarray]:
@@ -260,8 +447,9 @@ def _flow_modes(flow: np.ndarray, weight: np.ndarray) -> List[Tuple[float, float
     bins = [max(1, int((hi[i] - lo[i]) / _MODE_BIN)) for i in (0, 1)]
     hist, ex, ey = np.histogram2d(flow[:, 0], flow[:, 1], bins=bins, range=[[lo[0], hi[0]], [lo[1], hi[1]]],
                                   weights=weight)
-    hist = cv2.GaussianBlur(hist.astype(np.float32), (3, 3), 0)
-    peaks = (hist == cv2.dilate(hist, np.ones((5, 5), np.uint8))) & (hist >= _MODE_SHARE * hist.max())
+    for axis in (0, 1):
+        hist = ndimage.correlate1d(hist, [0.25, 0.5, 0.25], axis=axis, mode="mirror")
+    peaks = (hist == ndimage.maximum_filter(hist, 5, mode="nearest")) & (hist >= _MODE_SHARE * hist.max())
     ix, iy = np.nonzero(peaks)
     order = np.argsort(-hist[ix, iy])[:_MODE_MAX]
     return [(float((ex[i] + ex[i + 1]) / 2), float((ey[j] + ey[j + 1]) / 2)) for i, j in zip(ix[order], iy[order])]
@@ -275,20 +463,26 @@ def _spans(core: np.ndarray, cut: np.ndarray, shift: Tuple[float, float]) -> np.
     the motion across its own unchanged middle. Ground bridging two bodies lies across the motion from them instead,
     so this joins the halves of one body and never two bodies.
     """
+    if not cut.any():
+        return core.astype(bool)
+    at = _region(cut, 1)
+    shape = core.shape
+    core, cut = core[at], cut[at]
     h, w = core.shape
-    turn = cv2.getRotationMatrix2D((w / 2, h / 2), math.degrees(math.atan2(shift[1], shift[0])), 1.0)
+    # The turn that lays the motion along +x, centred in a square that holds the whole cut at any angle.
+    phi = math.atan2(shift[1], shift[0])
+    rot = np.array([[math.cos(phi), math.sin(phi)], [-math.sin(phi), math.cos(phi)]])
     side = int(math.ceil(math.hypot(h, w)))
-    turn[:, 2] += (side - w) / 2, (side - h) / 2
-    flat = [cv2.warpAffine(m.astype(np.uint8), turn, (side, side), flags=cv2.INTER_NEAREST) > 0 for m in (core, cut)]
-    c, k = flat
+    turn = np.hstack([rot, (np.array([side / 2, side / 2]) - rot @ np.array([w / 2, h / 2]))[:, None]])
+    c, k = (_warp(m, _inverse(turn), (side, side), order=0) > 0 for m in (core, cut))
     run = np.cumsum(np.diff(np.pad(k, ((0, 0), (1, 0))).astype(np.int8), axis=1) == 1, axis=1) * k
     out = np.zeros_like(c)
     for y in np.nonzero(c.any(axis=1))[0]:
         for r in np.unique(run[y][c[y]]):
             xs = np.nonzero(c[y] & (run[y] == r))[0]
             out[y, xs[0]:xs[-1] + 1] = True
-    back = cv2.warpAffine(out.astype(np.uint8), turn, (w, h), flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP)
-    return core.astype(bool) | ((back > 0) & cut.astype(bool))
+    back = _warp(out, turn, (h, w), order=0)
+    return _paste(core.astype(bool) | ((back > 0) & cut.astype(bool)), at, shape)
 
 
 def _split(a: np.ndarray, b: np.ndarray, cut: np.ndarray, min_area: float,
@@ -300,25 +494,22 @@ def _split(a: np.ndarray, b: np.ndarray, cut: np.ndarray, min_area: float,
     cored on those, joined along a slide's motion (`_spans`), and keeps the explained ground within reach of its own
     core and nearer to it than to any other.
     """
-    changed = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
-                     - cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH)) >= _CARRY_GREY
+    at = _region(cut)
+    shape = cut.shape
+    a, b, cut = a[at], b[at], cut[at]
+    changed = np.abs(_smooth(b, _CARRY_SMOOTH) - _smooth(a, _CARRY_SMOOTH)) >= _CARRY_GREY
     core = cut.astype(bool) & changed
     if shift is not None:
         core = _spans(core, cut, shift)
-    core = cv2.morphologyEx(core.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(_fill(core), connectivity=8)
-    cores = [labels == i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
+    labels, areas = _components(_fill(_close(core, _CORE_CLOSE)))
+    cores = [labels == i for i in range(1, len(areas)) if areas[i] >= min_area]
     if not cores:
         return []
-    dist = np.stack([cv2.distanceTransform((~c).astype(np.uint8), cv2.DIST_L2, 3) for c in cores])
+    dist = np.stack([ndimage.distance_transform_edt(~c) for c in cores])
     owner = dist.argmin(axis=0)
     near = dist.min(axis=0) <= _CORE_REACH
-    out = []
-    for i in range(len(cores)):
-        body = _fill(((cut.astype(bool) & near & (owner == i)) | cores[i]).astype(np.uint8))
-        if body.sum() >= min_area:
-            out.append(body)
-    return out
+    bodies = [_fill((cut.astype(bool) & near & (owner == i)) | cores[i]) for i in range(len(cores))]
+    return [_paste(body, at, shape) for body in bodies if body.sum() >= min_area]
 
 
 def _bodies(a: np.ndarray, b: np.ndarray, fwd: np.ndarray, moving: np.ndarray, part: np.ndarray, xs: np.ndarray,
@@ -332,7 +523,7 @@ def _bodies(a: np.ndarray, b: np.ndarray, fwd: np.ndarray, moving: np.ndarray, p
     """
     # The flow's own part has leaked onto still ground, and the flow is smoothed toward zero at its edge: the
     # interior alone says how it moved, to a tenth of a pixel.
-    inner = cv2.erode(_fill(part), np.ones((9, 9), np.uint8)).astype(bool) & (moving > 0)
+    inner = _shrink(_fill(part), 9).astype(bool) & (moving > 0)
     if inner.sum() < min_area:
         inner = part & (moving > 0)
     src = np.stack([xs[inner], ys[inner]], axis=1)
@@ -345,8 +536,8 @@ def _bodies(a: np.ndarray, b: np.ndarray, fwd: np.ndarray, moving: np.ndarray, p
     if radius * abs(math.radians(rough[0])) > math.hypot(rough[1], rough[2]):
         kind, angles, guesses = TURN, _angles(rough[0], 3.0), [rough]
     else:
-        g = cv2.GaussianBlur(a.astype(np.float32), (0, 0), 1.0)
-        edge = cv2.Sobel(g, cv2.CV_32F, 1, 0) ** 2 + cv2.Sobel(g, cv2.CV_32F, 0, 1) ** 2
+        g = _smooth(a, 1.0)
+        edge = ndimage.sobel(g, axis=1, mode="mirror") ** 2 + ndimage.sobel(g, axis=0, mode="mirror") ** 2
         kind, angles = SLIDE, None
         guesses = [(0.0, tx, ty) for tx, ty in _flow_modes(fwd[inner], edge[inner])]
     return _refined(a, b, part, inner, c_part, guesses, kind, angles, min_area)
@@ -402,8 +593,7 @@ def _slid_at(a: np.ndarray, b: np.ndarray, seed: Point, min_area: float) -> List
     y0, y1 = max(reach_t, y - reach), min(h - reach_t, y + reach)
     if x1 - x0 < 3 or y1 - y0 < 3:
         return []
-    sa = cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH)
-    sb = cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH)
+    sa, sb = _smooth(a, _CARRY_SMOOTH), _smooth(b, _CARRY_SMOOTH)
     here = sa[y0:y1, x0:x1]
     changed = np.abs(sb[y0:y1, x0:x1] - here) >= _CARRY_GREY
     best, shift = 0, (0, 0)
@@ -418,12 +608,8 @@ def _slid_at(a: np.ndarray, b: np.ndarray, seed: Point, min_area: float) -> List
     tx, ty = shift
     explained = np.zeros((h, w), np.uint8)
     explained[y0:y1, x0:x1] = changed & (np.abs(sb[y0 + ty:y1 + ty, x0 + tx:x1 + tx] - here) < _CARRY_GREY)
-    explained = cv2.morphologyEx(explained, cv2.MORPH_CLOSE, np.ones((_CORE_CLOSE, _CORE_CLOSE), np.uint8))
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(explained, connectivity=8)
-    if n < 2:
-        return []
-    dist = {i: cv2.pointPolygonTest(_outline(labels == i), (float(seed[0]), float(seed[1])), True)
-            for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area}
+    labels, areas = _components(_close(explained, _CORE_CLOSE))
+    dist = {i: _inside(labels == i, seed) for i in range(1, len(areas)) if areas[i] >= min_area}
     if not dist:
         return []
     part = _fill((labels == max(dist, key=dist.get)).astype(np.uint8)).astype(bool)
@@ -445,20 +631,17 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
     """
     a, b = _pair(first, probe)
     h, w = a.shape
-    dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
-    fwd = dis.calc(a, b, None)
-    bwd = dis.calc(b, a, None)
+    fwd, bwd = _dense_flow(a, b), _dense_flow(b, a)
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
-    back = cv2.remap(bwd, xs + fwd[..., 0], ys + fwd[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    at = [ys + fwd[..., 1], xs + fwd[..., 0]]
+    back = np.stack([ndimage.map_coordinates(bwd[..., i], at, order=1, mode="nearest") for i in (0, 1)], axis=-1)
     mag = np.hypot(fwd[..., 0], fwd[..., 1])
     fb = np.hypot(fwd[..., 0] + back[..., 0], fwd[..., 1] + back[..., 1])
-    moving = ((mag > _MOVING_PX) & (fb < np.maximum(_FB_ABS_PX, _FB_REL * mag))).astype(np.uint8)
-    moving = cv2.morphologyEx(moving, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    moving = cv2.morphologyEx(moving, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    moving = _close(_open((mag > _MOVING_PX) & (fb < np.maximum(_FB_ABS_PX, _FB_REL * mag)), 3), 5)
 
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(moving, connectivity=8)
+    labels, areas = _components(moving)
     min_area = max(_MIN_PART_PX, _MIN_PART_FRACTION * h * w)
-    parts = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_area]
+    parts = [i for i in range(1, len(areas)) if areas[i] >= min_area]
     if not parts and seed is None and goal is None:
         raise TrackingError("nothing moved between the press and the probe")
 
@@ -472,14 +655,13 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
     if seed is not None:
         pick = label_at(seed) if label_at(seed) in parts else 0
         if not pick and parts:
-            inside = {i: cv2.pointPolygonTest(_outline(labels == i), (float(seed[0]), float(seed[1])), True)
-                      for i in parts}
+            inside = {i: _inside(labels == i, seed) for i in parts}
             near = max(inside, key=inside.get)
             pick = near if -inside[near] <= reach else 0
         candidates = [pick] if pick else []
     else:
         # Every part, the handle's own included: see `_bodies` for why the piece can share it.
-        candidates = sorted(parts, key=lambda i: -stats[i, cv2.CC_STAT_AREA])
+        candidates = sorted(parts, key=lambda i: -areas[i])
 
     found: List[Tuple[np.ndarray, Params, str, Point]] = []
     why: Optional[TrackingError] = None
@@ -497,8 +679,8 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
                                        f"({seed[0]:.0f}, {seed[1]:.0f})")
         # The body under the model's point, else the nearest: it read the piece off a shot before the press.
         sx, sy = float(seed[0]), float(seed[1])
-        mask, exact, kind, c_part = max(found, key=lambda f: cv2.pointPolygonTest(_outline(f[0]), (sx, sy), True))
-        off = -cv2.pointPolygonTest(_outline(mask), (sx, sy), True)
+        mask, exact, kind, c_part = max(found, key=lambda f: _inside(f[0], (sx, sy)))
+        off = -_inside(mask, (sx, sy))
         if off > reach:
             raise TrackingError(f"nothing moved within {reach:.0f}px of the point on the object "
                                 f"({sx:.0f}, {sy:.0f}); the nearest moving body is {off:.0f}px away")
@@ -528,7 +710,7 @@ def segment(first: Image, probe: Image, seed: Optional[Point] = None, handle: Op
     else:
         pivot = c0
 
-    grabbed = handle is not None and bool(cv2.dilate(mask, np.ones((5, 5), np.uint8))[
+    grabbed = handle is not None and bool(_grow(mask, 5)[
         min(max(int(round(handle[1])), 0), h - 1), min(max(int(round(handle[0])), 0), w - 1)])
     probe, _ = _locate(a, b, mask, c0, exact, 3.0, _angles(exact[0], 2.0) if kind == TURN else None)
     return Segment(mask=mask, centroid=c0, grabbed=grabbed, kind=kind, pivot=pivot, probe=probe,
@@ -543,18 +725,17 @@ def _proven(a: np.ndarray, b: np.ndarray, mask: np.ndarray, params: Params, c0: 
     needs them) but not its appearance: matched against a later shot, after the object has left that ground, a
     swallowed patch of dark cow is a template the object no longer carries.
     """
-    h, w = a.shape
-    smooth = cv2.GaussianBlur(a.astype(np.float32), (0, 0), _CARRY_SMOOTH)
-    along = cv2.warpAffine(smooth, _rigid(params, c0), (w, h), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
-                           borderMode=cv2.BORDER_REPLICATE)
-    changed = np.abs(cv2.GaussianBlur(b.astype(np.float32), (0, 0), _CARRY_SMOOTH) - smooth) >= _CARRY_GREY
+    at = _region(mask)
+    smooth = _smooth(a, _CARRY_SMOOTH)
+    along = _warp(smooth, _from(_rigid(params, c0), at[1].start, at[0].start), smooth[at].shape, mode="nearest")
+    changed = np.abs(_smooth(b[at], _CARRY_SMOOTH) - smooth[at]) >= _CARRY_GREY
     # The mask's outermost pixel is ground the fill and the reach keep for the object's extent, nearly always; one
     # deeper is the object's own rim, which on a flat face is the only detail it has.
-    body = cv2.erode(mask.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
-    proven = (body & changed & (np.abs(along - smooth) >= _CARRY_GREY)).astype(np.uint8)
+    body = _shrink(mask[at], 3).astype(bool)
+    proven = (body & changed & (np.abs(along - smooth[at]) >= _CARRY_GREY)).astype(np.uint8)
     if proven.sum() < min_area:
         raise TrackingError("the probe moved the object too little to show which pixels are its own")
-    return proven
+    return _paste(proven, at, a.shape)
 
 
 # ── where it is now ──────────────────────────────────────────────────────────
@@ -596,7 +777,8 @@ def _angles(centre: float, reach: float) -> List[float]:
 
 def _peak(res: np.ndarray) -> Tuple[float, float, float]:
     """The score map's best point to a fraction of a pixel (a parabola through each axis), and its score."""
-    _, score, _, (x, y) = cv2.minMaxLoc(res)
+    y, x = np.unravel_index(int(np.argmax(res)), res.shape)
+    score = res[y, x]
 
     def vertex(lo: float, mid: float, hi: float) -> float:
         den = lo - 2 * mid + hi
@@ -612,33 +794,64 @@ def _match(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params,
     """The object carried by `p`, matched against `b` within `reach` pixels: the shift that best seats it."""
     h, w = a.shape
     m = _rigid(p, c0)
-    warped = cv2.warpAffine(a, m, (w, h), flags=cv2.INTER_LINEAR)
-    wmask = cv2.warpAffine(mask.astype(np.uint8) * 255, m, (w, h), flags=cv2.INTER_NEAREST)
+    bx1, by1, bx2, by2 = _box(_corners(mask) @ m[:, :2].T + m[:, 2], w, h)
+    if bx2 <= bx1 or by2 <= by1:
+        return None
+    # Only the box the carried mask can land in is warped; the template is its tight bounds within that.
+    back = _from(_inverse(m), bx1, by1)
+    wmask = _warp(mask, back, (by2 - by1, bx2 - bx1), order=0) > 0
     ys, xs = np.nonzero(wmask)
     if len(xs) < _MIN_PART_PX:
         return None
+    warped = np.rint(_warp(a, back, wmask.shape))
+    xs, ys = xs + bx1, ys + by1
     x1, y1, x2, y2 = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
     sx1, sy1, sx2, sy2 = max(0, x1 - reach), max(0, y1 - reach), min(w, x2 + reach), min(h, y2 + reach)
     if sx2 - sx1 < x2 - x1 or sy2 - sy1 < y2 - y1:
         return None
-    res = cv2.matchTemplate(b[sy1:sy2, sx1:sx2], warped[y1:y2, x1:x2], cv2.TM_CCOEFF_NORMED,
-                            mask=wmask[y1:y2, x1:x2])
-    res = np.nan_to_num(res, nan=-1.0, posinf=-1.0, neginf=-1.0)
-    px, py, score = _peak(res)
+    tight = (slice(y1 - by1, y2 - by1), slice(x1 - bx1, x2 - bx1))
+    px, py, score = _peak(_correlation(b[sy1:sy2, sx1:sx2], warped[tight], wmask[tight]))
     return (float(p[0]), float(p[1] + sx1 + px - x1), float(p[2] + sy1 + py - y1)), float(score)
+
+
+def _correlation(img: np.ndarray, templ: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Zero-mean normalized correlation of `templ` over `mask` at every place it fits in `img`; -1 where the window
+    is flat and has no correlation.
+
+    All three sums are of whole grey levels over a 0/1 mask, so they are whole numbers: rounding the FFT's results
+    makes them exact, and a flat window's variance exactly zero rather than rounding noise that scores as a match.
+    """
+    i, t, m = img.astype(np.float64), templ.astype(np.float64), mask.astype(np.float64)
+    n = m.sum()
+    (ih, iw), (th, tw) = i.shape, t.shape
+    shape = (fft.next_fast_len(ih + th - 1, real=True), fft.next_fast_len(iw + tw - 1, real=True))
+    f_i, f_ii, f_m, f_tm = (fft.rfft2(x, shape) for x in (i, i * i, m[::-1, ::-1], (t * m)[::-1, ::-1]))
+
+    def window(f: np.ndarray) -> np.ndarray:
+        return np.rint(fft.irfft2(f, shape)[th - 1:ih, tw - 1:iw])
+
+    s_i, s_ii, s_ti = window(f_i * f_m), window(f_ii * f_m), window(f_i * f_tm)
+    s_t = float((t * m).sum())
+    var_t = float((t * t * m).sum()) - s_t * s_t / n
+    den = np.sqrt(np.maximum(var_t * (s_ii - s_i * s_i / n), 0.0))
+    return np.where(den > 0, (s_ti - s_t * s_i / n) / np.where(den > 0, den, 1.0), -1.0)
 
 
 def _score(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params) -> float:
     """Zero-mean correlation of the object carried exactly by `p` against `b`, over the object only."""
     h, w = a.shape
     m = _rigid(p, c0)
-    x1, y1, x2, y2 = _box(cv2.transform(_corners(mask), m).reshape(-1, 2), w, h)
+    x1, y1, x2, y2 = _box(_corners(mask) @ m[:, :2].T + m[:, 2], w, h)
     if x2 - x1 < 3 or y2 - y1 < 3:
         return -1.0
     shift = m.copy()
     shift[:, 2] -= (x1, y1)
-    warped = cv2.warpAffine(a.astype(np.float32), shift, (x2 - x1, y2 - y1), flags=cv2.INTER_LINEAR)
-    inside = cv2.warpAffine(mask.astype(np.float32), shift, (x2 - x1, y2 - y1), flags=cv2.INTER_LINEAR) > 0.99
+    # Only the object's own box is read: outside it the mask is 0, and no pixel there is scored.
+    at = _region(mask, 1)
+    back = _inverse(shift)
+    back[:, 2] -= (at[1].start, at[0].start)
+    both = _warp(np.dstack([a[at], mask[at]]), back, (y2 - y1, x2 - x1))
+    warped, inside = both[..., 0], both[..., 1] > 0.99
     if inside.sum() < _MIN_PART_PX:
         return -1.0
     u, v = warped[inside], b[y1:y2, x1:x2].astype(np.float32)[inside]
@@ -648,9 +861,9 @@ def _score(a: np.ndarray, b: np.ndarray, mask: np.ndarray, c0: Point, p: Params)
 
 
 def _corners(mask: np.ndarray) -> np.ndarray:
-    ys, xs = np.nonzero(mask)
-    x1, y1, x2, y2 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
-    return np.float32([[x1, y1], [x2, y1], [x1, y2], [x2, y2]]).reshape(-1, 1, 2)
+    rows, cols = _region(mask, 0)
+    x1, y1, x2, y2 = cols.start, rows.start, cols.stop, rows.stop
+    return np.float64([[x1, y1], [x2, y1], [x1, y2], [x2, y2]])
 
 
 def _box(pts: np.ndarray, w: int, h: int) -> Tuple[int, int, int, int]:
@@ -736,10 +949,9 @@ def _share(sa: np.ndarray, sb: np.ndarray, sil: np.ndarray, box: Tuple[int, int,
     smoothed grey; -1 when the shift takes them out of the shot."""
     x1, y1, x2, y2 = box
     h, w = sb.shape
-    m = np.float32([[1, 0, x1 + dx], [0, 1, y1 + dy]])
     if x1 + dx < 0 or y1 + dy < 0 or x2 + dx > w or y2 + dy > h:
         return -1.0
-    there = cv2.warpAffine(sb, m, (x2 - x1, y2 - y1), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)
+    there = _warp(sb, np.array([[1.0, 0.0, x1 + dx], [0.0, 1.0, y1 + dy]]), (y2 - y1, x2 - x1))
     return float((np.abs(there - sa[y1:y2, x1:x2])[sil] < _CARRY_GREY).mean())
 
 
@@ -756,9 +968,8 @@ def _along_rail(a: np.ndarray, b: np.ndarray, seg: Segment, guess: Params, reach
     peak nearest `guess` is taken (`_SHARE_TIE`). Within a pixel of the seat the edges' correlation is the sharper
     of the two.
     """
-    sa = cv2.GaussianBlur(a.astype(np.float32), (0, 0), _SHARE_SMOOTH)
-    sb = cv2.GaussianBlur(b.astype(np.float32), (0, 0), _SHARE_SMOOTH)
-    face = seg.proven.astype(bool) | cv2.erode(seg.mask.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    sa, sb = _smooth(a, _SHARE_SMOOTH), _smooth(b, _SHARE_SMOOTH)
+    face = seg.proven.astype(bool) | _shrink(seg.mask, 5).astype(bool)
     ys, xs = np.nonzero(face)
     box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
     sil = face[box[1]:box[3], box[0]:box[2]]

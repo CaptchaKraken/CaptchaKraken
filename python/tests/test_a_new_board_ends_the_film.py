@@ -68,11 +68,11 @@ def test_a_new_board_frees_the_slice(tmp_path):
     )
 
 
-def test_the_resample_level_still_resets(tmp_path):
+def test_the_refused_rounds_still_resets(tmp_path):
     # The behaviour `_fresh_board` already had, pinned so the film teardown is an addition rather than a swap.
     solver, _ = _solver_holding_a_plan(tmp_path)
-    solver._resample_level = 3
+    solver._refused_rounds = 3
     solver._acted_on_board = True
     solver._fresh_board()
-    assert solver._resample_level == 0
+    assert solver._refused_rounds == 0
     assert solver._acted_on_board is False

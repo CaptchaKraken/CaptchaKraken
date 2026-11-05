@@ -6,15 +6,17 @@ quietly worse.
 """
 
 import base64
+import io
 import json
 from pathlib import Path
 
-import cv2
 import numpy as np
 import pytest
+from PIL import Image
 
 from captchakraken import clipvideo, prompts
 from captchakraken import planner as P
+from captchakraken.keyframes import read_frame
 from captchakraken.solver import CaptchaSolver, cut_recording
 
 BAND = 128 * 128
@@ -65,7 +67,7 @@ def _clip_frames(n=30):
     for i in range(n):
         f = np.full((120, 160, 3), 255, np.uint8)
         x = 5 + i * 4
-        cv2.rectangle(f, (x, 40), (x + 20, 60), (0, 0, 200), -1)
+        f[40:61, x:x + 21] = (0, 0, 200)
         frames.append(f)
     return frames
 
@@ -85,8 +87,8 @@ def test_a_video_generation_sends_one_video_part_with_the_general_prompt(registr
     assert url.startswith("data:video/jpeg;base64,")
     clip = clipvideo.clip_video(recording.frames, recording.fps, max_pixels=BAND)
     assert len(url.split(",")) - 1 == len(clip.frames), "one JPEG per frame the model is to watch"
-    first = cv2.imdecode(np.frombuffer(base64.b64decode(url.split(",")[1]), np.uint8), cv2.IMREAD_COLOR)
-    assert first.shape[0] * first.shape[1] <= BAND, "frames are cut to the model's pixel ceiling"
+    first = Image.open(io.BytesIO(base64.b64decode(url.split(",")[1])))
+    assert first.width * first.height <= BAND, "frames are cut to the model's pixel ceiling"
     assert parts[1]["text"] == prompts.BUILTIN_PROMPTS["3"]["general"]
 
 
@@ -103,7 +105,7 @@ def test_the_driver_waits_for_the_exact_frame_the_answer_names(registry, wire, t
     assert action.t == 1.7 and action.frame is None
     assert action.await_keyframe in recording.keyframe_paths, \
         "the reference must sit among its sibling screens, or the wait gate's recurrence check has none"
-    waited = cv2.imread(action.await_keyframe)
+    waited = read_frame(action.await_keyframe)
     assert np.array_equal(waited, recording.frames[source])
 
 

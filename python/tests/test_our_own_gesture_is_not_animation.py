@@ -11,12 +11,12 @@ import sys
 from pathlib import Path
 from typing import Any, List, Tuple
 
-import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from captchakraken.humanize import Humanizer  # noqa: E402
+from captchakraken.keyframes import write_frame  # noqa: E402
 from captchakraken.page_solver import INPUT_SETTLE_MS, PageSolver, PageSolverConfig, _now  # noqa: E402
 
 BOARD = {"x": 100.0, "y": 100.0, "width": 300.0, "height": 300.0}
@@ -81,7 +81,7 @@ def test_a_pointer_already_off_the_board_is_not_moved() -> None:
 
 
 def _png(path: str, shade: int) -> None:
-    cv2.imwrite(path, np.full((8, 8, 3), shade, dtype=np.uint8))
+    write_frame(path, np.full((8, 8, 3), shade, dtype=np.uint8))
 
 
 def test_a_board_that_only_changed_under_our_gesture_films_as_still() -> None:

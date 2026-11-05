@@ -1,5 +1,6 @@
 import type { RoundVerdict } from './verdicts';
 import type { Humanizer, TouchTransform } from './humanize.js';
+import type { CustomSelectors, SelectorConfigFile } from './selectors';
 import type { ActionKind, FrameRole, HumanizationMode, PromptFamily, SolveStage, Vendor } from './kinds';
 
 /** One intermediate stage of a solve, handed to `CaptchaKrakenConfig.onStep`. */
@@ -23,6 +24,14 @@ export interface CaptchaKrakenConfig {
   humanization?: HumanizationMode;
   /** Your own gesture implementation; overrides `humanization`. */
   humanizer?: Humanizer;
+  /**
+   * Every URL pattern and selector the solver detects and drives with: a path to a config file of the shape of the
+   * repository's `captchakraken.config.json`, or the parsed object. What it gives is laid over the shipped default, so
+   * a file holding only a `custom` entry adds that entry and keeps every built-in vendor. Default: `DEFAULT_CONFIG_PATH`.
+   */
+  selectors?: string | SelectorConfigFile;
+  /** Deprecated, kept working: your own vendor entry in code. Prefer `custom` in the `selectors` file; when both are given this one wins. */
+  customSelectors?: CustomSelectors;
   /** Mobile only: an Appium / WebdriverIO driver on a real handset. Unset dispatches CDP touch at the page. */
   touchDriver?: any;
   /** Mobile only: CSS-pixel to device-pixel transform for `touchDriver`. */
@@ -47,10 +56,10 @@ export interface CaptchaKrakenConfig {
   maxSolveLoops?: number;
   /** How long to keep looking for a widget the page has not drawn yet, before "no captcha" is believed. Not charged to `overallSolveTimeoutMs`. Default 15000. */
   detectionTimeoutMs?: number;
-  /** Repeats of one answer on one board before the solve ends; the first repeats are re-asked at a fresh sample. Default 2. */
-  maxNoProgressRounds?: number;
   /** @deprecated Ignored since 3.2.0: a round that performed nothing goes straight on to the next. */
   postSolveDelayMs?: number;
+  /** Repeats of one answer on one board before the solve ends; the first repeats are re-asked naming the refused answer. Default 2. */
+  maxNoProgressRounds?: number;
   /** Whole-solve time limit. Default 45000. */
   overallSolveTimeoutMs?: number;
   /** reCAPTCHA grid-load poll interval. Default 250. */
@@ -87,7 +96,9 @@ export interface CaptchaKrakenConfig {
   maxStaleFrameReSolves?: number;
   /** Settle monitor: fraction of pixels that still count as moving. Default 0.01. */
   settleDiffThreshold?: number;
-  /** How long to wait for hCaptcha's task images to paint. Default 3000. */
+  /** How long to wait for a board's task images (the vendor's `images` selectors) to paint. Default 3000. */
+  boardImagesTimeoutMs?: number;
+  /** @deprecated Use `boardImagesTimeoutMs`; read when that is unset. */
   hcaptchaImagesTimeoutMs?: number;
   /** Settle monitor poll interval. Default 220. */
   settlePollMs?: number;
@@ -125,10 +136,10 @@ export interface CaptchaKrakenConfig {
   stepScreenshotTimeoutMs?: number;
   /** @deprecated Ignored since 3.2.0: a stale handle now counts against `maxSolveLoops`. */
   maxStaleElementRetries?: number;
-  /** The pause before a failed round is tried again. Default 900. */
-  staleElementBackoffMs?: number;
   /** @deprecated Ignored since 3.2.0: an unusable answer now counts against `maxSolveLoops`. */
   maxUnsupportedReSolves?: number;
+  /** The pause before a failed round is tried again. Default 900. */
+  staleElementBackoffMs?: number;
 }
 
 export interface BoundingBox {

@@ -18,12 +18,6 @@ from .server_manager import ensure_server
 
 DEBUG = os.getenv("CAPTCHA_DEBUG", "0") == "1"
 
-# A floor, not a resize, and the AREA is clamped rather than the sides: predictions on a 277x285 GeeTest
-# board landed 80-105px from the hand label at native size and 1-4px once upscaled, and squashing the
-# aspect moves every tile centre.
-MIN_PIXELS = 448 * 448
-
-
 def _encode_image(path: str,
                   budget: "Optional[prompts.PixelBudget]" = None) -> tuple:
     budget = budget or prompts.pixel_budget(None)
@@ -160,28 +154,6 @@ PIXEL_ACTION_PROMPT = _LATEST.action_prompt
 
 
 
-# Greedy only, by measurement: (0.0, 0.35, 0.7) scored 0/5 against 4/5 and made the median failed attempt
-# 24.0s against 13.9s, because a differing re-ask resets the no-progress counter. The level plumbing stays for
-# a network-refusal trigger. Lives here once so the two ports cannot drift (TRIBAL_KNOWLEDGE.md).
-RESAMPLE_TEMPERATURES = (0.0,)
-
-
-def sampling_for_level(level: int) -> Dict[str, Any]:
-    temps = RESAMPLE_TEMPERATURES or (0.0,)
-    temp = temps[min(max(level, 0), len(temps) - 1)]
-    if not temp:
-        return {}
-    return {"temperature": temp, "seed": 1000 + level}
-
-
-def _sampling_from_env() -> Dict[str, Any]:
-    raw = os.environ.get("CAPTCHA_RESAMPLE_LEVEL", "").strip()
-    if not raw:
-        return {}
-    try:
-        return sampling_for_level(int(raw))
-    except ValueError:
-        return {}
 
 
 #: The ceiling on one ask, and the old hardcoded value. Measured why it matters: against the hosted
@@ -224,6 +196,8 @@ def _norm_xy(x: Any, y: Any) -> Optional[tuple]:
 # Closer than this (0-1 of the board) and two pointer clicks are one target. Small enough that neighbouring icons in a
 # click-in-order puzzle stay two targets.
 REPEATED_POINT = 0.004
+#: Refused answers sent back with one pointer ask: the server's MAX_AVOID.
+POINTER_AVOID_MAX = 32
 
 
 def _without_repeated_points(action: Dict[str, Any]) -> Dict[str, Any]:
@@ -258,7 +232,11 @@ class ActionPlanner:
         if config.is_hosted_endpoint(self.base_url) and prompts.is_legacy_hosted_name(self.model):
             _warn_legacy_model_once(self.model)
         self.api_key = api_key or config.api_key()
-        self.sampling: Dict[str, Any] = {}
+        #: The pointer's answers on the current board, oldest first. The pointer's heads are an argmax, so a
+        #: re-ask cannot move them: once the caller sets `avoid_refused`, every ask names these and the
+        #: server answers with its likeliest OTHER answer. The caller clears both when the board changes.
+        self.pointer_answers: List[Dict[str, Any]] = []
+        self.avoid_refused = False
         #: Seconds a single ask may take. The CALLER owns this: a solve has a budget, and a request
         #: that outlives it cannot be cancelled once it is in flight — the deadline is only read
         #: between steps. Left alone it is the old ceiling; `PageSolver` lowers it to what remains.
@@ -365,10 +343,6 @@ class ActionPlanner:
             "chat_template_kwargs": {"enable_thinking": False},
             "reasoning_effort": "none",
         }
-        sampling = self.sampling or _sampling_from_env()
-        if sampling:
-            payload.update(sampling)
-
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -536,7 +510,10 @@ class ActionPlanner:
             **routing_headers(hosted=config.is_hosted_endpoint(self.base_url)),
         }
         url = f"{self.base_url}{self._POINTER_PATH}"
-        self._log(f"POST {url} model={self.model} media={sorted(k for k in body if k != 'model')}")
+        self._log(f"POST {url} model={self.model} media={sorted(k for k in body if k not in ('model', 'avoid'))}")
+        if self.avoid_refused and self.pointer_answers:
+            body = {**body, "avoid": self.pointer_answers[-POINTER_AVOID_MAX:]}
+            self._log(f"asking past {len(body['avoid'])} refused answer(s)")
         resp = self._http.post(url, headers=headers, json={"model": self.model, **body},
                                timeout=self.request_timeout_s or DEFAULT_REQUEST_TIMEOUT_S)
         if not resp.ok:
@@ -549,6 +526,7 @@ class ActionPlanner:
         if not isinstance(answer, dict):
             raise RuntimeError(f"the pointer server's reply from {url} has no answer: {str(data)[:300]}")
         self._log(f"pointer answer: {answer}")
+        self.pointer_answers.append({k: v for k, v in answer.items() if k != "checks"})
         return answer
 
     def get_pointer_actions(self, image_path: str) -> List[Dict[str, Any]]:

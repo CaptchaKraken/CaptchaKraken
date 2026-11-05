@@ -20,6 +20,7 @@ def packed(action="click", count=0, drags=1, slots=None, text=(), moment=0):
         v += [tok, dx, dy, 0.9, el[0] if el else 0, 0.8]
     ids = list(text) + [-1] * (L.MAX_TEXT - len(text))
     v += ids + [moment, 0.7]
+    v += [0.0] * (L.ALTS * L.ALT_WIDTH * len(L.SLOTS) + 3 * L.MAX_TEXT)   # no runner-ups
     assert len(v) == L.PACKED
     return v
 

@@ -9,8 +9,8 @@ import sys
 
 import pytest
 
-torch = pytest.importorskip("torch", reason="torch is only installed with the serving stack")
-import torch.nn.functional as F
+torch = pytest.importorskip("torch")
+import torch.nn.functional as F  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 

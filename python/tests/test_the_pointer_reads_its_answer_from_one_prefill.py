@@ -81,3 +81,22 @@ def test_a_video_point_is_read_on_the_chosen_moment():
     on_moment = h[pos.vis].reshape(3, 6, d)[m]
     assert got["slots"]["click1"]["token"] == int(heads.point("click", q["click1"], on_moment).argmax())
     assert 0 <= got["slots"]["click1"]["token"] < 6
+
+
+def test_each_slot_carries_its_runner_up_tokens_and_each_character_its_runner_up():
+    torch.manual_seed(2)
+    d = 32
+    heads = Hd.Heads(d, dp=16, text_rank=8)
+    ids = still(n_tokens=12)
+    pos = Hd.Positions(ids, IDS)
+    h = torch.randn(len(ids), d)
+    lm = torch.randn(50, d)
+    got = L.unpack(heads.decide(h, pos, lm).tolist())
+    q = dict(zip(L.QUESTIONS, h[pos.q]))
+    order = heads.point("click", q["click3"], h[pos.vis]).argsort(descending=True).tolist()
+    s = got["slots"]["click3"]
+    assert [s["token"]] + [a["token"] for a in s["alts"]] == order[:1 + L.ALTS]
+    assert s["p_point"] >= s["alts"][0]["p_point"] >= s["alts"][1]["p_point"]
+    logits = heads.text(torch.stack([q[n] for n in L.TEXT]), lm)
+    assert got["text_alt_ids"] == logits.argsort(-1, descending=True)[:, 1].tolist()
+    assert all(p >= a for p, a in zip(got["text_p"], got["text_alt_p"]))

@@ -248,3 +248,45 @@ def test_the_executor_lets_go_when_the_fill_reaches_the_mark(monkeypatch, tmp_pa
     assert s._execute_hold(page, action, box, el) is True
     assert shots[-1] in (290, 340) and 349 not in shots, shots
     assert _kinds(page).count("down") == 1 and _kinds(page)[-1] == "up"
+
+
+# ── a widget that completes on its own: HUMAN's button ───────────────────────
+
+def test_a_self_completing_widget_is_held_past_its_mark_until_it_settles(monkeypatch):
+    """HUMAN's button verifies only once it has drawn its done state, and resets when let go at full. The fill
+    reaching `to` is therefore not a release: the fill line is never tracked, and the hold ends on the widget's
+    own signal — here its finished picture sitting still."""
+    clock = iter(x * 0.25 for x in range(1000))
+    monkeypatch.setattr(page_solver.time, "monotonic", lambda: next(clock))
+    # Unchanged, the fill moving, the check drawing itself in, then the done state sitting still.
+    s = _solver(monkeypatch, ["a", "a", "b", "c", "d", "e", "e", "e", "e", "e", "e", "e"])
+
+    def screenshot(*_a, **_k):
+        raise AssertionError("a self-completing hold never tracks its fill line")
+
+    s._screenshot = screenshot
+    page = Page()
+    box = {"x": 0, "y": 0, "width": 400, "height": 100}
+    action = {"action": ActionKind.HOLD, "target_bounding_box": [0.45, 0.45, 0.55, 0.55],
+              "fill_from_bounding_box": [0.12, 0.49, 0.13, 0.51], "fill_to_bounding_box": [0.87, 0.49, 0.88, 0.51]}
+    el = Element()
+    el.box = box
+    assert s._execute_hold(page, action, box, el, completes_itself=True) is True
+    assert _kinds(page).count("down") == 1 and _kinds(page)[-1] == "up"
+
+
+def test_the_vendors_whose_hold_completes_on_its_own_are_named():
+    from captchakraken.selectors import SELECTORS
+    from captchakraken.kinds import Vendor
+    assert SELECTORS[Vendor.HUMAN].hold_completes and SELECTORS[Vendor.FUNCAPTCHA].hold_completes
+    # A hold graded on where it lets go (a line to fill to a mark) is released at the mark.
+    assert not SELECTORS[Vendor.UNKNOWN].hold_completes
+
+
+def test_your_own_entry_is_released_at_its_mark_unless_it_says_it_completes():
+    from captchakraken.kinds import Vendor
+    from captchakraken.selectors import SelectorTable, VendorSelectors
+    gauge = SelectorTable(VendorSelectors(hosts=(), widget=("#gauge",)))
+    assert not gauge.selectors[Vendor.UNKNOWN].hold_completes
+    button = SelectorTable(VendorSelectors(hosts=(), widget=("#button",), hold_completes=True))
+    assert button.selectors[Vendor.UNKNOWN].hold_completes
