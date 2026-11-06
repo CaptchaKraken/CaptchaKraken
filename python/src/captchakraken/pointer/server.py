@@ -8,8 +8,10 @@ POST /v1/pointer
     {"frames": ["<base64 JPEG>", ...], "fps": 5.0}    a video, `clipvideo`-cut
     {"marked": false}                                 optional: skip the detector
     {"avoid": [answer, ...]}                          optional: answers already refused on this
-                                                      board; the likeliest other one comes back
--> {"answer": {...}, "elements": [{"id", "class", "box", "score"}], "size": [W, H]}
+                                                      board; the likeliest other ones come back
+-> {"actions": [{...}, {...}, {...}],                 the three likeliest distinct answers, best first
+    "answer": {...},                                 the first action, kept for older callers
+    "elements": [{"id", "class", "box", "score"}], "size": [W, H]}
 
 `elements` are in the pixels of the board as the model saw it (`size`), numbered
 as the answer's ids are. The client sends no prompt: the server owns it.
@@ -67,7 +69,8 @@ def parse(body: Dict) -> Dict:
 
 
 def reply(result: Dict) -> Dict:
-    return {"answer": result["answer"], "size": list(result["size"]),
+    return {"actions": result.get("answers") or [result["answer"]],
+            "answer": result["answer"], "size": list(result["size"]),
             "elements": [{"id": n, "class": e["class"], "box": [round(v, 1) for v in e["box"]],
                           "score": e["score"]} for n, e in enumerate(result["elements"], 1)]}
 

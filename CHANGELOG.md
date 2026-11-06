@@ -35,6 +35,11 @@ Version 4.0.0.
 
 ### Added
 
+- **`POST /v1/pointer` returns the three likeliest actions.** `actions` holds
+  three distinct complete plans, best first; perform the first and keep the
+  other two as fallbacks. `answer` repeats the first for clients that predate
+  the field.
+
 - **`HF_TOKEN` fetches the detector weights from a private repository.** The
   download sends it as a bearer token when it is set, and nothing otherwise.
 

@@ -11,6 +11,11 @@ An older client keeps using its registered chat-completion model because its
 prompts and inference protocol belong to that generation. There is no silent
 substitution between chat-completion and pointer models.
 
+Every pointer response carries `actions`: the three likeliest distinct plans,
+best first. Perform the first; the second and third are the fallbacks if the
+widget refuses it. `answer` repeats the first for older clients. One response is
+one billable response, however many actions it contains.
+
 The client code is identical to the self-hosted path. Only the endpoint changes.
 
 ## Sign in without touching a key

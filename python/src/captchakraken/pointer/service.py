@@ -337,14 +337,16 @@ def _in_board_script(text: str, slots: Sequence[Dict]) -> List[str]:
     return [latin, cyrillic]
 
 
-def read_answer(d: Dict, size, els, detokenize, stop_id: Optional[int],
-                timestamps=None, avoid: Sequence[Dict] = (), letters: Optional[Sequence[Dict]] = None) -> Dict:
-    """Unpacked decisions -> the answer, with element ids and `checks`.
+def read_answers(d: Dict, size, els, detokenize, stop_id: Optional[int],
+                 timestamps=None, avoid: Sequence[Dict] = (), letters: Optional[Sequence[Dict]] = None,
+                 top: int = 3) -> List[Dict]:
+    """Unpacked decisions -> the likeliest distinct answers, best first.
 
-    `avoid`: answers already performed on this board and refused. The answer is the
-    likeliest of `layout.variants` that does something none of them did, so a
-    deterministic model still moves when its first answer is refused, and never back
-    onto one already tried. With every variant refused, the heads' own answer.
+    `avoid`: answers already performed on this board and refused. `top` answers are
+    returned, each doing something none of `avoid` and none of the answers before it
+    did, so a deterministic model still moves when an answer is refused and never
+    goes back onto one already tried. With every variant refused, the heads' own
+    answer is the one that comes back.
 
     `letters`: the letter detector's letters on a typed board (`letter_slots`). The
     code typed is the one the model and the detector read together (`fused_texts`):
@@ -353,6 +355,8 @@ def read_answer(d: Dict, size, els, detokenize, stop_id: Optional[int],
     detector's reading and whether it spells what the model read on its own (`fold`ed):
     two readers that agree are almost always right (all 25 such real boards), and the
     fusion matters where they do not."""
+    if top < 1:
+        raise ValueError("top must be at least 1")
     grid = L.token_grid(size)
     if timestamps is not None and els:
         els = E.on_frame(els, E.moment_frame(d["moment"], len(els[0]["frames"])))
@@ -368,6 +372,7 @@ def read_answer(d: Dict, size, els, detokenize, stop_id: Optional[int],
         order = [*joint, *order, {**order[0], "typed": _in_board_script(reading, slots)[0],
                                   "retry": "letter detector's reading"}]
     first = None
+    answers: List[Dict] = []
     for v in order:
         ids = v["text_ids"]
         if stop_id is not None and stop_id in ids:
@@ -383,9 +388,20 @@ def read_answer(d: Dict, size, els, detokenize, stop_id: Optional[int],
             ans["checks"]["letters"] = reading
             ans["checks"]["letters_agree"] = fold(model) == fold(reading)
         first = first or ans
-        if not any(same_effect(ans, r) for r in avoid):
-            return ans
-    return first
+        if any(same_effect(ans, r) for r in avoid):
+            continue
+        if any(same_effect(ans, r) for r in answers):
+            continue
+        answers.append(ans)
+        if len(answers) >= top:
+            break
+    return answers or ([first] if first is not None else [])
+
+
+def read_answer(d: Dict, size, els, detokenize, stop_id: Optional[int],
+                timestamps=None, avoid: Sequence[Dict] = (), letters: Optional[Sequence[Dict]] = None) -> Dict:
+    """The single likeliest answer; `read_answers` with `top=1`."""
+    return read_answers(d, size, els, detokenize, stop_id, timestamps, avoid, letters, top=1)[0]
 
 
 class PointerService:
@@ -455,7 +471,8 @@ class PointerService:
                             "multi_modal_data": {"image": [*earlier, shown] if earlier else shown}},
                 "size": board.size, "elements": els, "shown": shown, "timestamps": None, "board": board}
 
-    def decode(self, prep: Dict, vector: Sequence[float], avoid: Sequence[Dict] = ()) -> Dict:
+    def decode_answers(self, prep: Dict, vector: Sequence[float], avoid: Sequence[Dict] = (),
+                       top: int = 3) -> List[Dict]:
         v = [float(x) for x in vector]
         per_moment, _moments = v[L.PACKED:L.PACKED + vllm_plugin.TRAILER]
         grid = L.token_grid(prep["size"])
@@ -463,8 +480,12 @@ class PointerService:
             raise ValueError(f"vLLM saw {int(per_moment)} tokens per moment, the board has {grid}: "
                              "the processor resized it, so points would be misplaced")
         d = L.unpack(v[:L.PACKED])
-        return read_answer(d, prep["size"], prep["elements"], self.processor.tokenizer.decode, self.stop_id,
-                           prep["timestamps"], avoid, self.count_letters(prep, d))
+        return read_answers(d, prep["size"], prep["elements"], self.processor.tokenizer.decode, self.stop_id,
+                            prep["timestamps"], avoid, self.count_letters(prep, d), top)
+
+    def decode(self, prep: Dict, vector: Sequence[float], avoid: Sequence[Dict] = ()) -> Dict:
+        """The single likeliest answer; `decode_answers` with `top=1`."""
+        return self.decode_answers(prep, vector, avoid, 1)[0]
 
     def count_letters(self, prep: Dict, d: Dict) -> Optional[List[Dict]]:
         """The letter detector's `letter_slots` on a still the heads would type into; else None."""
@@ -475,16 +496,22 @@ class PointerService:
         return letter_slots(self.letters.detect(prep["board"], min_score=FAINTEST_LETTER))
 
     def solve(self, image: Optional[Image.Image] = None, frames: Optional[Sequence[np.ndarray]] = None,
-              marked: bool = True, history: Sequence[Image.Image] = (), avoid: Sequence[Dict] = ()) -> Dict:
-        """-> {"answer": generation-3 dict, "elements": numbered elements (board px;
-        a video's are `elements.track` tracks),
-        "shown": the image the model saw (None for a video), "size": board (W, H)}. `avoid`: see `read_answer`."""
+              marked: bool = True, history: Sequence[Image.Image] = (), avoid: Sequence[Dict] = (),
+              top: int = 3) -> Dict:
+        """-> {"answer": the likeliest generation-3 dict, "answers": the `top` likeliest
+        distinct ones, "elements": numbered elements (board px; a video's are
+        `elements.track` tracks), "shown": the image the model saw (None for a video),
+        "size": board (W, H)}. `avoid`: see `read_answers`."""
         return self.solve_many([{"image": image, "frames": frames, "marked": marked, "history": history,
-                                 "avoid": avoid}])[0]
+                                 "avoid": avoid}], top=top)[0]
 
-    def solve_many(self, boards: List[Dict]) -> List[Dict]:
+    def solve_many(self, boards: List[Dict], top: int = 3) -> List[Dict]:
         preps = [self.prepare(b.get("image"), b.get("frames"), b.get("marked", True), b.get("history", ()))
                  for b in boards]
         outs = self.llm.embed([p["request"] for p in preps], use_tqdm=False)
-        return [{"answer": self.decode(p, o.outputs.embedding, b.get("avoid", ())), "elements": p["elements"],
-                 "shown": p["shown"], "size": p["size"]} for b, p, o in zip(boards, preps, outs)]
+        results = []
+        for b, p, o in zip(boards, preps, outs):
+            answers = self.decode_answers(p, o.outputs.embedding, b.get("avoid", ()), top)
+            results.append({"answer": answers[0], "answers": answers, "elements": p["elements"],
+                            "shown": p["shown"], "size": p["size"]})
+        return results

@@ -126,6 +126,16 @@ def test_the_server_takes_the_refused_answers():
         Srv.parse({"image": img, "avoid": ["XK4XWP"]})
 
 
+def test_the_server_returns_the_three_likeliest_actions():
+    d = decision(count=2, slots={"click1": (21, 0.9, [(22, 0.05)]), "click2": (100, 0.5, [(140, 0.4)])})
+    answers = Svc.read_answers(d, SIZE, [], lambda ids: "", STOP, top=3)
+    assert len(answers) == 3
+    assert answers[0] == Svc.read_answer(d, SIZE, [], lambda ids: "", STOP)
+    assert all(not Svc.same_effect(a, b) for i, a in enumerate(answers) for b in answers[i + 1:])
+    out = Srv.reply({"answer": answers[0], "answers": answers, "size": SIZE, "elements": []})
+    assert out["actions"] == answers and out["answer"] == answers[0]
+
+
 def test_the_planner_names_the_refused_answers_once_told_to(monkeypatch):
     sent = []
     answers = iter([{"action": "type", "text": "AB", "checks": {}}, {"action": "type", "text": "AC"}, {}])

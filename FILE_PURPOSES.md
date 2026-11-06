@@ -306,8 +306,8 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/pointer/marks.py` | Draws the numbered overlay the model sees: a 1 px trace of each element's mask, not its box, and a tag drawn in a built-in pixel font at 3x, big enough for the vision encoder to read. |
 | `python/src/captchakraken/pointer/heads.py` | The heads that read the answer off the prefill's hidden states: action, count, a point per slot, the element under it, the video moment, and typed text. |
 | `python/src/captchakraken/pointer/vllm_plugin.py` | The vLLM plugin that serves the pointer as a pooling model: one prefill per board, and the heads' packed decision is the output. |
-| `python/src/captchakraken/pointer/service.py` | Board in, answer out: detector, marks, one vLLM prefill, decode. |
-| `python/src/captchakraken/pointer/server.py` | The `/v1/pointer` HTTP endpoint in front of `PointerService`. |
+| `python/src/captchakraken/pointer/service.py` | Board in, answers out: detector, marks, one vLLM prefill, decode, the three likeliest distinct plans. |
+| `python/src/captchakraken/pointer/server.py` | The `/v1/pointer` HTTP endpoint in front of `PointerService`; returns the three likeliest actions and the first as `answer`. |
 
 ### `python/tests/`
 
@@ -406,7 +406,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_slow_camera_does_not_stretch_the_burst.py` | The burst's windows are budgets in milliseconds, so a camera slower than the interval must not spend more of the solve than a fast one. |
 | `python/tests/test_a_refused_clip_is_not_re_asked.py` | A recording with no steady screen cannot answer differently, so a refusal must throw the frames away rather than re-ask them. |
 | `python/tests/test_a_repeated_answer_is_not_re_performed.py` | An answer the widget already refused is not pressed again; the round re-asks instead. |
-| `python/tests/test_a_refused_pointer_answer_moves_to_the_next.py` | A pointer retry gets the likeliest answer the board has not already refused, read from the heads' runner-ups. |
+| `python/tests/test_a_refused_pointer_answer_moves_to_the_next.py` | A pointer retry gets the likeliest answer the board has not already refused, read from the heads' runner-ups; the server returns the three likeliest distinct actions. |
 | `python/tests/test_a_typed_code_is_read_by_the_model_and_the_letter_detector_together.py` | A typed code is the one the pointer and the letter detector read together: boxes settle the count, evidence each letter. |
 | `python/tests/test_a_typed_captcha_is_shown_with_its_box.py` | A typed captcha is photographed with its text box, as every training board shows it. |
 | `python/tests/test_a_hold_is_held_until_the_widget_completes.py` | A `hold` answer survives parsing as a hold with its press and fill line, the fill tracker finds a drawn bar's leading edge, and the press lasts until the fill reaches the model's mark or the widget finishes, never longer than the cap. |

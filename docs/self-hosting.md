@@ -41,6 +41,21 @@ The server listens on `http://127.0.0.1:8000` and provides:
 - `GET /v1/models` — the served model name
 - `GET /health` — the unauthenticated load-balancer health check
 
+A pointer response carries three complete plans, best first:
+
+```json
+{"actions": [{"action": "click", "points": [[x, y]], "checks": {}},
+             {"action": "click", "points": [[x, y]], "checks": {}},
+             {"action": "drag", "drags": [{"from": [x, y], "to": [x, y]}], "checks": {}}],
+ "answer": {"action": "click", "points": [[x, y]], "checks": {}},
+ "size": [W, H],
+ "elements": [{"id": 1, "class": "tile", "box": [x, y, w, h], "score": 0.9}]}
+```
+
+Perform the first action. The second and third are the next likeliest distinct
+plans, for a retry after the widget refuses it. `answer` repeats the first for
+callers written before `actions`.
+
 `captchakraken.env` contains a random bearer key. The client and server read it
 from the same file, so no further configuration is needed. Remote vLLM endpoints
 are never auto-started:
