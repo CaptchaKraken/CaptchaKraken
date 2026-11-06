@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   API_KEY_ENV,
   buildSolveArgs,
+  parseSolveOutput,
   redactCommand,
   solveEnv,
   type SolveInvocation,
@@ -19,6 +20,12 @@ const invocation: SolveInvocation = {
   model: 'captcha-v12',
   puzzleSource: Vendor.HCAPTCHA,
 };
+
+test('a paged puzzle\'s earlier screens travel as --history, oldest first', () => {
+  const args = buildSolveArgs({ ...invocation, history: ['/tmp/page1.png', '/tmp/page2.png'] });
+  assert.deepEqual(args.filter((a) => a.startsWith('--history=')),
+    ['--history=/tmp/page1.png', '--history=/tmp/page2.png']);
+});
 
 test('the api key never appears in argv', () => {
   const args = buildSolveArgs(invocation);
@@ -67,4 +74,18 @@ test('vendor hint, retry mode and text mode still reach the CLI', () => {
   assert.ok(args.includes('--retry-mode=missed-tiles'));
   assert.ok(args.includes('--text-mode'));
   assert.ok(args.includes('captcha-v12'));
+});
+
+const PLAN_A = [{ action: 'click', target_bounding_boxes: [[0.1, 0.1, 0.2, 0.2]] }];
+const PLAN_B = [{ action: 'click', target_bounding_boxes: [[0.5, 0.5, 0.6, 0.6]] }];
+
+test("the server's other plans survive the CLI's output", () => {
+  const out = parseSolveOutput(`a log line\n${JSON.stringify({ actions: PLAN_A, fallbacks: [PLAN_B], token_usage: [] })}\n`);
+  assert.deepEqual(out.actions, PLAN_A);
+  assert.deepEqual(out.fallbacks, [PLAN_B]);
+});
+
+test('an answer without other plans has none', () => {
+  const out = parseSolveOutput(JSON.stringify({ actions: PLAN_A, token_usage: [] }));
+  assert.equal(out.fallbacks, undefined);
 });

@@ -551,17 +551,23 @@ class PageSolver:
         self._last_answer_sig: Optional[str] = None
         self._no_progress_rounds = 0
         self._refused_rounds = 0
+        self._fallback_board: Optional[str] = None
+        self._exchanges_at_answer = 0
+        self._drop_pointer_history()
         self._apply_refusals()
 
-    @staticmethod
-    def _answer_signature(actions: Sequence[Any], retry_mode: Optional[RetryMode]) -> Optional[str]:
-        """Keyed on retry mode: the missed-tiles answer legitimately overlaps the previous one."""
+    def _answer_signature(self, actions: Sequence[Any], retry_mode: Optional[RetryMode]) -> Optional[str]:
+        """Keyed on the BOARD and the retry mode, not the answer alone.
+
+        A paged puzzle's next arrow is at the same point on every page, so a signature over the actions
+        alone would call a correct page turn a repeated answer and stop pressing it.
+        """
         try:
             parts = [(a.get("action"), _round_pts(a.get("target_bounding_boxes")),
                       _round_pts(a.get("target_bounding_box")), _round_pts(a.get("target_coordinates")),
                       _round_pts(a.get("source_bounding_box")), a.get("text"))
                      for a in map(_as_dict, actions)]
-            return repr((retry_mode, parts))
+            return repr((self._fallback_board, retry_mode, parts))
         except Exception:
             return None
 
@@ -577,14 +583,21 @@ class PageSolver:
         if sig is not None and sig == self._last_answer_sig:
             self._no_progress_rounds += 1
             _log(f"[no-progress] the model returned the same answer again ({self._no_progress_rounds} in a row)")
-            self._refused_rounds += 1
-            self._apply_refusals()
+            # A board that said nothing to its server has refused nothing, and another plan is one more press.
+            if not self._board_stayed_silent():
+                self._refused_rounds += 1
+                self._apply_refusals()
             self._invalidate_animated_answer()
             self._arm_animated_probe()
             return True
         self._no_progress_rounds = 0
         self._last_answer_sig = sig
+        self._exchanges_at_answer = self._verdicts.exchanges if self._verdicts else 0
         return False
+
+    def _board_stayed_silent(self) -> bool:
+        log = self._verdicts
+        return log is not None and log.listening and log.exchanges == self._exchanges_at_answer
 
     def _bound_ask_to_the_budget(self) -> None:
         """Give the planner what is LEFT of the solve, so one ask cannot outlive the whole thing.
@@ -613,6 +626,71 @@ class PageSolver:
                 target.pointer_fallbacks.clear()
             if hasattr(target, "pointer_has_actions"):
                 target.pointer_has_actions = False
+            self._fallback_board = None
+
+    def _drop_pointer_history(self) -> None:
+        """A paged puzzle's earlier screens do not belong to the next puzzle."""
+        directory = getattr(self, "_pointer_history_dir", None)
+        if directory:
+            shutil.rmtree(directory, ignore_errors=True)
+        self._pointer_history: List[str] = []
+        self._pointer_history_dir: Optional[str] = None
+        planner = getattr(self._solver, "planner", None)
+        if planner is not None and hasattr(planner, "pointer_history"):
+            planner.pointer_history = self._pointer_history
+
+    def _keep_pointer_screen(self, shot: str, puzzle_source: Vendor, actions: Sequence[Any]) -> None:
+        """A FunCaptcha page turn's answer depends on the screens already seen; keep each one for the next ask.
+
+        The model reads the earlier screens of the same puzzle as history. Sent only the current page, it
+        has nothing to compare against and keeps answering "next arrow", including on the match.
+        """
+        if puzzle_source != Vendor.FUNCAPTCHA:
+            return
+        kinds = {_as_dict(a).get("action") for a in actions}
+        if kinds != {ActionKind.CLICK}:
+            return
+        if self._pointer_history_dir is None:
+            self._pointer_history_dir = tempfile.mkdtemp(prefix="ck_pghist_")
+        path = os.path.join(self._pointer_history_dir, f"{len(self._pointer_history):02d}.png")
+        try:
+            shutil.copyfile(shot, path)
+        except OSError:
+            return
+        self._pointer_history.append(path)
+        while len(self._pointer_history) > 8:
+            old = self._pointer_history.pop(0)
+            _unlink(old)
+        planner = getattr(self._solver, "planner", None)
+        if planner is not None and hasattr(planner, "pointer_history"):
+            planner.pointer_history = self._pointer_history
+
+    def _board_hash(self, element: Any, shot: str, filmed: bool) -> str:
+        """The board's identity, always from a plain photograph: a filmed frame of an unchanged board differs in bytes."""
+        if not filmed:
+            return _sha1(shot)
+        plain = _tmp_png("board")
+        try:
+            self._screenshot(element, plain, timeout_ms=self.config.element_screenshot_timeout_ms)
+            return _sha1(plain)
+        finally:
+            _unlink(plain)
+
+    def _guard_fallbacks_to_board(self, board: str) -> None:
+        """A fallback plan answers the board it was read off. Reuse it only while that board is still up.
+
+        The next round's screenshot is the test. Without it, a vendor that deals a new board without
+        saying so has the previous board's second plan pressed onto the new one.
+        """
+        target = getattr(self._solver, "planner", None)
+        if target is None or not getattr(getattr(target, "prompts", None), "pointer", False):
+            return
+        if self._fallback_board is not None and board != self._fallback_board:
+            if self._refused_rounds or getattr(target, "pointer_fallbacks", None):
+                _log("[pointer] the board changed; dropping the previous answer's fallbacks")
+            self._refused_rounds = 0
+            self._apply_refusals()
+        self._fallback_board = board
 
     def _fresh_board(self) -> None:
         # ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer describes the
@@ -626,6 +704,7 @@ class PageSolver:
         self._animated_probe_done = False
         self._refused_rounds = 0
         self._acted_on_board = False
+        self._drop_pointer_history()
         self._apply_refusals()
 
     def _check_deadline(self, where: str) -> None:
@@ -2143,6 +2222,7 @@ class PageSolver:
                 if not have_shot:
                     with self._phase(Phase.SCREENSHOT):
                         self._screenshot(element, shot, timeout_ms=self.config.element_screenshot_timeout_ms)
+                self._guard_fallbacks_to_board(self._board_hash(element, shot, filmed=have_shot))
                 if self._should_speculate(puzzle_source, text_mode):
                     actions, all_usage, keyframe_dir = self._speculate(element, shot, puzzle_source, retry_mode, text_mode)
                     is_animated = keyframe_dir is not None
@@ -2169,6 +2249,8 @@ class PageSolver:
             # `_note_answer` drops the refused animated answer on its way through, so the next round re-asks.
             if self._note_answer(actions, retry_mode):
                 return False, all_usage
+            if not is_animated:
+                self._keep_pointer_screen(shot, puzzle_source, actions)
             _log(f"executing {len(actions)} action(s)")
 
             for raw_action in actions:
@@ -2214,18 +2296,15 @@ class PageSolver:
 
             # A slide submits itself on release, and any Verify found afterwards belongs to the host page and would
             # submit the guarded form while the verdict is in flight. An empty or `done` plan still presses Verify/Skip.
-            verify_button = self._get_verify_button(scope) if frame or not slid else None
+            # FunCaptcha's answer is the click itself: an arrow pages and Submit submits. The generic Verify
+            # fallback would submit the page an arrow just turned to.
+            verify_button = (self._get_verify_button(scope)
+                             if (frame or not slid) and puzzle_source != Vendor.FUNCAPTCHA else None)
             if not slid and (answered or not performed) and verify_button:
                 _log(f"clicking Verify to submit ({puzzle_source}).")
                 self._move_and_click(page, verify_button)
                 performed = True
                 self._last_submit_frame_hash = self._element_frame_hash(element)
-            # The first plan has run. If it did not end the solve, the next ask is the server's second plan,
-            # not a re-ask that returns the first one again: an argmax model cannot move on its own.
-            planner = getattr(self._solver, "planner", None)
-            if getattr(getattr(planner, "prompts", None), "pointer", False) and self._refused_rounds == 0:
-                self._refused_rounds = 1
-                self._apply_refusals()
         finally:
             _unlink(shot)
             held = self._animated_plan[1] if self._animated_plan else None
@@ -2442,6 +2521,11 @@ class PageSolver:
                 raise blocked("it is showing its try-again-later screen")
             if said == Verdict.REJECTED:
                 _log(f"[verdict] the vendor rejected the answer after {verdict_ms:.0f}ms")
+                # Only a refusal earns the server's next plan. A round that ended with no verdict, or on a
+                # board that merely repainted, has not refused anything, and every extra press is behaviour
+                # a vendor scores.
+                self._refused_rounds += 1
+                self._apply_refusals()
 
             # Only "select all matching images" means tiles were missed; "please try again" is a wrong answer and
             # deals a new board, which is asked fresh.

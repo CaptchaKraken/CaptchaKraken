@@ -466,7 +466,8 @@ class PointerService:
                 if tracks:
                     fr = np.stack([np.asarray(M.draw(im, E.on_frame(tracks, k)))
                                    for k, im in enumerate(ims)])
-            return {"request": {"prompt": L.chat(self.processor, True),
+            prompt = L.chat(self.processor, True).replace(L.VIDEO_PAD, L.VLLM_VIDEO)
+            return {"request": {"prompt": prompt,
                                 "multi_modal_data": {"video": (fr, meta)},
                                 "mm_processor_kwargs": {"do_sample_frames": False}},
                     "size": (w, h), "elements": tracks, "shown": None,

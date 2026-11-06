@@ -402,11 +402,14 @@ def main():
                         help="Force one expert of a routed model. Also CAPTCHA_EXPERT.")
     parser.add_argument("--text-mode", action="store_true",
                         help="The widget has a text box, so the answer is typed rather than clicked.")
+    parser.add_argument("--history", action="append", default=[],
+                        help="An earlier screen of the same paged puzzle, oldest first (repeatable).")
     args = parser.parse_args()
     _image(args.image_path)
 
     def query():
         solver = CaptchaSolver(model=args.model, api_key=args.api_key, expert=args.expert)
+        solver.planner.pointer_history = list(args.history)
         result = solver.solve(args.image_path, puzzle_source=args.puzzle_source,
                               retry_mode=args.retry_mode, text_mode=args.text_mode)
         actions = [a.model_dump() for a in result] if isinstance(result, list) else result.model_dump()

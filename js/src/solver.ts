@@ -27,7 +27,7 @@ import { aggregateTokenUsage } from './token-usage';
 import { parseApiError } from './errors';
 import { DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS } from './limits';
 import { resolvePythonCommand } from './python-command';
-import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
+import { buildSolveArgs, parseSolveOutput, redactCommand, solveEnv } from './cli-invocation';
 import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
 import { DEFAULT_CONFIG_PATH, DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe } from './selectors';
 
@@ -304,6 +304,13 @@ export class CaptchaKrakenSolver {
   private solutionCache: Map<string, CliResponse> = new Map();
   /** The other complete plans the pointer returned for this board, best first; a refresh is last. */
   private fallbackPlans: CaptchaAction[][] = [];
+  /** The screenshot those plans answered. A different board makes them the wrong answer, not an alternative. */
+  private fallbackBoardHash: string | null = null;
+  /** True only once THIS board refused the plan at the front. Nothing is pressed speculatively. */
+  private fallbackArmed = false;
+  private exchangesAtAnswer = 0;
+  /** Earlier screens of the same paged puzzle (FunCaptcha), oldest first; the CLI sends them as `--history`. */
+  private pointerHistory: string[] = [];
   private repeatedAnswerSeen = false;
   private knownAnimated = false;
   private animatedProbeDone = false;
@@ -447,6 +454,7 @@ export class CaptchaKrakenSolver {
       if (timingsEnabled()) console.error(this.budget!.report());
       // The camera outlives a round by design, so it has to be ended by the thing that outlives the solve.
       await this.stopAnimatedFilm();
+      this.dropPointerHistory();
       this.teardownCvWorker();
       this.cvWorkerReady = null;
       // Set by solveImpl, which the narrowing from the reset above cannot see.
@@ -637,6 +645,9 @@ export class CaptchaKrakenSolver {
           await this.stopAnimatedFilm();
           this.knownAnimated = false;
           this.fallbackPlans = [];
+          this.fallbackBoardHash = null;
+          this.fallbackArmed = false;
+          this.dropPointerHistory();
           // Its own second look, but only once IT fails: what armed it was evidence about the previous board,
           // and left set it filmed every still board after a solve's first miss.
           this.repeatedAnswerSeen = false;
@@ -652,7 +663,12 @@ export class CaptchaKrakenSolver {
       }
       if (roundSaid === Verdict.BLOCKED) throw blocked('its server answered 429');
       if (await this.isBlocked(page)) throw blocked('it is showing its try-again-later screen');
-      if (roundSaid === Verdict.REJECTED) console.log(`[verdict] the vendor rejected the answer after ${Date.now() - verdictT0}ms`);
+      if (roundSaid === Verdict.REJECTED) {
+        console.log(`[verdict] the vendor rejected the answer after ${Date.now() - verdictT0}ms`);
+        // Only a refusal earns the server's next plan. Without it a board that merely repainted would have
+        // the previous board's plan pressed onto it.
+        this.fallbackArmed = true;
+      }
 
       // Only "select all matching images" means tiles were missed; "please try again" is a wrong answer and
       // deals a new board, which is asked fresh.
@@ -858,11 +874,13 @@ export class CaptchaKrakenSolver {
     const screenshotPath = tmp('captcha');
     const settledFrame = (isAnimated || painted?.verdict !== PaintVerdict.PAINTED)
       ? null : (this.pendingBurst?.stableFrame() ?? null);
-    if (settledFrame && fs.existsSync(settledFrame)) {
-      fs.copyFileSync(settledFrame, screenshotPath);
+    const filmed = !!settledFrame && fs.existsSync(settledFrame);
+    if (filmed) {
+      fs.copyFileSync(settledFrame!, screenshotPath);
     } else {
       await this.ph(Phase.SCREENSHOT, () => this.shot(captchaElement, screenshotPath, cfg.elementScreenshotTimeoutMs ?? 8000));
     }
+    const boardHash = await this.boardHash(captchaElement, screenshotPath, filmed);
     if (this.stepIndex === 0) {
       await this.emitStep(captchaElement, SolveStage.INITIAL, 'initial (pre-action)', puzzleSource, frameRole, attempt,
         establishedGridSize ? { gridSize: establishedGridSize } : undefined);
@@ -878,8 +896,15 @@ export class CaptchaKrakenSolver {
       let response: CliResponse | null = null;
       let fromFallback = false;
       if (this.fallbackPlans.length) {
-        response = { actions: this.fallbackPlans.shift()!, token_usage: [] };
-        fromFallback = true;
+        if (this.fallbackArmed && this.fallbackBoardHash === boardHash) {
+          response = { actions: this.fallbackPlans.shift()!, token_usage: [] };
+          fromFallback = true;
+        } else {
+          // The board that refused the first plan is not this one, or the last round did not refuse it.
+          this.fallbackPlans = [];
+          this.fallbackBoardHash = null;
+          this.fallbackArmed = false;
+        }
       }
       const ask = (imagePath: string) => this.getSolution(imagePath, puzzleSource, retryMode, textMode);
       const askAnimated = () => this.ph(Phase.INFERENCE, () => this.withIdleWander(page, captchaElement, () => this.getAnimatedSolution(burstDir as string)));
@@ -976,7 +1001,11 @@ export class CaptchaKrakenSolver {
         response = await this.ph(Phase.INFERENCE, () => this.solveFrameFreshnessGuarded(captchaElement, screenshotPath,
           (imagePath) => this.withIdleWander(page, captchaElement, () => ask(imagePath))));
       }
-      if (!fromFallback) this.fallbackPlans = response.fallbacks ?? [];
+      if (!fromFallback) {
+        this.fallbackPlans = response.fallbacks ?? [];
+        this.fallbackBoardHash = this.fallbackPlans.length ? boardHash : null;
+        this.fallbackArmed = false;
+      }
       const actionList = Array.isArray(response.actions) ? response.actions : [response.actions];
       allTokenUsage = response.token_usage;
 
@@ -993,7 +1022,22 @@ export class CaptchaKrakenSolver {
       // A repeated answer is not re-performed: the widget already refused it, and every extra press is
       // behaviour a vendor scores. Re-asking, or asking a recording, is the round's only move.
       // `noteAnswer` drops the refused animated answer on its way through, so the next round re-asks.
-      if (this.noteAnswer(actionList, retryMode)) return { didInteract: false, tokenUsage: allTokenUsage };
+      // An animated board's screens are SUPPOSED to change; keying a repeat on them would never fire. The
+      // board hash is for the still path only, where a paged puzzle's same next-arrow is a new page.
+      if (this.noteAnswer(actionList, retryMode, isAnimated ? null : boardHash)) return { didInteract: false, tokenUsage: allTokenUsage };
+      // FunCaptcha pages one option at a time and the model reads the earlier screens as history. Without
+      // them it has nothing to compare against and keeps answering "next arrow", including on the match.
+      if (!isAnimated && puzzleSource === Vendor.FUNCAPTCHA
+          && actionList.length && actionList.every((a: any) => a?.action === ActionKind.CLICK)) {
+        try {
+          if (fs.existsSync(screenshotPath)) {
+            const saved = tmp('pghist');
+            fs.copyFileSync(screenshotPath, saved);
+            this.pointerHistory.push(saved);
+            while (this.pointerHistory.length > 8) unlink(this.pointerHistory.shift());
+          }
+        } catch { /* a screen we could not keep simply is not history */ }
+      }
       console.log(`Executing ${actionList.length} actions.`);
       // Stop filming before we touch it. Everything from here to the vendor's verdict is our own answer
       // landing, and a frame of the board wearing our clicks is not a screen the board ever showed.
@@ -1054,8 +1098,11 @@ export class CaptchaKrakenSolver {
       }
 
       // A slide submits itself on release, and any Verify found afterwards belongs to the host page and would
-      // submit the guarded form mid-verdict. An empty or `done` plan still presses Verify/Skip.
-      const verifyButton = frame || !slid ? await this.getVerifyButton(scope) : null;
+      // submit the guarded form mid-verdict. An empty or `done` plan still presses Verify/Skip. FunCaptcha is
+      // the exception: its answer is the click itself — an arrow pages, Submit (which the model clicks on the
+      // match) submits — so the generic fallback submits page one right after an arrow turned it.
+      const verifyButton = (frame || !slid) && puzzleSource !== Vendor.FUNCAPTCHA
+        ? await this.getVerifyButton(scope) : null;
       if (!slid && (answered || !performedAction) && verifyButton) {
         console.log(`Clicking Verify to submit (${puzzleSource}).`);
         await this.moveAndClick(page, verifyButton);
@@ -2163,9 +2210,17 @@ export class CaptchaKrakenSolver {
     return false;
   }
 
+  private dropPointerHistory(): void {
+    for (const screen of this.pointerHistory) unlink(screen);
+    this.pointerHistory = [];
+  }
+
   private resetSolveState(): void {
     this.solutionCache.clear();
     this.fallbackPlans = [];
+    this.fallbackBoardHash = null;
+    this.fallbackArmed = false;
+    this.dropPointerHistory();
     this.repeatedAnswerSeen = false;
     this.knownAnimated = false;
     this.animatedProbeDone = false;
@@ -2180,11 +2235,15 @@ export class CaptchaKrakenSolver {
     this.videoBudgetGranted = false;
   }
 
-  /** Keyed on the retry mode too: the missed-tiles answer legitimately overlaps the previous one. */
-  private static answerSignature(actions: any[], retryMode: RetryMode | null): string | null {
+  /**
+   * Keyed on the BOARD and the retry mode, not the answer alone. A paged puzzle's next arrow sits at the
+   * same point on every page, so a signature over the actions alone would call a correct page turn a
+   * repeated answer and stop pressing it.
+   */
+  private static answerSignature(actions: any[], retryMode: RetryMode | null, boardHash: string | null): string | null {
     const round3 = (v: any): any => typeof v === 'number' ? Math.round(v * 1000) / 1000 : Array.isArray(v) ? v.map(round3) : v ?? null;
     try {
-      return JSON.stringify([retryMode ?? null, actions.map((a: any) => [a?.action ?? null, round3(a?.target_bounding_boxes),
+      return JSON.stringify([boardHash, retryMode ?? null, actions.map((a: any) => [a?.action ?? null, round3(a?.target_bounding_boxes),
         round3(a?.target_bounding_box), round3(a?.target_coordinates), round3(a?.source_bounding_box), a?.text ?? null])]);
     } catch {
       return null;
@@ -2198,8 +2257,8 @@ export class CaptchaKrakenSolver {
   }
 
   /** True when this answer already ran and changed nothing: re-ask, and let the recording path have a go. */
-  private noteAnswer(actions: any[], retryMode: RetryMode | null): boolean {
-    const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode);
+  private noteAnswer(actions: any[], retryMode: RetryMode | null, boardHash: string | null = null): boolean {
+    const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode, boardHash);
     // A refresh asks for a different board, so the same refresh twice is two boards, not a refused answer. An
     // answer that could not be signed could not be read either, and is not looked into.
     if (sig !== null && actions.some((a) => a?.action === ActionKind.REFRESH)) {
@@ -2213,11 +2272,32 @@ export class CaptchaKrakenSolver {
       // A re-ask never reaches the wire while the cached animated answer stands in front of it.
       this.invalidateAnimatedAnswer();
       this.repeatedAnswerSeen = true;
+      // The plan at the front of the queue ran and changed nothing. A board that said nothing to its server has
+      // refused nothing, though, and another plan is one more press.
+      this.fallbackArmed = !this.boardStayedSilent();
       return true;
     }
     this.noProgressRounds = 0;
     this.lastAnswerSig = sig;
+    this.exchangesAtAnswer = this.verdicts?.exchanges ?? 0;
     return false;
+  }
+
+  private boardStayedSilent(): boolean {
+    const log = this.verdicts;
+    return !!log?.listening && log.exchanges === this.exchangesAtAnswer;
+  }
+
+  /** The board's identity, always from a plain photograph: a filmed frame of an unchanged board differs in bytes. */
+  private async boardHash(element: any, shot: string, filmed: boolean): Promise<string> {
+    if (!filmed) return sha1(shot);
+    const plain = tmp('board');
+    try {
+      await this.shot(element, plain, this.config.elementScreenshotTimeoutMs ?? 8000);
+      return sha1(plain);
+    } finally {
+      fs.rmSync(plain, { force: true });
+    }
   }
 
   /** A cache hit costs no inference, and means the answer already ran: the board cycles. */
@@ -2226,7 +2306,7 @@ export class CaptchaKrakenSolver {
     if (cached) {
       console.log('[dedup] this exact picture was already answered and the answer already ran — the challenge is cycling, not still; re-solving it as animated.');
       this.repeatedAnswerSeen = true;
-      return { actions: cached.actions, token_usage: [] };
+      return { ...cached, token_usage: [] };
     }
     const fresh = await ask();
     this.solutionCache.set(cacheKey, fresh);
@@ -2309,28 +2389,15 @@ export class CaptchaKrakenSolver {
   private async askModel(imagePath: string, puzzleSource: Vendor = Vendor.UNKNOWN, retryMode: RetryMode | null = null, textMode = false): Promise<CliResponse> {
     const { cliRoot, py } = this.resolveCli();
     const { apiKey } = this;
-    const args = buildSolveArgs({ imagePath, model: this.modelName(cliRoot), puzzleSource, retryMode, textMode, expert: this.config.expert });
+    const args = buildSolveArgs({ imagePath, model: this.modelName(cliRoot), puzzleSource, retryMode, textMode,
+      expert: this.config.expert, history: this.pointerHistory });
     console.log(`Executing CaptchaKraken CLI: ${redactCommand([py, ...args].join(' '), apiKey)}`);
     try {
       const { stdout, stderr } = await execFileAsync(py, args, { cwd: cliRoot, env: this.solveEnvironment(cliRoot, apiKey), maxBuffer: 10 * 1024 * 1024, timeout: this.askTimeoutMs(), killSignal: 'SIGKILL' });
       console.log('CaptchaKraken CLI stdout:', stdout);
       if (stderr) console.error('CaptchaKraken CLI stderr:', stderr);
       if (!stdout.trim()) throw new Error(`CLI returned empty output. Stderr: ${stderr}`);
-      let actions: SolverResult = [];
-      let tokenUsage: TokenUsage[] = [];
-      for (const line of stdout.trim().split('\n')) {
-        try {
-          const parsed = JSON.parse(line);
-          if (parsed.actions !== undefined && parsed.token_usage !== undefined) {
-            actions = parsed.actions;
-            tokenUsage = parsed.token_usage;
-            break;
-          }
-          if (Array.isArray(parsed)) actions = parsed;
-          else if (parsed.action && (parsed.target_bounding_box || parsed.target_coordinates || parsed.action === ActionKind.WAIT)) actions = [parsed];
-        } catch { /* not json or not relevant */ }
-      }
-      return { actions, token_usage: tokenUsage };
+      return parseSolveOutput(stdout);
     } catch (error: any) {
       throw this.cliError(error, 'Cannot solve this kind of captcha', 'Failed to execute captcha solver CLI');
     }

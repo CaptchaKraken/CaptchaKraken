@@ -169,6 +169,7 @@
     ],
     "solve_parser": [
       "--expert",
+      "--history",
       "--puzzle-source",
       "--retry-mode",
       "--text-mode",

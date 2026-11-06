@@ -95,6 +95,8 @@ export function readVerdict(url: string, status: number, body: string): RoundVer
   return verdict ? { vendor: found.vendor, verdict } : null;
 }
 
+const SCRIPTED_REQUESTS = new Set(['xhr', 'fetch', 'script']);
+
 /**
  * Every verdict the page's network carries while a solve runs.
  *
@@ -103,11 +105,15 @@ export function readVerdict(url: string, status: number, body: string): RoundVer
  */
 export class VerdictLog {
   readonly verdicts: RoundVerdict[] = [];
+  /** Requests the page's scripts have made. A board that answers a press with none has refused nothing. */
+  exchanges = 0;
+  readonly listening: boolean;
   private read = 0;
   private pending: Promise<void>[] = [];
   private readonly listener = (response: PlaywrightResponse): void => {
     const url = response.url();
     const status = response.status();
+    if (SCRIPTED_REQUESTS.has(response.request?.().resourceType?.() ?? '')) this.exchanges++;
     if (!endpointFor(url)) return;
     const body = status === TOO_MANY_REQUESTS ? Promise.resolve('') : response.text();
     this.pending.push(body.then((text) => {
@@ -117,6 +123,7 @@ export class VerdictLog {
   };
 
   constructor(private readonly page: PlaywrightPage) {
+    this.listening = typeof page.on === 'function';
     page.on?.('response', this.listener);
   }
 

@@ -56,3 +56,14 @@ def test_a_new_solve_starts_at_zero():
     s._note_answer(_answer(1), None)
     s._reset_animated_state()
     assert s._refused_rounds == 0
+
+
+def test_the_same_point_on_a_new_page_is_not_a_repeat():
+    """A paged puzzle's next arrow is at the same point on every page. Keyed on position alone, a correct
+    page turn would read as a refused answer."""
+    s = _solver()
+    s._fallback_board = "page-1"
+    assert s._note_answer(_answer(10), None) is False
+    s._fallback_board = "page-2"
+    assert s._note_answer(_answer(10), None) is False, "a new board's same point has not run yet"
+    assert s._note_answer(_answer(10), None) is True, "on the SAME board it is still the same answer"

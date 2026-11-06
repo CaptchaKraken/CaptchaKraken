@@ -241,6 +241,9 @@ class ActionPlanner:
         #: older server's `avoid` retry still works.
         self.pointer_fallbacks: List[Dict[str, Any]] = []
         self.pointer_has_actions = False
+        #: Earlier screens of the same paged puzzle, oldest first, as file paths. A FunCaptcha pager's answer
+        #: depends on the pages already seen; without them the model keeps answering "next arrow".
+        self.pointer_history: List[str] = []
         self.avoid_refused = False
         #: Seconds a single ask may take. The CALLER owns this: a solve has a budget, and a request
         #: that outlives it cannot be cancelled once it is in flight — the deadline is only read
@@ -562,8 +565,19 @@ class ActionPlanner:
         else:
             with open(image_path, "rb") as f:
                 raw = f.read()
+            body: Dict[str, Any] = {"image": base64.b64encode(raw).decode()}
+            if self.pointer_history:
+                history = []
+                for path in self.pointer_history[-8:]:
+                    try:
+                        with open(path, "rb") as f:
+                            history.append(base64.b64encode(f.read()).decode())
+                    except OSError:
+                        continue
+                if history:
+                    body["history"] = history
             actions = [_without_repeated_points(a) for a in
-                       self._normalize_general(self._ask_pointer({"image": base64.b64encode(raw).decode()}))]
+                       self._normalize_general(self._ask_pointer(body))]
         self._log(f"pointer actions -> {actions}")
         return actions
 

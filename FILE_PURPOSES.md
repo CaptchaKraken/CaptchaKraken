@@ -419,6 +419,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_the_client_runs_without_opencv.py` | No module of the package imports OpenCV, and the client loads where it cannot. |
 | `python/tests/test_a_frame_keeps_its_colours_and_its_pixels.py` | Frames stay BGR from disk to model, grey and movement use OpenCV's weights and threshold, and resizes reproduce OpenCV's pixels. |
 | `python/tests/test_a_reask_is_a_different_sample.py` | Re-asking a refused board must actually produce a different sample, not the same answer again. |
+| `python/tests/test_a_repeat_on_a_silent_board.py` | A repeated answer counts as a refusal only if the widget contacted its server, and one board reads as one board however its picture was captured. |
 | `python/tests/test_fetch_command.py` | The `fetch` command's plan: what it would pull, upgrade and restart, without doing any of it. |
 | `python/tests/test_overlay_is_what_the_model_reads.py` | `add_overlays_to_image` is exported API and the model reads what it draws. Pins where marks land for each of the two accepted bbox forms, that the source is not overwritten when an output path is given, that the result is RGB, and that an unusable box raises instead of writing a wrong overlay. |
 | `python/tests/test_find_checkbox_rejects_what_is_not_a_checkbox.py` | The tick box of every vendor's widget is found on real captures in a language the detector never trained on; a ticked widget, a blank page, a grid tile and an unreadable file give none. |

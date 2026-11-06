@@ -54,6 +54,12 @@ Q_END = "<|quad_end|>"
 IMAGE_PAD = "<|image_pad|>"
 VIDEO_PAD = "<|video_pad|>"
 VISION_END = "<|vision_end|>"
+#: What vLLM's video processor searches the prompt for. It replaces this whole
+#: span with the per-pair expansion, so a request that carries only `VIDEO_PAD`
+#: gives it nothing to find (`Failed to apply prompt replacement`). Training's
+#: transformers processor instead wraps `chat`'s bare pad in the outer pair
+#: itself, which is why `chat` stays bare and only the serving request is wrapped.
+VLLM_VIDEO = "<|vision_start|><|video_pad|><|vision_end|>"
 
 #: (question, kind). A kind has its own query projections: what a click names
 #: differs from what a drag picks up (`pick`), where it lets go (`drop`), and what
@@ -120,9 +126,10 @@ def chat(processor, video: bool, history: int = 0) -> str:
     see them all, and points land on the last only (`heads.Positions`). A video
     is one look and has none.
 
-    vLLM replaces the chat template's whole `<|vision_start|><|video_pad|><|vision_end|>`
-    with its per-pair placeholder, where transformers keeps the outer pair around it;
-    the bare pad goes in so both expand a video alike (an image they already agree on)."""
+    This is the TRAINING form: transformers' processor wraps the bare pad in the
+    outer `<|vision_start|>...<|vision_end|>` pair itself. A vLLM request must
+    instead carry `VLLM_VIDEO`, because vLLM searches the prompt for that whole
+    span and replaces it with its per-pair expansion."""
     if video and history:
         raise ValueError("a video board carries no earlier screens")
     if not 0 <= history <= MAX_HISTORY:
