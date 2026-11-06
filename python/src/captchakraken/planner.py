@@ -236,6 +236,11 @@ class ActionPlanner:
         #: re-ask cannot move them: once the caller sets `avoid_refused`, every ask names these and the
         #: server answers with its likeliest OTHER answer. The caller clears both when the board changes.
         self.pointer_answers: List[Dict[str, Any]] = []
+        #: The complete plans the server returned after the first (`actions[1:]`); the next retry uses them
+        #: without asking again. `pointer_has_actions` says the server answered with the list at all, so an
+        #: older server's `avoid` retry still works.
+        self.pointer_fallbacks: List[Dict[str, Any]] = []
+        self.pointer_has_actions = False
         self.avoid_refused = False
         #: Seconds a single ask may take. The CALLER owns this: a solve has a budget, and a request
         #: that outlives it cannot be cancelled once it is in flight — the deadline is only read
@@ -525,16 +530,40 @@ class ActionPlanner:
         answer = data.get("answer") if isinstance(data, dict) else None
         if not isinstance(answer, dict):
             raise RuntimeError(f"the pointer server's reply from {url} has no answer: {str(data)[:300]}")
+        actions = data.get("actions") if isinstance(data, dict) else None
+        self.pointer_has_actions = isinstance(actions, list) and bool(actions)
+        self.pointer_fallbacks = ([a for a in actions if isinstance(a, dict)][1:]
+                                  if self.pointer_has_actions else [])
         self._log(f"pointer answer: {answer}")
         self.pointer_answers.append({k: v for k, v in answer.items() if k != "checks"})
         return answer
 
+    def pointer_fallback_actions(self) -> List[List[Dict[str, Any]]]:
+        """The complete plans after the first, and a refresh when they run out; [] for a non-pointer model."""
+        if not self.pointer_has_actions:
+            return []
+        plans = [[_without_repeated_points(a) for a in self._normalize_general(f)] for f in self.pointer_fallbacks]
+        return [p for p in plans if p] + [[{"kind": PixelAnswerKind.REFRESH, "points": []}]]
+
     def get_pointer_actions(self, image_path: str) -> List[Dict[str, Any]]:
-        """Generation 4 on a still: the screenshot as it is, PNG; the server sizes it and marks it."""
-        with open(image_path, "rb") as f:
-            raw = f.read()
-        actions = [_without_repeated_points(a) for a in
-                   self._normalize_general(self._ask_pointer({"image": base64.b64encode(raw).decode()}))]
+        """Generation 4 on a still: the screenshot as it is, PNG; the server sizes it and marks it.
+
+        On a retry the server's other complete plans come first, then a refresh: a refused answer is never
+        asked again, and the model's exhausted board is replaced rather than re-queried."""
+        if self.avoid_refused and self.pointer_has_actions:
+            if self.pointer_fallbacks:
+                answer = self.pointer_fallbacks.pop(0)
+                self.pointer_answers.append({k: v for k, v in answer.items() if k != "checks"})
+                self._log(f"pointer fallback: {answer.get('action')}")
+            else:
+                answer = {"action": ActionKind.REFRESH, "points": []}
+                self._log("pointer fallbacks exhausted; asking for a new board")
+            actions = [_without_repeated_points(a) for a in self._normalize_general(answer)]
+        else:
+            with open(image_path, "rb") as f:
+                raw = f.read()
+            actions = [_without_repeated_points(a) for a in
+                       self._normalize_general(self._ask_pointer({"image": base64.b64encode(raw).decode()}))]
         self._log(f"pointer actions -> {actions}")
         return actions
 

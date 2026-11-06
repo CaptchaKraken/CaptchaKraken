@@ -132,11 +132,11 @@ answers with a frame number the driver then waits for on screen.
 | File | Purpose |
 |---|---|
 | `js/src/index.ts` | The package's public surface, and the worked examples in its doc comments. |
-| `js/src/solver.ts` | `CaptchaKrakenSolver`: the driver. Finds the widget, screenshots it, asks the engine for a plan, performs it, decides whether the vendor accepted, and goes round again if not. |
+| `js/src/solver.ts` | `CaptchaKrakenSolver`: the driver. Finds the widget, screenshots it, asks the engine for a plan, performs it, decides whether the vendor accepted, and goes round again if not; it tries the pointer's other complete plans before refreshing the board. |
 | `js/src/kinds.ts` | Every closed set of names the driver uses — vendors, action kinds, verdicts, phases, error codes — as `as const` objects mirrored one-for-one in `kinds.py`. |
 | `js/src/selectors.ts` | Loads `captchakraken.config.json` (the repository root's in a checkout, else the bundled engine's copy) into the typed table keyed by vendor (`SELECTORS`), lays a caller's own config over it, validates it with errors that name the key, and derives the detection probes and control lists. |
 | `js/src/verdicts.ts` | The vendor's own answer to each submitted round, read off the page's network: which answer-check endpoints are readable, how each vendor words accept, reject, a new board and a refusal to serve, and the per-solve log the driver reads them from. Mirrored in `verdicts.py`. |
-| `js/src/types.ts` | `SolveResult`, the per-step lifecycle event, and the whole configuration surface with a doc comment per knob. |
+| `js/src/types.ts` | `SolveResult`, `CliResponse` and its pointer fallback plans, the per-step lifecycle event, and the whole configuration surface with a doc comment per knob. |
 | `js/src/watcher.ts` | `watchPage()`: a background poller that solves captchas as they appear and hands back a `stop()`. Injects nothing into the page. |
 | `js/src/cli-invocation.ts` | How a solve request is handed to the bundled Python CLI: the argv, the environment the bearer token travels in, and the redaction applied to anything printed. |
 | `js/src/python-command.ts` | Which interpreter runs that CLI: an explicit override, else the venv beside it, else `python3`, else `python`. |
@@ -271,12 +271,11 @@ something every browser-driver install should pay for.
 |---|---|
 | `python/src/captchakraken/__init__.py` | The package's public surface and `__version__`, which must equal both manifests. |
 | `python/src/captchakraken/captchakraken.config.json` | The copy of the root `captchakraken.config.json` the wheel and npm package ship, because an installed package has no repository root; a test holds it identical to the root file. |
-| `python/src/captchakraken/cli.py` | Every CLI mode: solve a still image, solve a recorded animated burst, the frame-diff and grid-cell state helpers the drivers poll, each image tool call (grid, checkbox, slider and hold trackers), `server start\|stop\|status\|run`, and `fetch`. |
+| `python/src/captchakraken/cli.py` | Every CLI mode: solve a still image, solve a recorded animated burst, the frame-diff and grid-cell state helpers the drivers poll, each image tool call (grid, checkbox, slider and hold trackers), `server start\|stop\|status\|run`, and `fetch`; the solve JSON carries the pointer's fallback plans. |
 | `python/src/captchakraken/config.py` | Central, model-agnostic configuration: the endpoint, the key, and which model is served, read from the environment with defaults from `models.json`. |
-| `python/src/captchakraken/solver.py` | `CaptchaSolver`: solve one still image or one recorded burst against the endpoint. The engine behind the CLI. |
-| `python/src/captchakraken/page_solver.py` | `PageSolver`: the Python page driver, mirror of `js/src/solver.ts`, and the home of `CaptchaSolveError` and its four subclasses. |
-| `python/src/captchakraken/watcher.py` | The Python mirror of `js/src/watcher.ts`: solve captchas as they appear, and stop on demand. |
-| `python/src/captchakraken/planner.py` | `ActionPlanner`: assemble the request, call the OpenAI-compatible endpoint, and parse the plan back into typed actions. |
+| `python/src/captchakraken/solver.py` | `CaptchaSolver`: solve one still image or one recorded burst against the endpoint. The engine behind the CLI; it exposes the pointer's fallback plans. |
+| `python/src/captchakraken/page_solver.py` | `PageSolver`: the Python page driver, mirror of `js/src/solver.ts`, the pointer fallback queue and refresh, and the home of `CaptchaSolveError` and its four subclasses. |
+| `python/src/captchakraken/planner.py` | `ActionPlanner`: assemble the request, call the OpenAI-compatible endpoint, parse the plan back into typed actions, and queue the pointer's other complete plans. |
 | `python/src/captchakraken/prompts.py` | Prompt resolution. Every model gets the prompt generation it was trained on: a drifting prompt does not error, it just makes puzzles fail silently, so the built-ins for every generation still in service ship here and `models.json` records which model wants which. |
 | `python/src/captchakraken/models.json` | The model registry: every published model, the prompt generation it was trained on, its pixel budget, and whether its weights are downloadable. |
 | `python/src/captchakraken/pinned_model.json` | The adapter this release was validated against, so a client can say what it was proved with rather than what happens to be latest. |
@@ -406,7 +405,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_slow_camera_does_not_stretch_the_burst.py` | The burst's windows are budgets in milliseconds, so a camera slower than the interval must not spend more of the solve than a fast one. |
 | `python/tests/test_a_refused_clip_is_not_re_asked.py` | A recording with no steady screen cannot answer differently, so a refusal must throw the frames away rather than re-ask them. |
 | `python/tests/test_a_repeated_answer_is_not_re_performed.py` | An answer the widget already refused is not pressed again; the round re-asks instead. |
-| `python/tests/test_a_refused_pointer_answer_moves_to_the_next.py` | A pointer retry gets the likeliest answer the board has not already refused, read from the heads' runner-ups; the server returns the three likeliest distinct actions. |
+| `python/tests/test_a_refused_pointer_answer_moves_to_the_next.py` | A pointer retry gets the likeliest answer the board has not already refused, read from the heads' runner-ups; the server returns the three likeliest distinct actions, and the planner uses them in order before refreshing. |
 | `python/tests/test_a_typed_code_is_read_by_the_model_and_the_letter_detector_together.py` | A typed code is the one the pointer and the letter detector read together: boxes settle the count, evidence each letter. |
 | `python/tests/test_a_typed_captcha_is_shown_with_its_box.py` | A typed captcha is photographed with its text box, as every training board shows it. |
 | `python/tests/test_a_hold_is_held_until_the_widget_completes.py` | A `hold` answer survives parsing as a hold with its press and fill line, the fill tracker finds a drawn bar's leading edge, and the press lasts until the fill reaches the model's mark or the widget finishes, never longer than the cap. |

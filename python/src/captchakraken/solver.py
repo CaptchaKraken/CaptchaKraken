@@ -215,6 +215,10 @@ class CaptchaSolver:
     def _solve_pixel(self, image_path: str, text_mode: bool = False) -> List[CaptchaAction]:
         return self._to_actions(self.planner.get_pixel_actions(image_path, text_mode=text_mode))
 
+    def pointer_fallback_actions(self) -> List[List[CaptchaAction]]:
+        """The complete plans after the first, and a refresh; [] for a non-pointer model."""
+        return [self._to_actions(plan) for plan in self.planner.pointer_fallback_actions()]
+
     def _to_actions(self, raw_actions: List[dict],
                     wait_for: Optional[Callable[[dict], dict]] = None) -> List[CaptchaAction]:
         """Normalised 0-1 points become small boxes. A slide with a handle is generation 3's; one without is

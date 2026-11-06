@@ -609,6 +609,10 @@ class PageSolver:
         target.avoid_refused = self._refused_rounds > 0
         if not self._refused_rounds and hasattr(target, "pointer_answers"):
             target.pointer_answers.clear()
+            if hasattr(target, "pointer_fallbacks"):
+                target.pointer_fallbacks.clear()
+            if hasattr(target, "pointer_has_actions"):
+                target.pointer_has_actions = False
 
     def _fresh_board(self) -> None:
         # ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer describes the
@@ -2216,6 +2220,12 @@ class PageSolver:
                 self._move_and_click(page, verify_button)
                 performed = True
                 self._last_submit_frame_hash = self._element_frame_hash(element)
+            # The first plan has run. If it did not end the solve, the next ask is the server's second plan,
+            # not a re-ask that returns the first one again: an argmax model cannot move on its own.
+            planner = getattr(self._solver, "planner", None)
+            if getattr(getattr(planner, "prompts", None), "pointer", False) and self._refused_rounds == 0:
+                self._refused_rounds = 1
+                self._apply_refusals()
         finally:
             _unlink(shot)
             held = self._animated_plan[1] if self._animated_plan else None

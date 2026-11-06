@@ -303,7 +303,9 @@ def _solve_animated(args):
         solver = CaptchaSolver(model=opts.model, api_key=opts.api_key, expert=opts.expert)
         result = solver.solve_animated(recording)
         kfset = recording.keyframes
-        return {"actions": [a.model_dump() for a in result], "token_usage": solver.planner.token_usage,
+        return {"actions": [a.model_dump() for a in result],
+                "fallbacks": [[a.model_dump() for a in plan] for plan in solver.pointer_fallback_actions()],
+                "token_usage": solver.planner.token_usage,
                 "keyframes": recording.keyframe_paths, "keyframe_mode": kfset.mode,
                 "steady_screens": kfset.steady_screens, "source_frames": len(imgs)}
 
@@ -408,7 +410,9 @@ def main():
         result = solver.solve(args.image_path, puzzle_source=args.puzzle_source,
                               retry_mode=args.retry_mode, text_mode=args.text_mode)
         actions = [a.model_dump() for a in result] if isinstance(result, list) else result.model_dump()
-        return {"actions": actions, "token_usage": solver.planner.token_usage}
+        return {"actions": actions,
+                "fallbacks": [[a.model_dump() for a in plan] for plan in solver.pointer_fallback_actions()],
+                "token_usage": solver.planner.token_usage}
 
     _run_solve(query)
 

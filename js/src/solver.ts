@@ -302,6 +302,8 @@ export class CaptchaKrakenSolver {
   private cvWorkerBuf = '';
   /** Answers keyed by screenshot hash; a hit means the answer already ran and changed nothing. */
   private solutionCache: Map<string, CliResponse> = new Map();
+  /** The other complete plans the pointer returned for this board, best first; a refresh is last. */
+  private fallbackPlans: CaptchaAction[][] = [];
   private repeatedAnswerSeen = false;
   private knownAnimated = false;
   private animatedProbeDone = false;
@@ -634,6 +636,7 @@ export class CaptchaKrakenSolver {
           // hCaptcha's reference photo and then pressed Skip, six rounds running.
           await this.stopAnimatedFilm();
           this.knownAnimated = false;
+          this.fallbackPlans = [];
           // Its own second look, but only once IT fails: what armed it was evidence about the previous board,
           // and left set it filmed every still board after a solve's first miss.
           this.repeatedAnswerSeen = false;
@@ -873,9 +876,14 @@ export class CaptchaKrakenSolver {
 
     try {
       let response: CliResponse | null = null;
+      let fromFallback = false;
+      if (this.fallbackPlans.length) {
+        response = { actions: this.fallbackPlans.shift()!, token_usage: [] };
+        fromFallback = true;
+      }
       const ask = (imagePath: string) => this.getSolution(imagePath, puzzleSource, retryMode, textMode);
       const askAnimated = () => this.ph(Phase.INFERENCE, () => this.withIdleWander(page, captchaElement, () => this.getAnimatedSolution(burstDir as string)));
-      if (isAnimated) {
+      if (isAnimated && !response) {
         // The camera was paused while the last answer was performed; from here the board is its own again.
         this.animatedFilm?.resume();
         if (this.animatedPlan?.response) {
@@ -968,6 +976,7 @@ export class CaptchaKrakenSolver {
         response = await this.ph(Phase.INFERENCE, () => this.solveFrameFreshnessGuarded(captchaElement, screenshotPath,
           (imagePath) => this.withIdleWander(page, captchaElement, () => ask(imagePath))));
       }
+      if (!fromFallback) this.fallbackPlans = response.fallbacks ?? [];
       const actionList = Array.isArray(response.actions) ? response.actions : [response.actions];
       allTokenUsage = response.token_usage;
 
@@ -2156,6 +2165,7 @@ export class CaptchaKrakenSolver {
 
   private resetSolveState(): void {
     this.solutionCache.clear();
+    this.fallbackPlans = [];
     this.repeatedAnswerSeen = false;
     this.knownAnimated = false;
     this.animatedProbeDone = false;

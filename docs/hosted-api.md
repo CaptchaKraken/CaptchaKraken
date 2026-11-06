@@ -13,8 +13,9 @@ substitution between chat-completion and pointer models.
 
 Every pointer response carries `actions`: the three likeliest distinct plans,
 best first. Perform the first; the second and third are the fallbacks if the
-widget refuses it. `answer` repeats the first for older clients. One response is
-one billable response, however many actions it contains.
+widget refuses it. `answer` repeats the first for older clients. The shipped
+drivers try the three in order and refresh the board after the third. One
+response is one billable response, however many actions it contains.
 
 The client code is identical to the self-hosted path. Only the endpoint changes.
 

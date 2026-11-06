@@ -54,7 +54,8 @@ A pointer response carries three complete plans, best first:
 
 Perform the first action. The second and third are the next likeliest distinct
 plans, for a retry after the widget refuses it. `answer` repeats the first for
-callers written before `actions`.
+callers written before `actions`. The shipped Python and JavaScript drivers try
+all three in that order, then refresh the board.
 
 `captchakraken.env` contains a random bearer key. The client and server read it
 from the same file, so no further configuration is needed. Remote vLLM endpoints

@@ -230,6 +230,8 @@ export interface TokenUsage {
 
 export interface CliResponse {
   actions: SolverResult;
+  /** The complete plans after the first, best first, and a refresh when they run out. */
+  fallbacks?: CaptchaAction[][];
   token_usage: TokenUsage[];
 }
 

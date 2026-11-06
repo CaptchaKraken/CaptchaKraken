@@ -126,6 +126,41 @@ def test_the_server_takes_the_refused_answers():
         Srv.parse({"image": img, "avoid": ["XK4XWP"]})
 
 
+def test_the_planner_uses_the_three_actions_before_asking_again(monkeypatch, tmp_path):
+    from PIL import Image
+    sent = []
+    first = {"action": "click", "points": [[100, 100]]}
+    second = {"action": "click", "points": [[200, 200]]}
+    third = {"action": "click", "points": [[300, 300]]}
+
+    class _Resp:
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"answer": first, "actions": [first, second, third]}
+
+    monkeypatch.setattr(P.requests.Session, "post", lambda self, url, headers=None, json=None, timeout=None:
+                        sent.append(json) or _Resp())
+    monkeypatch.setattr(P, "ensure_server", lambda *a, **k: None)
+    img = tmp_path / "b.png"
+    Image.new("RGB", (64, 64)).save(img)
+    pl = P.ActionPlanner(model="x", base_url="http://127.0.0.1:1/v1", api_key="k")
+
+    first_actions = pl.get_pointer_actions(str(img))
+    pl.avoid_refused = True
+    second_actions = pl.get_pointer_actions(str(img))
+    third_actions = pl.get_pointer_actions(str(img))
+    refresh = pl.get_pointer_actions(str(img))
+
+    assert first_actions[0]["kind"] == "click"
+    assert second_actions[0]["points"] != first_actions[0]["points"]
+    assert third_actions[0]["points"] != second_actions[0]["points"]
+    assert refresh[0]["kind"] == "refresh"
+    assert len(sent) == 1
+    assert pl.pointer_fallback_actions() == [[{"kind": "refresh", "points": []}]]
+
+
 def test_the_server_returns_the_three_likeliest_actions():
     d = decision(count=2, slots={"click1": (21, 0.9, [(22, 0.05)]), "click2": (100, 0.5, [(140, 0.4)])})
     answers = Svc.read_answers(d, SIZE, [], lambda ids: "", STOP, top=3)

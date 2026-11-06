@@ -46,6 +46,10 @@ Version 4.0.0.
   other two as fallbacks. `answer` repeats the first for clients that predate
   the field.
 
+- **The drivers use those three actions in order.** The first is performed; the
+  second and third are tried when the widget refuses it, and the board is
+  refreshed after the third instead of re-asking an argmax that cannot move.
+
 - **`HF_TOKEN` fetches the detector weights from a private repository.** The
   download sends it as a bearer token when it is set, and nothing otherwise.
 
