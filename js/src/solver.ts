@@ -333,6 +333,7 @@ export class CaptchaKrakenSolver {
   private animatedFilm: ReturnType<CaptchaKrakenSolver['startKeyframeBurst']> | null = null;
   private lastBurstFps: number | null = null;
   private actedOnBoard = false;
+  private submittedOnBoard = false;
   private lastSubmitFrameHash: string | null = null;
   private solveSessionId: string | null = null;
   /** Which vendor and site this solve is for, sent to the hosted API; the site is a hostname only. */
@@ -638,6 +639,7 @@ export class CaptchaKrakenSolver {
         if (widgetGone >= 2) { solved = true; break; }
         if (await this.isChallengeFreshlyRendered(page)) {
           this.actedOnBoard = false;
+          this.submittedOnBoard = false;
           // ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer
           // describes the board it was cut from, so replaying it here presses that board's
           // coordinates onto this one: live, a keyframe answer from an earlier board landed on
@@ -1098,15 +1100,16 @@ export class CaptchaKrakenSolver {
       }
 
       // A slide submits itself on release, and any Verify found afterwards belongs to the host page and would
-      // submit the guarded form mid-verdict. An empty or `done` plan still presses Verify/Skip. FunCaptcha is
-      // the exception: its answer is the click itself — an arrow pages, Submit (which the model clicks on the
-      // match) submits — so the generic fallback submits page one right after an arrow turned it.
-      const verifyButton = (frame || !slid) && puzzleSource !== Vendor.FUNCAPTCHA
-        ? await this.getVerifyButton(scope) : null;
-      if (!slid && (answered || !performedAction) && verifyButton) {
+      // submit the guarded form mid-verdict, unless this board has already taken a Verify from us: then that button
+      // is the widget's, and a slide on it submits nothing by itself. An empty or `done` plan still presses
+      // Verify/Skip. FunCaptcha is the exception: its answer is the click itself — an arrow pages, Submit (which the
+      // model clicks on the match) submits — so the generic fallback submits page one right after an arrow turned it.
+      const submits = slid ? this.submittedOnBoard : answered || !performedAction;
+      const verifyButton = submits && puzzleSource !== Vendor.FUNCAPTCHA ? await this.getVerifyButton(scope) : null;
+      if (verifyButton) {
         console.log(`Clicking Verify to submit (${puzzleSource}).`);
         await this.moveAndClick(page, verifyButton);
-        performedAction = true;
+        performedAction = this.submittedOnBoard = true;
         await this.emitStep(captchaElement, SolveStage.SUBMIT, 'submitted (Verify/Next)', puzzleSource, frameRole, attempt);
         this.lastSubmitFrameHash = await this.elementFrameHash(captchaElement);
       }
@@ -2226,6 +2229,7 @@ export class CaptchaKrakenSolver {
     this.animatedProbeDone = false;
     this.discardAnimatedPlan();
     this.lastSubmitFrameHash = null;
+    this.submittedOnBoard = false;
     this.keyframeMode = null;
     this.keyframeSteadyScreens = 0;
     this.solveDeadlineAt = 0;
@@ -2436,7 +2440,7 @@ export class CaptchaKrakenSolver {
         console.log('[freshness] the widget moved while the model was reading it, with nothing clicked — recording it rather than answering another still.');
       }
       // While a speculative burst is filming, the film is the better answer to "the screen changed".
-      if (opts.recordingInFlight) return { actions: response.actions, token_usage: mergedUsage };
+      if (opts.recordingInFlight) return { ...response, token_usage: mergedUsage };
 
       let changedDuringInference = 0;
       for (let i = 0; i < maxReSolves; i++) {
@@ -2444,7 +2448,7 @@ export class CaptchaKrakenSolver {
         if (++changedDuringInference >= 2 && !this.actedOnBoard && untouched()) {
           this.repeatedAnswerSeen = true;
           console.log('[freshness] the frame changed twice during inference with nothing clicked — this board cycles; recording it rather than re-solving a screen that has gone.');
-          return { actions: response.actions, token_usage: mergedUsage };
+          return { ...response, token_usage: mergedUsage };
         }
         await this.waitForBoardPainted(captchaElement);
         const fresh = tmp(`freshsolve_${Date.now()}`);
@@ -2459,7 +2463,7 @@ export class CaptchaKrakenSolver {
         response = await runQuery(currentPath);
         mergedUsage.push(...response.token_usage);
       }
-      return { actions: response.actions, token_usage: mergedUsage };
+      return { ...response, token_usage: mergedUsage };
     } finally {
       unlink(liveAnchor);
       for (const f of ownedFrames) unlink(f);

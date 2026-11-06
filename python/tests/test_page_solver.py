@@ -672,8 +672,9 @@ class TestTextCaptchas:
 
 class TestSlideSubmitPolicy:
 
-    def _run(self, actions):
+    def _run(self, actions, submitted_on_board=False):
         solver = _solver()
+        solver._submitted_on_board = submitted_on_board
         page = _typing_page()
         handle = FakeElement(box={"x": 120.0, "y": 420.0, "width": 40.0, "height": 30.0})
         verify = FakeElement(box={"x": 300.0, "y": 500.0, "width": 80.0, "height": 30.0})
@@ -708,6 +709,14 @@ class TestSlideSubmitPolicy:
         assert performed is True
         assert kinds.count("down") == 1, "the only press should be the slider handle"
         assert kinds.count("up") == 1
+
+    def test_a_slide_on_a_board_that_took_a_verify_submits(self):
+        from captchakraken.action_types import SlideAction
+
+        slide = SlideAction(action="slide", handle_bounding_box=[0.32, 0.86, 0.36, 0.9],
+                            source_bounding_box=[0.1, 0.4, 0.14, 0.44], target_bounding_box=[0.35, 0.4, 0.4, 0.6])
+        _, kinds = self._run([slide], submitted_on_board=True)
+        assert kinds.count("down") == 2, "the slider handle, then the widget's own Verify"
 
     def test_the_gate_does_not_suppress_an_ordinary_submit(self):
         from captchakraken.action_types import DoneAction

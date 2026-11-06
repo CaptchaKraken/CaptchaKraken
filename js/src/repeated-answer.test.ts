@@ -127,6 +127,22 @@ test("the model's other plans reach the round that needs them", async () => {
   }
 });
 
+test("the model's other plans survive the check that the board held still", async () => {
+  const plan = [{ action: 'click', target_bounding_boxes: [[0.5, 0.5, 0.6, 0.6]] }];
+  const answer = { ...ANSWER, fallbacks: [plan] };
+  const solver: any = new CaptchaKrakenSolver({});
+  solver.shot = async () => {};
+  solver.waitForBoardPainted = async () => ({ waitedMs: 0 });
+  const guarded = (opts = {}) => solver.solveFrameFreshnessGuarded({}, 'board.png', async () => answer, opts);
+
+  solver.captchaFrameChangedSince = async () => false;
+  assert.deepEqual((await guarded()).fallbacks, [plan], 'a board that held still');
+  assert.deepEqual((await guarded({ recordingInFlight: true })).fallbacks, [plan], 'a recording in flight');
+
+  solver.captchaFrameChangedSince = async () => true;
+  assert.deepEqual((await guarded()).fallbacks, [plan], 'a board that cycled');
+});
+
 function widgetTraffic(): { log: any; say: (type: string) => void } {
   const listeners = new Set<(r: any) => void>();
   const log = new VerdictLog({ on: (_: string, l: any) => listeners.add(l), off: () => {} } as any);

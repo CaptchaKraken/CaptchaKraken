@@ -541,6 +541,7 @@ class PageSolver:
 
     def _reset_animated_state(self) -> None:
         self._acted_on_board = False
+        self._submitted_on_board = False
         self._known_animated = False
         self._animated_probe_armed = False
         self._animated_probe_done = False
@@ -704,6 +705,7 @@ class PageSolver:
         self._animated_probe_done = False
         self._refused_rounds = 0
         self._acted_on_board = False
+        self._submitted_on_board = False
         self._drop_pointer_history()
         self._apply_refusals()
 
@@ -2295,15 +2297,16 @@ class PageSolver:
                         performed = True
 
             # A slide submits itself on release, and any Verify found afterwards belongs to the host page and would
-            # submit the guarded form while the verdict is in flight. An empty or `done` plan still presses Verify/Skip.
-            # FunCaptcha's answer is the click itself: an arrow pages and Submit submits. The generic Verify
-            # fallback would submit the page an arrow just turned to.
-            verify_button = (self._get_verify_button(scope)
-                             if (frame or not slid) and puzzle_source != Vendor.FUNCAPTCHA else None)
-            if not slid and (answered or not performed) and verify_button:
+            # submit the guarded form while the verdict is in flight, unless this board has already taken a Verify
+            # from us: then that button is the widget's, and a slide on it submits nothing by itself. An empty or
+            # `done` plan still presses Verify/Skip. FunCaptcha's answer is the click itself: an arrow pages and
+            # Submit submits. The generic Verify fallback would submit the page an arrow just turned to.
+            submits = self._submitted_on_board if slid else answered or not performed
+            verify_button = self._get_verify_button(scope) if submits and puzzle_source != Vendor.FUNCAPTCHA else None
+            if verify_button:
                 _log(f"clicking Verify to submit ({puzzle_source}).")
                 self._move_and_click(page, verify_button)
-                performed = True
+                performed = self._submitted_on_board = True
                 self._last_submit_frame_hash = self._element_frame_hash(element)
         finally:
             _unlink(shot)
