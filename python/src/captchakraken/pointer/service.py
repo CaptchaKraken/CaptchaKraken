@@ -414,10 +414,16 @@ class PointerService:
         self.processor = AutoProcessor.from_pretrained(str(checkpoint))
         tok = self.processor.tokenizer
         self.stop_id = tok.convert_tokens_to_ids("<|im_end|>")
+        # The heads read a hidden state at every prompt token, and vLLM's prefix
+        # cache returns only the uncached suffix. It is not an optimisation we
+        # may take: a cached prompt is refused by the plugin.
+        if llm_kwargs.pop("enable_prefix_caching", False):
+            raise ValueError("the pointer heads need every prompt token; prefix caching is not supported")
         self.llm = LLM(model=str(checkpoint), runner="pooling", max_model_len=max_model_len,
                        gpu_memory_utilization=gpu_memory_utilization,
                        limit_mm_per_prompt={"image": 1 + L.MAX_HISTORY, "video": 1},
-                       mm_processor_kwargs={"min_pixels": 64 * 64, "max_pixels": L.MAX_PIXELS}, **llm_kwargs)
+                       mm_processor_kwargs={"min_pixels": 64 * 64, "max_pixels": L.MAX_PIXELS},
+                       enable_prefix_caching=False, **llm_kwargs)
         self.detector = None
         if detector is not None:
             from .detector import Detector

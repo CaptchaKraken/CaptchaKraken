@@ -1,10 +1,49 @@
 import http.client
 import json
+import sys
 import threading
+import types
 from http.server import ThreadingHTTPServer
 
+import pytest
+
 from captchakraken import server_manager
+from captchakraken.pointer import service as Svc
 from captchakraken.pointer.server import make_handler
+
+
+def test_the_pointer_engine_never_uses_prefix_caching(monkeypatch):
+    captured = {}
+
+    class FakeLLM:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    class FakeTokenizer:
+        @staticmethod
+        def convert_tokens_to_ids(token):
+            return 0
+
+    class FakeProcessor:
+        tokenizer = FakeTokenizer()
+
+    class FakeAutoProcessor:
+        @staticmethod
+        def from_pretrained(path):
+            return FakeProcessor()
+
+    fake_vllm = types.ModuleType("vllm")
+    fake_vllm.LLM = FakeLLM
+    fake_transformers = types.ModuleType("transformers")
+    fake_transformers.AutoProcessor = FakeAutoProcessor
+    monkeypatch.setitem(sys.modules, "vllm", fake_vllm)
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    monkeypatch.setattr(Svc.vllm_plugin, "register", lambda: None)
+
+    Svc.PointerService("/model")
+    assert captured["enable_prefix_caching"] is False
+    with pytest.raises(ValueError):
+        Svc.PointerService("/model", enable_prefix_caching=True)
 
 
 def test_the_default_server_runs_the_q4_pointer(monkeypatch):

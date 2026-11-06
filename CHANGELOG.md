@@ -33,6 +33,12 @@ Version 4.0.0.
     which the docs already imported from `captchakraken.page_solver`.
   - Submodules (`captchakraken.page_solver`, `js/src/*`) are internal.
 
+### Fixed
+
+- **A repeated pointer prompt no longer fails.** The pointer server disables
+  vLLM prefix caching: the heads read a hidden state at every prompt token, and
+  a cached prefix would return only the uncached suffix.
+
 ### Added
 
 - **`POST /v1/pointer` returns the three likeliest actions.** `actions` holds
