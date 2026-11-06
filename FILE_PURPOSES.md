@@ -185,6 +185,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/hosted-default.test.ts` | Against our own endpoint the client asks for the hosted-only model by its routing alias; against anyone else's it asks for the downloadable default. |
 | `js/src/no-progress.test.ts` | A solve that repeats itself stops instead of running the clock out. |
 | `js/src/repeated-answer.test.ts` | A board that cycles was being solved as a still, forever. |
+| `js/src/a-slide-on-a-verify-board-submits.test.ts` | A slide submits itself, unless the board has already taken a Verify: then that button is the widget's, and it is pressed. |
 | `js/src/a-typed-captcha-is-shown-with-its-box.test.ts` | A typed captcha is photographed with its text box, as every training board shows it. |
 | `js/src/second-look-believes-the-recording.test.ts` | The second look at a board that failed once is a question, and the clip it records answers it: a board that never moved goes back to the still expert. |
 | `js/src/animated-budget.test.ts` | Escalating to a recording has to fit inside the overall solve budget, which was sized for rounds only. |
