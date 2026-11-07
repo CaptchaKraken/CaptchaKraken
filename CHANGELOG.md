@@ -12,6 +12,12 @@ semantic versioning; v2 is a major, **breaking** release.
   `./setup.sh --quant bf16` selects full precision.
 - **CaptchaKraken and all its models are LGPL-3.0-only.** The former custom
   license no longer applies to this release or the v2 weights.
+- **A solve stops once the next round could do nothing different.** A repeated
+  answer ends it unless the model has another plan, a recording is left to take
+  or a retry mode applies. An answer already pressed on a picture counts as a
+  repeat even with another plan in between, and a refresh that brings the same
+  picture back ends the solve. The failure reported is now always the last
+  round's.
 - **A line's two ends are two clicks.** The server dropped a click on an element
   an earlier click had taken, and the detector outlines a whole line as one
   element, so a board asking for both ends got one click. Only a click in the

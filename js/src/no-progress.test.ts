@@ -116,8 +116,8 @@ test('invalidating twice is not an error', () => {
   assert.equal(s.animatedPlan.burstDir, '/tmp/burst-abc');
 });
 
-test('a board answered the same way three times ends the solve', async () => {
-  // No solve ever followed a third identical answer; the loops left would only cost the board 3-7s each.
+test('a repeat with nothing else to try ends the solve', async () => {
+  // At temperature 0 a third ask of the same board returns the same answer, and a repeat presses nothing.
   const s: any = new CaptchaKrakenSolver({ maxSolveLoops: 6, videoSolveEnabled: false });
   let rounds = 0;
   s.isCaptchaSolved = async () => false;
@@ -132,6 +132,59 @@ test('a board answered the same way three times ends the solve', async () => {
   };
   let message = '';
   await s.solveImpl({}).catch((e: Error) => { message = e.message; });
-  assert.match(message, /same answer 3 times/);
-  assert.equal(rounds, 3, `spent ${rounds} rounds on a board the model cannot read`);
+  assert.match(message, /same answer 2 times/);
+  assert.equal(rounds, 2, `spent ${rounds} rounds on a board the model cannot read`);
+});
+
+test('the failure reported is the last round\'s, not an earlier one\'s', async () => {
+  const s: any = new CaptchaKrakenSolver({ maxSolveLoops: 3, videoSolveEnabled: true, postSolveOutcomeTimeoutMs: 0 });
+  const answers = [click([0.1, 0.1, 0.2, 0.2]), click([0.1, 0.1, 0.2, 0.2]), click([0.5, 0.5, 0.6, 0.6])];
+  s.isCaptchaSolved = async () => false;
+  s.detectCaptcha = async () => ({ el: {}, at: {}, vendor: 'hcaptcha', role: 'challenge' });
+  s.bannerKind = async () => null;
+  s.human.reset = async () => {};
+  s.isChallengeFreshlyRendered = async () => false;
+  s.solveSingle = async () => ({ didInteract: !s.noteAnswer(answers.shift(), null), tokenUsage: [] });
+  let message = '';
+  await s.solveImpl({}).catch((e: Error) => { message = e.message; });
+  assert.match(message, /after 3 solve loops/);
+  assert.doesNotMatch(message, /same answer/);
+});
+
+test('a repeat goes on while a recording, a plan or a retry mode is left', () => {
+  const s: any = new CaptchaKrakenSolver({ videoSolveEnabled: true });
+  s.repeatedAnswerSeen = true;
+  assert.equal(s.anotherMoveLeft(null), true, 'a board that cycles repeats, and filming it can still work');
+  s.animatedProbeDone = true;
+  assert.equal(s.anotherMoveLeft(null), false, 'the film is spent and no plan was earned');
+  assert.equal(s.anotherMoveLeft('missed_tiles'), true, 'a retry mode is a different question');
+  s.fallbackArmed = true;
+  s.fallbackPlans = [[{ action: 'click' }]];
+  assert.equal(s.anotherMoveLeft(null), true, 'the model has another plan');
+});
+
+test('an answer pressed earlier on this picture is a repeat after another plan', () => {
+  // Dealing the same picture again clears the plans, and the first answer came back and was pressed again.
+  const s: any = solver();
+  assert.equal(s.noteAnswer(click([0.1, 0.1, 0.2, 0.2]), null, 'board'), false);
+  assert.equal(s.noteAnswer(click([0.5, 0.5, 0.6, 0.6]), null, 'board'), false);
+  assert.equal(s.noteAnswer(click([0.1, 0.1, 0.2, 0.2]), null, 'board'), true);
+});
+
+test('a paged puzzle may come back to a page', () => {
+  // The earlier screens are part of the question, so the same page later is not the same ask.
+  const s: any = solver();
+  s.noteAnswer(click([0.1, 0.1, 0.2, 0.2]), null, 'page-1');
+  s.pointerHistory.push('page-1.png');
+  s.noteAnswer(click([0.5, 0.5, 0.6, 0.6]), null, 'page-1');
+  assert.equal(s.noteAnswer(click([0.1, 0.1, 0.2, 0.2]), null, 'page-1'), false);
+  s.pointerHistory = [];
+});
+
+test('a refresh records the picture it was meant to replace', () => {
+  const s: any = solver();
+  assert.equal(s.noteAnswer([{ action: 'refresh' }], null, 'board'), false);
+  assert.equal(s.refreshedBoards.has('board'), true);
+  s.resetSolveState();
+  assert.equal(s.refreshedBoards.has('board'), false, 'a new solve has refreshed nothing');
 });

@@ -320,6 +320,8 @@ export class CaptchaKrakenSolver {
   private keyframeSteadyScreens = 0;
   private solveDeadlineAt = 0;
   private lastAnswerSig: string | null = null;
+  private triedAnswers = new Set<string>();
+  private refreshedBoards = new Set<string>();
   private noProgressRounds = 0;
   /** The recording `classifyByRecording` started and left running for the branch below to finish or drop. */
   private pendingBurst: ReturnType<CaptchaKrakenSolver['startKeyframeBurst']> | null = null;
@@ -682,15 +684,18 @@ export class CaptchaKrakenSolver {
       if (roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page))) return done();
       if (this.noProgressRounds) {
         const stuck = `No progress: the model returned the same answer ${this.noProgressRounds + 1} times running`;
-        // A board answered the same way after every resample is one the model cannot read: measured, no solve ever
-        // followed a third identical answer, and each further round cost the board 3-7s.
-        if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2)) throw new Error(`${stuck}.`);
+        // A repeat pressed nothing, so a further round is only worth its 3-7s if it can do something else.
+        if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2) || !this.anotherMoveLeft(pendingRetryMode)) {
+          throw new Error(`${stuck}.`);
+        }
         await again(stuck);
       } else if (!didInteract) {
         // An answer with nothing to execute is not proof the page is stuck; on an animated board it is what a still
         // expert returns when the board is not a still, so the next round takes a second look.
         if (cfg.videoSolveEnabled !== false) this.repeatedAnswerSeen = true;   // what arms the second look
         await again('The solver performed no interactions this round');
+      } else {
+        lastFailure = null;
       }
     }
 
@@ -883,6 +888,8 @@ export class CaptchaKrakenSolver {
       await this.ph(Phase.SCREENSHOT, () => this.shot(captchaElement, screenshotPath, cfg.elementScreenshotTimeoutMs ?? 8000));
     }
     const boardHash = await this.boardHash(captchaElement, screenshotPath, filmed);
+    // A refresh that brought the same picture back has replaced nothing, and every plan has been spent on it.
+    if (this.refreshedBoards.has(boardHash)) throw new Error('No progress: the board came back unchanged after a refresh.');
     if (this.stepIndex === 0) {
       await this.emitStep(captchaElement, SolveStage.INITIAL, 'initial (pre-action)', puzzleSource, frameRole, attempt,
         establishedGridSize ? { gridSize: establishedGridSize } : undefined);
@@ -2234,6 +2241,8 @@ export class CaptchaKrakenSolver {
     this.keyframeSteadyScreens = 0;
     this.solveDeadlineAt = 0;
     this.lastAnswerSig = null;
+    this.triedAnswers.clear();
+    this.refreshedBoards.clear();
     this.noProgressRounds = 0;
     this.videoBudgetMs = 0;
     this.videoBudgetGranted = false;
@@ -2268,9 +2277,13 @@ export class CaptchaKrakenSolver {
     if (sig !== null && actions.some((a) => a?.action === ActionKind.REFRESH)) {
       this.noProgressRounds = 0;
       this.lastAnswerSig = null;
+      if (boardHash !== null) this.refreshedBoards.add(boardHash);
       return false;
     }
-    if (sig !== null && sig === this.lastAnswerSig) {
+    // A vendor can deal the same picture again, which clears the plans but not what was pressed on it. A paged
+    // puzzle is exempt: coming back to a page after the others is a new question, because the history differs.
+    const tried = sig !== null && boardHash !== null && !this.pointerHistory.length && this.triedAnswers.has(sig);
+    if (sig !== null && (sig === this.lastAnswerSig || tried)) {
       this.noProgressRounds++;
       console.log(`[no-progress] the model returned the same answer again (${this.noProgressRounds} in a row) — the previous one already ran and changed nothing`);
       // A re-ask never reaches the wire while the cached animated answer stands in front of it.
@@ -2283,8 +2296,17 @@ export class CaptchaKrakenSolver {
     }
     this.noProgressRounds = 0;
     this.lastAnswerSig = sig;
+    if (sig !== null) this.triedAnswers.add(sig);
     this.exchangesAtAnswer = this.verdicts?.exchanges ?? 0;
     return false;
+  }
+
+  /** Whether the round after a repeat can differ. At temperature 0 the same question gets the same answer, so it
+   *  takes a different question (a retry mode, a film) or one of the model's other plans. */
+  private anotherMoveLeft(retryMode: RetryMode | null): boolean {
+    return !!retryMode || this.knownAnimated
+      || (this.config.videoSolveEnabled !== false && this.repeatedAnswerSeen && !this.animatedProbeDone)
+      || (this.fallbackArmed && this.fallbackPlans.length > 0);
   }
 
   private boardStayedSilent(): boolean {

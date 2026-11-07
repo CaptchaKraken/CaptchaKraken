@@ -312,6 +312,7 @@ def test_a_second_refresh_is_a_second_board_not_a_repeated_answer(monkeypatch):
     s = PageSolver.__new__(PageSolver)
     s._last_answer_sig, s._no_progress_rounds, s._fallback_board = None, 0, None
     s._verdicts, s._refused_rounds = None, 0
+    s._round_board, s._refreshed_boards, s._tried_answers = None, set(), set()
     refresh = [RefreshAction(action=ActionKind.REFRESH, target_bounding_box=[0.09, 0.89, 0.11, 0.91])]
     assert s._note_answer(refresh, None) is False
     assert s._note_answer(refresh, None) is False

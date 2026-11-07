@@ -550,6 +550,9 @@ class PageSolver:
         self._keyframe_mode: Optional[KeyframeMode] = None
         self._keyframe_steady_screens = 0
         self._last_answer_sig: Optional[str] = None
+        self._tried_answers: Set[str] = set()
+        self._refreshed_boards: Set[str] = set()
+        self._round_board: Optional[str] = None
         self._no_progress_rounds = 0
         self._refused_rounds = 0
         self._fallback_board: Optional[str] = None
@@ -580,8 +583,13 @@ class PageSolver:
         if sig is not None and any(_as_dict(a).get("action") == ActionKind.REFRESH for a in actions):
             self._no_progress_rounds = 0
             self._last_answer_sig = None
+            if self._round_board is not None:
+                self._refreshed_boards.add(self._round_board)
             return False
-        if sig is not None and sig == self._last_answer_sig:
+        # A vendor can deal the same picture again, which clears the plans but not what was pressed on it. A paged
+        # puzzle is exempt: coming back to a page after the others is a new question, because the history differs.
+        tried = (self._fallback_board is not None and not self._pointer_history and sig in self._tried_answers)
+        if sig is not None and (sig == self._last_answer_sig or tried):
             self._no_progress_rounds += 1
             _log(f"[no-progress] the model returned the same answer again ({self._no_progress_rounds} in a row)")
             # A board that said nothing to its server has refused nothing, and another plan is one more press.
@@ -593,8 +601,19 @@ class PageSolver:
             return True
         self._no_progress_rounds = 0
         self._last_answer_sig = sig
+        if sig is not None:
+            self._tried_answers.add(sig)
         self._exchanges_at_answer = self._verdicts.exchanges if self._verdicts else 0
         return False
+
+    def _another_move_left(self, retry_mode: Optional[RetryMode]) -> bool:
+        """Whether the round after a repeat can differ. At temperature 0 the same question gets the same answer,
+        so it takes a different question (a retry mode, a film) or one of the model's other plans."""
+        target = getattr(self._solver, "planner", None)
+        pointer = bool(getattr(getattr(target, "prompts", None), "pointer", False))
+        return bool(retry_mode or self._known_animated
+                    or (self.config.video_solve_enabled and self._animated_probe_armed)
+                    or (pointer and target.avoid_refused))
 
     def _board_stayed_silent(self) -> bool:
         log = self._verdicts
@@ -682,7 +701,12 @@ class PageSolver:
 
         The next round's screenshot is the test. Without it, a vendor that deals a new board without
         saying so has the previous board's second plan pressed onto the new one.
+
+        A refresh that brought the same picture back has replaced nothing, and every plan has been spent on it.
         """
+        if board in self._refreshed_boards:
+            raise CaptchaSolveError("no progress: the board came back unchanged after a refresh")
+        self._round_board = board
         target = getattr(self._solver, "planner", None)
         if target is None or not getattr(getattr(target, "prompts", None), "pointer", False):
             return
@@ -2181,6 +2205,7 @@ class PageSolver:
                 self._wait_for_board_painted(element)
 
         shot = _tmp_png("captcha")
+        self._round_board = None
         performed = slid = answered = have_shot = False
         all_usage: List[Dict[str, Any]] = []
         keyframe_dir: Optional[str] = None
@@ -2541,9 +2566,9 @@ class PageSolver:
             if self._no_progress_rounds:
                 stuck = CaptchaSolveError(f"no progress: the model returned the same answer "
                                           f"{self._no_progress_rounds + 1} times running")
-                # A board answered the same way after every resample is one the model cannot read: measured, no
-                # solve ever followed a third identical answer, and each further round cost the board 3-7s.
-                if self._no_progress_rounds >= cfg.max_no_progress_rounds:
+                # A repeat pressed nothing, so a further round is only worth its 3-7s if it can do something else.
+                if (self._no_progress_rounds >= cfg.max_no_progress_rounds
+                        or not self._another_move_left(pending_retry_mode)):
                     raise stuck
                 again(stuck)
             elif not did_interact:
@@ -2552,6 +2577,8 @@ class PageSolver:
                 if cfg.video_solve_enabled:
                     self._arm_animated_probe()
                 again(CaptchaSolveError("the solver performed no interactions this round"))
+            else:
+                last_failure = None
 
         if isinstance(last_failure, UnsupportedChallengeError):
             raise UnsupportedChallengeError(f"{last_failure} (after {cfg.max_solve_loops} solve loops)")

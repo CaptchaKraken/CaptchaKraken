@@ -71,8 +71,10 @@ everything else, including every loop spent without a solve.
 A solve gives up when the vendor refuses to serve the client, when
 `max_solve_loops` is spent, or when `overall_solve_timeout_ms` (default 45 s)
 runs out; any other failed round counts a loop and the next one goes again,
-except that a board the model answers identically
-`max_no_progress_rounds + 1` times (default 3) ends the solve. A
+except that a repeated answer ends the solve once the next round could do
+nothing different: no other plan from the model and no recording left to take.
+`max_no_progress_rounds + 1` identical answers (default 3) end it regardless,
+and so does a refresh that brings the same board back. A
 solve that takes much longer reads as automated to the vendor, so raise the
 budget only for a page that needs it. It also waits up to `detection_timeout_ms` (default 15 s) for a
 widget the page has not drawn yet, so you can call `solve()` straight after

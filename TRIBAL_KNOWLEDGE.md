@@ -162,6 +162,17 @@ a line into one click, on 2 of 3 gauntlet seeds of the board that asks for them.
 Only a cell deselects on a second press, so only a repeat in one cell or one place
 is dropped.
 
+**A repeat ends the solve unless the next round can differ.** At temperature 0
+the same board and question return the same answer, and a repeat presses
+nothing, so a further round needs an untried plan, an unspent recording or a
+retry mode. Measured on a drag board dealt identically after each miss, a solve
+ran answer, repeat, plan 2, plan 3, refresh, refresh and then blamed round 2's
+repeat: every plan reset the counter, so `max_no_progress_rounds` never tripped.
+Two rules close that. An answer already pressed on a picture counts as a repeat
+even when another plan ran in between. A refresh that brings the same picture
+back ends the solve. Both key on the picture, so a paged puzzle's next arrow and
+a vendor's genuinely new board are untouched.
+
 **`BUILTIN_PROMPTS`, `AVAILABILITIES` and `PROMPT_FAMILIES` are pure literals,
 and stay strings even though `kinds.py` has the enums.** The training repo's
 release parity gate reads them by AST without importing the package. An
@@ -195,7 +206,8 @@ solve, and solving them instantly is itself a tell, so generation 3 may ask for
 a new puzzle. The driver presses the vendor's own control (`refresh` in the
 selector table), else the model's point on it, else ends the round. Nothing
 after it — Verify included — belongs to the replaced board, and a second
-refresh is a second board, never counted as a repeated answer.
+refresh is a second board, never counted as a repeated answer, unless the
+picture came back the same, which ends the solve.
 
 **The pin decides the registry entry.** Reading `base_model` and `lora_name`
 off `latest` while `CAPTCHA_LORA_ADAPTER` named Abyss-27B downloaded a 9B base,
