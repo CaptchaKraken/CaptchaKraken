@@ -71,8 +71,10 @@ everything else, including every loop spent without a solve.
 A solve gives up when the vendor refuses to serve the client, when
 `max_solve_loops` is spent, or when `overall_solve_timeout_ms` (default 45 s)
 runs out; any other failed round counts a loop and the next one goes again,
-except that a board the model answers identically
-`max_no_progress_rounds + 1` times (default 3) ends the solve. A
+except that a repeated answer ends the solve once the next round could do
+nothing different: no other plan from the model and no recording left to take.
+`max_no_progress_rounds + 1` identical answers (default 3) end it regardless,
+and so does a refresh that brings the same board back. A
 solve that takes much longer reads as automated to the vendor, so raise the
 budget only for a page that needs it. It also waits up to `detection_timeout_ms` (default 15 s) for a
 widget the page has not drawn yet, so you can call `solve()` straight after
@@ -81,7 +83,8 @@ widget the page has not drawn yet, so you can call `solve()` straight after
 readable, `result.verdicts` lists its answer to each round, and an accepted
 verdict is what ends the solve. `max_stale_element_retries`,
 `max_unsupported_resolves` and `post_solve_delay_ms` are still accepted but
-ignored since 3.2.0.
+ignored since 3.2.0. `hcaptcha_images_timeout_ms` is read as
+`board_images_timeout_ms`.
 
 Tune with `PageSolverConfig`. Its fields are the snake_cased names of the
 TypeScript `CaptchaKrakenConfig` keys, so a value tuned on one driver is
@@ -110,6 +113,7 @@ side has:
 | `slide_tolerance_px` | `idleMouseWander` |
 | `slide_max_corrections` | `repoPath`, `pythonCommand` — where the bundled engine lives |
 | | `model`, `apiKey` — Python takes these on `PageSolver(...)` itself |
+| | `baseUrl` — Python reads `VLLM_BASE_URL` |
 
 Everything that decides **accuracy** — the prompts, the CV, the pixel budget,
 the model — lives in the shared Python half and is identical by construction.
@@ -272,7 +276,7 @@ desktop solve to touch dispatch would break every one of them silently.
 
 | Mode | What it dispatches | Use it when |
 |---|---|---|
-| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised (Cursory) | Default. Desktop pages. |
+| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised (Cursory); one move per gesture when the browser humanises its own pointer | Default. Desktop pages. |
 | `mobile` | Real touch events with finger kinematics — see below | The page is a mobile site, or you are driving a phone |
 | `none` | One move, one press, one release. No dwell, no jitter | Your own fixtures, or your stack humanises elsewhere |
 | custom | Whatever you write | You already model your users' input |
@@ -403,11 +407,85 @@ class HardwareMouse extends NullHumanizer implements Humanizer {
 new CaptchaKrakenSolver({ humanizer: new HardwareMouse() });
 ```
 
-This is also the right answer when your **browser already humanises**. Camoufox's
-`humanize` juggler re-humanises every `mouse.move()` it is handed, so running it
-against `mouse` mode composes two models: measured **82.1 s against 13.4 s** on
-one geetest slide, because each of the 60 trajectory points became its own
-humanised sub-trajectory. Use `none` there, and let camoufox do it.
+When your **browser already humanises**, `mouse` mode notices and steps aside.
+Camoufox's `humanize` juggler re-humanises every `mouse.move()` it is handed, so
+running both composes two models: measured **82.1 s against 13.4 s** on one
+geetest slide, because each of the 60 trajectory points became its own
+humanised sub-trajectory. The first move of each solve times a 3 px step against
+a zero-length move; when the step is more than 100 ms slower, every later
+gesture is a single `mouse.move()` and the browser draws the path. Pauses and
+per-key typing stay on. A slow remote browser is not mistaken for one, because
+the zero-length move pays the same round trip.
+
+## Selectors and URL patterns: `captchakraken.config.json`
+
+Every URL pattern and selector the solver detects and drives a captcha with
+lives in one file, `captchakraken.config.json` at the repository root (an
+installed package carries a copy of it). It holds:
+
+- `vendors`: one entry per vendor, in detection order: `hosts` (URL
+  substrings of the vendor's code on the wire) and its selectors (`challenge`,
+  `checkbox`, `widget`, `response`, `submit`, `text_input`, `slider_handle`,
+  …). Order matters: the driver takes the first visible match in table order.
+- `generic`: the fallbacks tried after every vendor's own (the button texts
+  probed for a submit control, the generic text box, slider and piece shapes).
+- `custom`: your own entry, empty in the shipped file.
+
+The file documents each field in its `_fields` section. The solver loads it by
+default: `PageSolverConfig.selectors` and `CaptchaKrakenConfig.selectors`
+default to `DEFAULT_CONFIG_PATH`.
+
+## A captcha the solver does not know
+
+For a captcha that table does not know (a site's own image-and-code box, say),
+write a config of your own with a `custom` entry and pass its path, or the
+parsed object, as `selectors`. Your entry is searched before every built-in
+vendor and reported as vendor `unknown`, and its controls are tried before the
+generic ones. A file of your own holds only what it changes and is laid over
+the shipped default: a vendor you list replaces that vendor's whole entry, and
+a `generic` list you give replaces that list.
+
+```json
+{
+  "custom": {
+    "widget": ["#signup-captcha"],
+    "text_input": ["#signup-code"],
+    "submit": ["#signup-check"],
+    "refresh": ["#signup-new-image"]
+  }
+}
+```
+
+```typescript
+new CaptchaKrakenSolver({ selectors: './my-captchas.json' });
+```
+
+```python
+from captchakraken import PageSolver
+from captchakraken.page_solver import PageSolverConfig
+
+PageSolver(config=PageSolverConfig(selectors="my-captchas.json"))
+```
+
+A config the solver cannot use is refused when the solver is built, with a
+`SelectorConfigError` naming the file and the key (`vendors.geetest.widgets:
+not a selector field`). `load_config` / `loadConfig` loads one without building
+a solver.
+
+The older `customSelectors` / `custom_selectors=` (one entry in code) still
+works and wins over the file's `custom` when both are given.
+
+Every field of the built-in entries is available (`challenge`, `checkbox`,
+`response`, `accepted`, `slider_handle`, `piece`, …); the
+entry must name at least one of `widget`, `challenge` or `checkbox`, or the
+solver refuses it at construction. `response` or `accepted` tells the solver the
+captcha passed; without either, it judges by the widget going away.
+
+A press-and-hold is let go where the answer says the fill should stop, which is
+right for a gauge read at a mark. A button that completes on its own once full,
+and starts over when let go early, wants `"hold_completes": true`
+instead: the solver then holds until the widget says it
+is done.
 
 ## Solve captchas as they appear
 

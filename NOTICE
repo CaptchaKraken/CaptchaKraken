@@ -1,10 +1,10 @@
 CaptchaKraken
-Copyright (c) 2026 CaptchaKraken LLC. All rights reserved.
+Copyright (c) 2026 CaptchaKraken LLC.
 
 This product includes third-party software. The notices below are required by
-those components' licences and do not change the terms of the CaptchaKraken
-Source-Available License, which governs everything in this repository that is
-not listed here.
+those components' licences and do not change the terms of the GNU Lesser
+General Public License, version 3 only (LGPL-3.0-only), which governs
+everything in this repository that is not listed here.
 
 ────────────────────────────────────────────────────────────────────────────
 Cursory  —  mouse trajectory generation

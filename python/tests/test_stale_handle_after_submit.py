@@ -47,7 +47,6 @@ def _solver(failure: str, *, solved_after_failure: bool):
 
     cfg = PageSolverConfig(
         post_solve_outcome_timeout_ms=1,
-        post_solve_delay_ms=1,
         stale_element_backoff_ms=1,
     )
     solver = PageSolver(config=cfg)

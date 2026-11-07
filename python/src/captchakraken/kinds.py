@@ -3,7 +3,7 @@ from enum import StrEnum
 
 
 class Vendor(StrEnum):
-    """`puzzle_source` everywhere. UNKNOWN must stay permissive: GeeTest and Prosopo report it, and so does the offline grader."""
+    """`puzzle_source` everywhere. UNKNOWN must stay permissive: the CLI, scripts and the offline grader report it."""
 
     HCAPTCHA = "hcaptcha"
     RECAPTCHA = "recaptcha"
@@ -16,6 +16,12 @@ class Vendor(StrEnum):
     PROSOPO = "prosopo"
     MTCAPTCHA = "mtcaptcha"
     BOTDETECT = "botdetect"
+    HUMAN = "human"
+    AWSWAF = "awswaf"
+    CAPTCHAFOX = "captchafox"
+    DINGXIANG = "dingxiang"
+    FUNCAPTCHA = "funcaptcha"
+    PROTON = "proton"
     UNKNOWN = "unknown"
 
 
@@ -25,6 +31,9 @@ class ActionKind(StrEnum):
     TYPE = "type"
     WAIT = "wait"
     DONE = "done"
+    HOLD = "hold"
+    REFRESH = "refresh"
+    SLIDE = "slide"
 
 
 class PixelAnswerKind(StrEnum):
@@ -34,6 +43,8 @@ class PixelAnswerKind(StrEnum):
     DRAG = "drag"
     SLIDE = "slide"
     TYPE = "type"
+    HOLD = "hold"
+    REFRESH = "refresh"
 
 
 class RetryMode(StrEnum):
@@ -126,7 +137,8 @@ class Phase(StrEnum):
     GRID_LOAD = "grid-load"
     FADE_WAIT = "fade-wait"
     BOARD_PAINT = "board-paint"
-    HCAPTCHA_IMAGES = "hcaptcha-images"
+    BOARD_IMAGES = "board-images"
+    HCAPTCHA_IMAGES = "board-images"  # the old name; an alias of BOARD_IMAGES
     AWAIT_NEXT_ROUND = "await-next-round"
     AWAIT_VERDICT = "await-verdict"
     POST_SUBMIT_DELAY = "post-submit-delay"

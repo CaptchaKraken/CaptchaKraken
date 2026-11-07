@@ -9,7 +9,7 @@
   The Python engine and CLI behind <a href="https://github.com/CaptchaKraken/CaptchaKraken">CaptchaKraken</a>.
 </p>
 
-OpenCV tile detection plus a fine-tuned **Qwen3.5-9B** vision model. Give it a
+CPU element detection plus a fine-tuned **Qwen3.5-9B** vision model. Give it a
 screenshot of a captcha and it returns the plan to solve it — which tiles to
 select, where to click, what to drag, how far to slide, or what text to type.
 Ships the `captchakraken` command.
@@ -57,7 +57,7 @@ keyframes and answered with the frame the action belongs to.
 ## Install
 
 ```bash
-pip install captchakraken            # client: OpenCV detection + vLLM HTTP planner
+pip install captchakraken            # client: CPU element detection + vLLM HTTP planner
 pip install "captchakraken[serve]"   # + the serving stack (vLLM/torch) to self-host
 ```
 
@@ -107,7 +107,7 @@ solver = CaptchaSolver()          # connects to / auto-starts a local vLLM
 actions = solver.solve("captcha.png")
 ```
 
-Pure-OpenCV tool subcommands (no model): `find-grid`, `find-checkbox`,
+Element-detector tool subcommands (CPU only, no planner model): `find-grid`, `find-checkbox`,
 `detect-selected`, `grid-cell-states`, and a persistent `serve` worker the browser driver polls.
 
 ## Configuration (model-agnostic)
@@ -123,6 +123,9 @@ Everything model-specific lives in `captchakraken.config` and is env-overridable
 | `CAPTCHA_LORA_ADAPTER` | Captcha adapter (HF id or path) | `CaptchaKraken/CaptchaKraken-Lora-v1.2` |
 | `CAPTCHA_LORA_NAME` | Served adapter name the client requests | `captcha-v12` |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` disables local auto-start | `1` |
+| `CAPTCHA_KRAKEN_DETECTOR` | A local element-detector `.onnx` to run instead of downloading the released one | the released weights, fetched once |
+| `CAPTCHA_KRAKEN_DETECTOR_MODEL` | Which released detector runs: `lite` (MobileNetV3, about 100 ms a board on one vCPU), `standard` (ResNet-18), or `auto`; overrides `detector` in `captchakraken.config.json` | the config's `detector`, shipped as `auto`: `lite` on two usable CPUs or fewer (a container's CPU quota included), else one board is timed and `standard` runs when it fits in 200 ms |
+| `HF_TOKEN` | A Hugging Face token, sent only when downloading the detector weights from a private copy of their repo | unset: the download sends no credential |
 | `CAPTCHA_HUMANIZATION` | How gestures are performed: `mouse`, `mobile` or `none` | `mouse` |
 
 **How it moves** is a choice of input device, not a realism dial. `mobile`
@@ -149,9 +152,7 @@ PageSolver(config=PageSolverConfig(
 
 ## License
 
-**CaptchaKraken Source-Available License v1.1** — see [LICENSE](./LICENSE).
-Build *with* it (scrapers, QA tooling) and run it against **any** browser you
-like, stealth or not. You may **not sell the solve itself**, ship a thin wrapper
-(browser extension, hosted solving API), or **bundle it as a built-in feature of
-a stealth/antidetect browser you distribute** — using it with one is fine. Those
-three are licensable, not categorically refused: open an issue to ask.
+**LGPL-3.0-only** — see [LICENSE](./LICENSE). Use, modify and redistribute it,
+including in commercial and hosted services. If you distribute a modified
+version, keep the licence and copyright notices and make your changes available
+under LGPLv3.

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import signal
@@ -10,6 +11,7 @@ from urllib.parse import urlparse
 import requests
 
 from . import config
+from .clipvideo import media_io_kwargs
 
 STATE_DIR = config.state_dir()
 LOCK_FILE = STATE_DIR / "vllm.lock"
@@ -67,6 +69,18 @@ def _read_pid() -> "int | None":
 
 
 def build_serve_command() -> "list[str]":
+    from . import prompts
+
+    if prompts.resolve(config.lora_adapter()).pointer:
+        detector = os.environ["CAPTCHA_POINTER_DETECTOR"]
+        return [
+            sys.executable, "-m", "captchakraken.pointer.server",
+            "--model", config.base_model(),
+            "--detector", detector,
+            "--host", os.getenv("CAPTCHA_POINTER_HOST", "127.0.0.1"),
+            "--port", str(config.port()),
+            "--gpu-memory-utilization", str(config.gpu_memory_utilization()),
+        ]
     return [
         _vllm_bin() or "vllm", "serve", config.base_model(),
         "--reasoning-parser", "qwen3",
@@ -78,6 +92,10 @@ def build_serve_command() -> "list[str]":
         "--trust-remote-code",
         "--port", str(config.port()),
         "--lora-modules", f"{config.lora_name()}={config.lora_adapter()}",
+        # A video-generation model watches an animation as one JPEG frame sequence; without these vLLM refuses the
+        # video or resamples it to its own frame count, and the time the model answers with names the wrong moment.
+        "--limit-mm-per-prompt", json.dumps({"image": 8, "video": 1}),
+        "--media-io-kwargs", json.dumps(media_io_kwargs()),
         *config.extra_serve_args(),
     ]
 

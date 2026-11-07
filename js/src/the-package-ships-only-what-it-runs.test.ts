@@ -20,6 +20,7 @@ test('npm pack lists only the driver and the engine it installs', () => {
   const [pack] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: ROOT, encoding: 'utf8' }));
   const paths: string[] = pack.files.map((f: { path: string }) => f.path);
   assert.ok(paths.some((p) => p.startsWith('python/src/captchakraken/')), 'the engine the driver shells out to is missing');
+  assert.ok(paths.includes('python/src/captchakraken/captchakraken.config.json'), 'the default selector config is missing');
   assert.deepEqual(paths.filter((p) => !SHIPPED.some((re) => re.test(p))), [], 'the tarball carries files the driver never runs');
   assert.deepEqual(paths.filter((p) => /__pycache__|\.pyc$|\/tests\/|\/examples\//.test(p)), []);
 });

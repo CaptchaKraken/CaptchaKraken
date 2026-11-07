@@ -8,7 +8,7 @@ couple of safeguards that keep the model from acting on a stale frame.
 ```
 browser ─▶ detect captcha ─▶ screenshot frame
                                    │
-                    OpenCV find_grid (color-agnostic line tracer)
+                    element detector (CNN on the CPU): grid, cells, checkbox
                                    │  tile boxes
                                    ▼
                     Qwen3.5-9B captcha LoRA on vLLM  ─▶  tile selection
@@ -16,9 +16,15 @@ browser ─▶ detect captcha ─▶ screenshot frame
                     click plan ─▶ execute (human-like) ─▶ re-detect / verify
 ```
 
-- **`find_grid`** finds the grid lines with plain OpenCV — no model needed. It
-  lives in the Python port ([`python/`](../python/), the `captchakraken`
-  package).
+- The **element detector** is a small Mask R-CNN that runs on the client's CPU
+  through onnxruntime, with no GPU and no call to the model server. It finds the
+  board's grid and each of its cells, and the tick box of a checkbox widget.
+  `find_grid` and `find_checkbox` read it; they live in the Python port
+  ([`python/`](../python/), the `captchakraken` package). Its weights are
+  downloaded once on first use and checked against a pinned hash.
+- Only the grids the **grid model** was trained on reach it: reCAPTCHA's 3×3 and
+  4×4 and hCaptcha's 3×3. Every other vendor's board goes to the model trained on
+  that vendor.
 - The **grid model** runs on your local vLLM server and says which tiles to
   click.
 - The **browser driver** (the [`js/`](../js/) TypeScript port) clicks, waits for

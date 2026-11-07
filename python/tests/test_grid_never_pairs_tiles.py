@@ -1,11 +1,7 @@
 """A board of tall tiles must not be read as a lattice of tile PAIRS.
 
-Six columns of tall tiles fail the near-square cell gate, but every other gutter
-spaces a lattice whose cells (two tiles wide) pass it, so a 6x3 board came back
-as a 3x3. A 3x3 is what the grid expert answers, so such a board was routed to
-an expert trained on photo grids instead of the one trained on it. A candidate
-whose every cell is split down its middle by a detected gutter is a sub-sampling
-of a finer lattice, not the board.
+A 6x3 board read as a 3x3 is routed to the expert trained on photo grids
+instead of the one trained on it, so the detector must return every tile.
 """
 
 import os
@@ -19,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from captchakraken.tool_calls.find_grid import find_grid
 
-cv2 = pytest.importorskip("cv2")
+from drawing import hsv_bgr, imwrite
 
 
 def _board(rows, cols, tile_w, tile_h, gutter=8, margin=16):
@@ -31,13 +27,13 @@ def _board(rows, cols, tile_w, tile_h, gutter=8, margin=16):
         for c in range(cols):
             y, x = margin + r * (tile_h + gutter), margin + c * (tile_w + gutter)
             hue = int((r * cols + c) * 9) % 180
-            base = cv2.cvtColor(np.uint8([[[hue, 190, 180]]]), cv2.COLOR_HSV2BGR)[0, 0]
+            base = hsv_bgr(hue, 190, 180)
             patch = np.full((tile_h, tile_w, 3), base, dtype=np.int16)
             patch += rng.integers(-20, 21, (tile_h, tile_w, 3), dtype=np.int16)
             canvas[y:y + tile_h, x:x + tile_w] = np.clip(patch, 0, 255).astype(np.uint8)
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
-    cv2.imwrite(path, canvas)
+    imwrite(path, canvas)
     return path
 
 

@@ -11,7 +11,7 @@ import {
   ViewportSize,
 } from './playwright-types';
 import { watchPage, CaptchaWatcher, WatchOptions } from './watcher';
-import { Humanizer, resolveHumanizer } from './humanize.js';
+import { Humanizer, gauss, hold, resolveHumanizer } from './humanize.js';
 import { execFile, spawn, spawnSync, ChildProcessWithoutNullStreams } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -20,18 +20,16 @@ import * as os from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { PhaseBudget, timingsEnabled } from './timing';
 import { CaptureRect, cropPng, enclosingRect } from './png';
-import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
+import { CaptchaKrakenConfig, SolverResult, ClickAction, DragAction, HoldAction, RefreshAction, SlideAction, TypeAction, CaptchaAction, SolveResult, CliResponse, TokenUsage, Vector } from './types';
 import { ActionKind, FrameRole, KeyframeMode, Outcome, PaintVerdict, PauseKind, Phase, RecaptchaBanner, RetryMode, SettleVerdict, SolveStage, Vendor, Verdict, isOneOf } from './kinds';
 import { VerdictLog } from './verdicts';
 import { aggregateTokenUsage } from './token-usage';
 import { parseApiError } from './errors';
 import { DEFAULT_RECAPTCHA_MAX_DYNAMIC_ROUNDS } from './limits';
 import { resolvePythonCommand } from './python-command';
-import { buildSolveArgs, redactCommand, solveEnv } from './cli-invocation';
-import { solveSlideGeometry, MIN_PIECE_PX, MAX_PIECE_FRACTION } from './slide-geometry';
+import { buildSolveArgs, parseSolveOutput, redactCommand, solveEnv } from './cli-invocation';
 import { getBundledCliRoot, isHostedEndpoint, isLegacyHostedName, LEGACY_MODEL_WARNING, resolveLoraName } from './model-name';
-import { SELECTORS, VENDORS, VendorSelectors, WIDGET_PROBES, WidgetProbe, ENCLAVE_SELECTORS, RESPONSE_SELECTORS, ACCEPTED_SELECTORS, SUBMIT_SELECTORS,
-  TEXT_INPUT_SELECTORS, TEXT_INPUT_VENDOR_SELECTORS, SLIDER_HANDLE_SELECTORS, PIECE_SELECTORS } from './selectors';
+import { DEFAULT_CONFIG_PATH, DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe } from './selectors';
 
 const execFileAsync = promisify(execFile);
 /** The ceiling on one ask, matching the Python planner's own default. */
@@ -106,11 +104,6 @@ interface GridCellStates {
   selected: number[];
 }
 
-interface TrackedPiece {
-  bbox: [number, number, number, number];
-  piece: { centre: number, width: number } | null;
-}
-
 /** What detection found: the handle to photograph, the locator to search inside, and which table entry named it. */
 export interface Widget {
   el: ElementHandle;
@@ -125,6 +118,38 @@ const VENDORS_WITH_BESPOKE_HANDLING: ReadonlySet<Vendor> = new Set<Vendor>([Vend
 
 // Long enough to resolve a locator `all()` just returned, short enough that a widget gone in between reads as stale, not hung.
 const HANDLE_TIMEOUT_MS = 1000;
+/**
+ * A typed captcha's text box widens the shot only when it sits by the image: the union may be at most this many
+ * times the image's area. A vendor-named box found in the enclosing form can be a whole login form away.
+ */
+const ANSWER_BOX_MAX_GROWTH = 4;
+
+/**
+ * A typed captcha's image and its text box, photographed and pointed into as one element.
+ *
+ * BotDetect's widget element is a 280x50 strip holding only the image; its text box is a sibling. Every training
+ * board and every real capture of a typed captcha shows the box under the image, and on the bare strip the pointer
+ * read the image as a click puzzle or doubled a glyph. The answer's points are taken in this union's frame, so
+ * `boundingBox` is the union everywhere the round reads it; everything else is the element's own.
+ */
+export function withAnswerBox(el: ElementHandle, box: ElementHandle): ElementHandle {
+  const union = async () => {
+    const a = await el.boundingBox();
+    const b = a ? await box.boundingBox() : null;
+    if (!a || !b) return a;
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x + a.width, b.x + b.width), y1 = Math.max(a.y + a.height, b.y + b.height);
+    if ((x1 - x0) * (y1 - y0) > ANSWER_BOX_MAX_GROWTH * Math.max(a.width * a.height, 1)) return a;
+    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  };
+  return new Proxy(el, {
+    get(target, key) {
+      if (key === 'boundingBox') return union;
+      const v = Reflect.get(target, key, target);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+}
 
 /** Every visible match of `selectors`, in selector order, queried at once. A selector this adapter can't parse is skipped, not fatal. */
 const visible = async (scope: Scope, selectors: readonly string[]): Promise<Locator[]> =>
@@ -136,14 +161,32 @@ const frameOf = async (at: Locator): Promise<Frame | null> => (await (await hand
  * Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave is
  * skipped because Playwright judges an element visible within its own document, whatever its frame's visibility.
  */
-const hostScopes = async (page: Page): Promise<Scope[]> =>
-  [page, ...(await Promise.all((await visible(page, ENCLAVE_SELECTORS)).map(frameOf))).filter((f): f is Frame => f !== null)];
+const hostScopes = async (page: Page, enclaves: readonly string[]): Promise<Scope[]> =>
+  [page, ...(await Promise.all((await visible(page, enclaves)).map(frameOf))).filter((f): f is Frame => f !== null)];
 const visibleIn = async (scopes: readonly Scope[], selectors: readonly string[]): Promise<Locator[]> =>
   (await Promise.all(scopes.map((scope) => visible(scope, selectors)))).flat();
 const hasText = async (el: ElementHandle): Promise<boolean> => !!((await el.textContent().catch(() => null)) ?? '').trim();
 
 const SLIDE_TOLERANCE_PX = 2;
 const SLIDE_MAX_CORRECTIONS = 3;
+// The nudge that shows the tracker what the handle moves: enough to separate the part from still ground, little
+// enough that a piece resting against the board's edge stays on it. Mirrors page_solver.py SLIDE_PROBE_PX.
+const SLIDE_PROBE_PX = 8;
+
+interface SlideStepRequest {
+  first: string; probe: string; current: string; probe_s: number; s: number | [number, number];
+  goal: number[]; seed: number[] | null; handle: number[]; bounds: number[]; tol: number;
+  history: { s: number | number[]; params: number[] }[];
+}
+
+interface SlideStepReply {
+  pos: [number, number]; params: [number, number, number]; error: number; grabbed: boolean; kind: 'slide' | 'turn';
+  next: number | [number, number]; done: boolean; correlation: number;
+  observation: { s: number | number[]; params: number[] };
+}
+
+/** What one look at a held widget's fill saw (`fill_tracker.py`); the first look carries only the shot's scale. */
+interface FillLook { t: number; edge: number | null; k?: number }
 
 /** An allow-list of what needs nothing: the other direction raises instead of clicking at the origin. */
 export function answerNeedsElementBox(actions: ReadonlyArray<{ action?: string }>): boolean {
@@ -173,6 +216,16 @@ const NOT_THIS_BOARD_POLLS = 3;
 // How long a control we hovered, pressed or typed into takes to stop repainting in reaction. A board read inside
 // this window is wearing our own feedback, which is not a screen it ever showed by itself.
 export const INPUT_SETTLE_MS = 400;
+// While a reCAPTCHA tile reloads the hand rests on it, drifting a few pixels every second or two. Reaching for a
+// different reloading tile on every 250 ms poll read as a cursor darting about the board.
+export const IDLE_DRIFT_EVERY_MS: readonly [number, number] = [1200, 2800];
+export const IDLE_DRIFT_PX = 3;
+// How much longer than gridLoadTimeoutMs a reCAPTCHA tile that is still painting is waited on.
+export const GRID_LOAD_CAP_FACTOR = 3;
+// A press-and-hold is released once the widget's picture has stopped changing for this long after its fill
+// moved, and at HOLD_MAX_MS whatever it shows. Press & Hold widgets ask for seconds, not tens of seconds.
+export const HOLD_SETTLE_MS = 900;
+export const HOLD_MAX_MS = 12_000;
 
 /** `viewportSize()` is null on a context launched without one (camoufox), where only the window knows. */
 async function viewportOf(page: Page): Promise<ViewportSize> {
@@ -239,6 +292,7 @@ export class CaptchaKrakenSolver {
   private videoBudgetMs = 0;
   private videoBudgetGranted = false;
   private human: Humanizer;
+  private sel: SelectorTable = DEFAULT_TABLE;
   private stepIndex = 0;
   private solveStartMs = 0;
   private cvWorker: ChildProcessWithoutNullStreams | null = null;
@@ -248,6 +302,15 @@ export class CaptchaKrakenSolver {
   private cvWorkerBuf = '';
   /** Answers keyed by screenshot hash; a hit means the answer already ran and changed nothing. */
   private solutionCache: Map<string, CliResponse> = new Map();
+  /** The other complete plans the pointer returned for this board, best first; a refresh is last. */
+  private fallbackPlans: CaptchaAction[][] = [];
+  /** The screenshot those plans answered. A different board makes them the wrong answer, not an alternative. */
+  private fallbackBoardHash: string | null = null;
+  /** True only once THIS board refused the plan at the front. Nothing is pressed speculatively. */
+  private fallbackArmed = false;
+  private exchangesAtAnswer = 0;
+  /** Earlier screens of the same paged puzzle (FunCaptcha), oldest first; the CLI sends them as `--history`. */
+  private pointerHistory: string[] = [];
   private repeatedAnswerSeen = false;
   private knownAnimated = false;
   private animatedProbeDone = false;
@@ -257,8 +320,9 @@ export class CaptchaKrakenSolver {
   private keyframeSteadyScreens = 0;
   private solveDeadlineAt = 0;
   private lastAnswerSig: string | null = null;
+  private triedAnswers = new Set<string>();
+  private refreshedBoards = new Set<string>();
   private noProgressRounds = 0;
-  private resampleLevel = 0;
   /** The recording `classifyByRecording` started and left running for the branch below to finish or drop. */
   private pendingBurst: ReturnType<CaptchaKrakenSolver['startKeyframeBurst']> | null = null;
   /**
@@ -271,6 +335,7 @@ export class CaptchaKrakenSolver {
   private animatedFilm: ReturnType<CaptchaKrakenSolver['startKeyframeBurst']> | null = null;
   private lastBurstFps: number | null = null;
   private actedOnBoard = false;
+  private submittedOnBoard = false;
   private lastSubmitFrameHash: string | null = null;
   private solveSessionId: string | null = null;
   /** Which vendor and site this solve is for, sent to the hosted API; the site is a hostname only. */
@@ -301,6 +366,9 @@ export class CaptchaKrakenSolver {
 
   constructor(config: CaptchaKrakenConfig = {}) {
     this.config = config;
+    if (config.customSelectors || config.selectors !== undefined) {
+      this.sel = new SelectorTable(config.customSelectors, config.selectors ?? DEFAULT_CONFIG_PATH);
+    }
     this.human = resolveHumanizer({ ...config, startingMousePosition: config.startingMousePosition ?? { x: 100, y: 100 } });
   }
 
@@ -389,6 +457,7 @@ export class CaptchaKrakenSolver {
       if (timingsEnabled()) console.error(this.budget!.report());
       // The camera outlives a round by design, so it has to be ended by the thing that outlives the solve.
       await this.stopAnimatedFilm();
+      this.dropPointerHistory();
       this.teardownCvWorker();
       this.cvWorkerReady = null;
       // Set by solveImpl, which the narrowing from the reset above cannot see.
@@ -409,7 +478,7 @@ export class CaptchaKrakenSolver {
       try {
         const { cliRoot, py } = this.resolveCli();
         const child = spawn(py, ['-m', 'captchakraken.cli', 'report-outcome', sessionId, solved ? Outcome.SOLVED : Outcome.FAILED],
-          { cwd: cliRoot, env: cliEnv(cliRoot, this.routingEnv()), stdio: ['ignore', 'pipe', 'pipe'] });
+          { cwd: cliRoot, env: solveEnv(cliEnv(cliRoot, this.routingEnv()), this.apiKey), stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '';
         child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
         // The engine words its own warnings; a hosted refusal must be as visible here as it is from Python.
@@ -571,14 +640,18 @@ export class CaptchaKrakenSolver {
         widgetGone = roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page)) ? widgetGone + 1 : 0;
         if (widgetGone >= 2) { solved = true; break; }
         if (await this.isChallengeFreshlyRendered(page)) {
-          this.resampleLevel = 0;
           this.actedOnBoard = false;
+          this.submittedOnBoard = false;
           // ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer
           // describes the board it was cut from, so replaying it here presses that board's
           // coordinates onto this one: live, a keyframe answer from an earlier board landed on
           // hCaptcha's reference photo and then pressed Skip, six rounds running.
           await this.stopAnimatedFilm();
           this.knownAnimated = false;
+          this.fallbackPlans = [];
+          this.fallbackBoardHash = null;
+          this.fallbackArmed = false;
+          this.dropPointerHistory();
           // Its own second look, but only once IT fails: what armed it was evidence about the previous board,
           // and left set it filmed every still board after a solve's first miss.
           this.repeatedAnswerSeen = false;
@@ -594,9 +667,16 @@ export class CaptchaKrakenSolver {
       }
       if (roundSaid === Verdict.BLOCKED) throw blocked('its server answered 429');
       if (await this.isBlocked(page)) throw blocked('it is showing its try-again-later screen');
-      if (roundSaid === Verdict.REJECTED) console.log(`[verdict] the vendor rejected the answer after ${Date.now() - verdictT0}ms`);
+      if (roundSaid === Verdict.REJECTED) {
+        console.log(`[verdict] the vendor rejected the answer after ${Date.now() - verdictT0}ms`);
+        // Only a refusal earns the server's next plan. Without it a board that merely repainted would have
+        // the previous board's plan pressed onto it.
+        this.fallbackArmed = true;
+      }
 
-      if (this.bannerIsFatalAfterRetry(await this.bannerKind(page))) {
+      // Only "select all matching images" means tiles were missed; "please try again" is a wrong answer and
+      // deals a new board, which is asked fresh.
+      if ((await this.bannerKind(page)) === RecaptchaBanner.SELECT_MORE) {
         console.log('reCAPTCHA under-selection error; the next round asks for the missed tiles.');
         pendingRetryMode = RetryMode.MISSED_TILES;
       }
@@ -604,15 +684,18 @@ export class CaptchaKrakenSolver {
       if (roundSaid !== Verdict.REJECTED && !(await this.detectCaptcha(page))) return done();
       if (this.noProgressRounds) {
         const stuck = `No progress: the model returned the same answer ${this.noProgressRounds + 1} times running`;
-        // A board answered the same way after every resample is one the model cannot read: measured, no solve ever
-        // followed a third identical answer, and each further round cost the board 3-7s.
-        if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2)) throw new Error(`${stuck}.`);
+        // A repeat pressed nothing, so a further round is only worth its 3-7s if it can do something else.
+        if (this.noProgressRounds >= (cfg.maxNoProgressRounds ?? 2) || !this.anotherMoveLeft(pendingRetryMode)) {
+          throw new Error(`${stuck}.`);
+        }
         await again(stuck);
       } else if (!didInteract) {
         // An answer with nothing to execute is not proof the page is stuck; on an animated board it is what a still
         // expert returns when the board is not a still, so the next round takes a second look.
         if (cfg.videoSolveEnabled !== false) this.repeatedAnswerSeen = true;   // what arms the second look
         await again('The solver performed no interactions this round');
+      } else {
+        lastFailure = null;
       }
     }
 
@@ -645,12 +728,12 @@ export class CaptchaKrakenSolver {
   /** The vendor showing its refusal screen: rate-limited or flagged, with no board to answer. */
   private async isBlocked(page: Page): Promise<boolean> {
     try {
-      const probes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHALLENGE && SELECTORS[p.vendor].blocked);
-      const scopes = await hostScopes(page);
+      const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].blocked);
+      const scopes = await hostScopes(page, this.sel.enclave);
       const shown = await Promise.all(probes.map(async (p) => {
         const [at] = await visibleIn(scopes, [p.selector]);
         const frame = at && await frameOf(at);
-        return !!frame && (await Promise.all((SELECTORS[p.vendor].blocked ?? []).map((sel) => this.visibleWithText(frame, sel)))).some(Boolean);
+        return !!frame && (await Promise.all((this.sel.selectors[p.vendor].blocked ?? []).map((sel) => this.visibleWithText(frame, sel)))).some(Boolean);
       }));
       return shown.some(Boolean);
     } catch {
@@ -659,14 +742,26 @@ export class CaptchaKrakenSolver {
   }
 
   /** The env the engine reads its routing headers from: session, and the vendor and site once they are known. */
+  /** This solver's endpoint and key: two solvers in one process may talk to different servers. */
+  private get baseUrl(): string | undefined {
+    return this.config.baseUrl ?? process.env.VLLM_BASE_URL;
+  }
+
+  private get apiKey(): string | undefined {
+    return this.config.apiKey ?? process.env.CAPTCHA_KRAKEN_API_KEY ?? process.env.VLLM_API_KEY;
+  }
+
   private routingEnv(): NodeJS.ProcessEnv {
     return {
+      ...(this.config.baseUrl ? { VLLM_BASE_URL: this.config.baseUrl } : {}),
       ...(this.solveSessionId ? { CAPTCHA_KRAKEN_SESSION: this.solveSessionId } : {}),
       ...(this.solveVendor ? { CAPTCHA_KRAKEN_VENDOR: this.solveVendor } : {}),
       ...(this.solveSite ? { CAPTCHA_KRAKEN_SITE: this.solveSite } : {}),
       ...(this.solveWidgetHost ? { CAPTCHA_KRAKEN_WIDGET_HOST: this.solveWidgetHost } : {}),
       // This driver warns about a legacy model name itself, once; the engine it starts per round stays quiet.
       CAPTCHA_KRAKEN_MODEL_WARNING: '0',
+      // The config's detector choice; the caller's own environment variable still wins, as it does in Python.
+      ...(process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL ? {} : { CAPTCHA_KRAKEN_DETECTOR_MODEL: this.sel.config.detector }),
     };
   }
 
@@ -693,7 +788,8 @@ export class CaptchaKrakenSolver {
 
   private async solveSingle(page: Page, widget: Widget, attempt: number, retryMode: RetryMode | null = null): Promise<{ didInteract: boolean, tokenUsage: TokenUsage[] }> {
     const cfg = this.config;
-    const { el: captchaElement, vendor: puzzleSource, role: frameRole } = widget;
+    const { vendor: puzzleSource, role: frameRole } = widget;
+    let captchaElement = widget.el;
     this.solveVendor = puzzleSource;
     const frame = await captchaElement.contentFrame();
     this.solveWidgetHost = frame ? hostname(frame) : null;
@@ -704,12 +800,12 @@ export class CaptchaKrakenSolver {
       return { didInteract: true, tokenUsage: [] };
     }
 
-    if (frame && frameRole === FrameRole.CHALLENGE && SELECTORS[puzzleSource].images) {
+    if (frame && frameRole === FrameRole.CHALLENGE && this.sel.selectors[puzzleSource].images) {
       if (this.lastSubmitFrameHash) {
         await this.ph(Phase.AWAIT_NEXT_ROUND, () => this.waitForChangeSince(captchaElement, this.lastSubmitFrameHash as string));
         this.lastSubmitFrameHash = null;
       }
-      await this.ph(Phase.HCAPTCHA_IMAGES, () => this.waitForBoardImages(frame, SELECTORS[puzzleSource]));
+      await this.ph(Phase.BOARD_IMAGES, () => this.waitForBoardImages(frame, this.sel.selectors[puzzleSource]));
     }
 
     // THE TWO QUESTIONS BELOW ARE PUT TO A PAINTED BOARD. Which expert answers the round is read out of the
@@ -723,8 +819,12 @@ export class CaptchaKrakenSolver {
       : await this.ph(Phase.BOARD_PAINT, () => this.waitForBoardPainted(captchaElement));
 
     // Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
-    const textMode = !VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) && (await this.answerBox(scope, widget.at)) !== null;
-    if (textMode) console.log('Widget has a text box; solving as a distorted-text captcha.');
+    const answerBox = VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) ? null : await this.answerBox(scope, widget.at);
+    const textMode = answerBox !== null;
+    if (textMode) {
+      console.log('Widget has a text box; solving as a distorted-text captcha.');
+      captchaElement = withAnswerBox(captchaElement, answerBox);
+    }
 
     // A reCAPTCHA board is read by its grid below, not filmed.
     const filmable = puzzleSource !== Vendor.RECAPTCHA && !textMode;
@@ -781,11 +881,15 @@ export class CaptchaKrakenSolver {
     const screenshotPath = tmp('captcha');
     const settledFrame = (isAnimated || painted?.verdict !== PaintVerdict.PAINTED)
       ? null : (this.pendingBurst?.stableFrame() ?? null);
-    if (settledFrame && fs.existsSync(settledFrame)) {
-      fs.copyFileSync(settledFrame, screenshotPath);
+    const filmed = !!settledFrame && fs.existsSync(settledFrame);
+    if (filmed) {
+      fs.copyFileSync(settledFrame!, screenshotPath);
     } else {
       await this.ph(Phase.SCREENSHOT, () => this.shot(captchaElement, screenshotPath, cfg.elementScreenshotTimeoutMs ?? 8000));
     }
+    const boardHash = await this.boardHash(captchaElement, screenshotPath, filmed);
+    // A refresh that brought the same picture back has replaced nothing, and every plan has been spent on it.
+    if (this.refreshedBoards.has(boardHash)) throw new Error('No progress: the board came back unchanged after a refresh.');
     if (this.stepIndex === 0) {
       await this.emitStep(captchaElement, SolveStage.INITIAL, 'initial (pre-action)', puzzleSource, frameRole, attempt,
         establishedGridSize ? { gridSize: establishedGridSize } : undefined);
@@ -799,9 +903,21 @@ export class CaptchaKrakenSolver {
 
     try {
       let response: CliResponse | null = null;
+      let fromFallback = false;
+      if (this.fallbackPlans.length) {
+        if (this.fallbackArmed && this.fallbackBoardHash === boardHash) {
+          response = { actions: this.fallbackPlans.shift()!, token_usage: [] };
+          fromFallback = true;
+        } else {
+          // The board that refused the first plan is not this one, or the last round did not refuse it.
+          this.fallbackPlans = [];
+          this.fallbackBoardHash = null;
+          this.fallbackArmed = false;
+        }
+      }
       const ask = (imagePath: string) => this.getSolution(imagePath, puzzleSource, retryMode, textMode);
       const askAnimated = () => this.ph(Phase.INFERENCE, () => this.withIdleWander(page, captchaElement, () => this.getAnimatedSolution(burstDir as string)));
-      if (isAnimated) {
+      if (isAnimated && !response) {
         // The camera was paused while the last answer was performed; from here the board is its own again.
         this.animatedFilm?.resume();
         if (this.animatedPlan?.response) {
@@ -894,6 +1010,11 @@ export class CaptchaKrakenSolver {
         response = await this.ph(Phase.INFERENCE, () => this.solveFrameFreshnessGuarded(captchaElement, screenshotPath,
           (imagePath) => this.withIdleWander(page, captchaElement, () => ask(imagePath))));
       }
+      if (!fromFallback) {
+        this.fallbackPlans = response.fallbacks ?? [];
+        this.fallbackBoardHash = this.fallbackPlans.length ? boardHash : null;
+        this.fallbackArmed = false;
+      }
       const actionList = Array.isArray(response.actions) ? response.actions : [response.actions];
       allTokenUsage = response.token_usage;
 
@@ -908,9 +1029,24 @@ export class CaptchaKrakenSolver {
       // Tier 3 grades this line with Tier 2's grader to split driver bugs from model misses (see TRIBAL_KNOWLEDGE.md).
       console.log('[answer] ' + JSON.stringify({ actions: actionList }));
       // A repeated answer is not re-performed: the widget already refused it, and every extra press is
-      // behaviour a vendor scores. Re-asking with a fresh sample or a recording is the round's only move.
+      // behaviour a vendor scores. Re-asking, or asking a recording, is the round's only move.
       // `noteAnswer` drops the refused animated answer on its way through, so the next round re-asks.
-      if (this.noteAnswer(actionList, retryMode)) return { didInteract: false, tokenUsage: allTokenUsage };
+      // An animated board's screens are SUPPOSED to change; keying a repeat on them would never fire. The
+      // board hash is for the still path only, where a paged puzzle's same next-arrow is a new page.
+      if (this.noteAnswer(actionList, retryMode, isAnimated ? null : boardHash)) return { didInteract: false, tokenUsage: allTokenUsage };
+      // FunCaptcha pages one option at a time and the model reads the earlier screens as history. Without
+      // them it has nothing to compare against and keeps answering "next arrow", including on the match.
+      if (!isAnimated && puzzleSource === Vendor.FUNCAPTCHA
+          && actionList.length && actionList.every((a: any) => a?.action === ActionKind.CLICK)) {
+        try {
+          if (fs.existsSync(screenshotPath)) {
+            const saved = tmp('pghist');
+            fs.copyFileSync(screenshotPath, saved);
+            this.pointerHistory.push(saved);
+            while (this.pointerHistory.length > 8) unlink(this.pointerHistory.shift());
+          }
+        } catch { /* a screen we could not keep simply is not history */ }
+      }
       console.log(`Executing ${actionList.length} actions.`);
       // Stop filming before we touch it. Everything from here to the vendor's verdict is our own answer
       // landing, and a frame of the board wearing our clicks is not a screen the board ever showed.
@@ -936,8 +1072,8 @@ export class CaptchaKrakenSolver {
           }
           performedAction = answered = true;
           await this.emitStep(captchaElement, SolveStage.CLICK, `clicked ${bboxes.length || 1} target(s)`, puzzleSource, frameRole, attempt, { bboxes });
-        } else if (action.action === ActionKind.DRAG && !(action as DragAction).source_bounding_box) {
-          if (await this.executeSlide(page, captchaElement, scope, action as DragAction, requireBox())) {
+        } else if (action.action === ActionKind.SLIDE || (action.action === ActionKind.DRAG && !(action as DragAction).source_bounding_box)) {
+          if (await this.executeSlide(page, captchaElement, scope, action as DragAction | SlideAction, requireBox())) {
             performedAction = slid = true;
             await this.emitStep(captchaElement, SolveStage.DRAG, 'slid the piece into the slot', puzzleSource, frameRole, attempt, { action });
           }
@@ -947,11 +1083,22 @@ export class CaptchaKrakenSolver {
           await this.executeDrag(page, captchaElement, action as any, requireBox());
           performedAction = answered = true;
           await this.emitStep(captchaElement, SolveStage.DRAG, 'drag', puzzleSource, frameRole, attempt, { action });
+        } else if (action.action === ActionKind.HOLD) {
+          // The widget submits itself when the hold completes, like a slide on release.
+          const completed = await this.executeHold(page, captchaElement, action as HoldAction, requireBox(),
+            this.sel.selectors[widget.vendor].holdCompletes ?? false);
+          performedAction = slid = true;
+          await this.emitStep(captchaElement, SolveStage.HOLD, completed ? 'held until the widget completed' : 'released the hold at the cap', puzzleSource, frameRole, attempt, { action });
         } else if (action.action === ActionKind.TYPE) {
           if (await this.executeType(page, scope, action as TypeAction, widget.at)) {
             performedAction = answered = true;
             await this.emitStep(captchaElement, SolveStage.TYPE, 'typed the code', puzzleSource, frameRole, attempt, { action });
           }
+        } else if (action.action === ActionKind.REFRESH) {
+          // Nothing after a refresh, Verify included, belongs to the board it replaces.
+          const refreshed = await this.executeRefresh(page, captchaElement, scope, action as RefreshAction, elementBox);
+          if (refreshed) await this.emitStep(captchaElement, SolveStage.REFRESH, 'asked for a new puzzle', puzzleSource, frameRole, attempt, { action });
+          return { didInteract: refreshed, tokenUsage: allTokenUsage };
         } else if (action.action === ActionKind.WAIT && (action as any).duration_ms > 0) {
           await delay((action as any).duration_ms);
           performedAction = true;
@@ -960,14 +1107,20 @@ export class CaptchaKrakenSolver {
       }
 
       // A slide submits itself on release, and any Verify found afterwards belongs to the host page and would
-      // submit the guarded form mid-verdict. An empty or `done` plan still presses Verify/Skip.
-      const verifyButton = frame || !slid ? await this.getVerifyButton(scope) : null;
-      if (!slid && (answered || !performedAction) && verifyButton) {
+      // submit the guarded form mid-verdict, unless this board has already taken a Verify from us: then that button
+      // is the widget's, and a slide on it submits nothing by itself. An empty or `done` plan still presses
+      // Verify/Skip. FunCaptcha is the exception: its answer is the click itself — an arrow pages, Submit (which the
+      // model clicks on the match) submits — so the generic fallback submits page one right after an arrow turned it.
+      const submits = slid ? this.submittedOnBoard : answered || !performedAction;
+      const verifyButton = submits && puzzleSource !== Vendor.FUNCAPTCHA ? await this.getVerifyButton(scope) : null;
+      if (verifyButton) {
         console.log(`Clicking Verify to submit (${puzzleSource}).`);
         await this.moveAndClick(page, verifyButton);
-        performedAction = true;
+        performedAction = this.submittedOnBoard = true;
         await this.emitStep(captchaElement, SolveStage.SUBMIT, 'submitted (Verify/Next)', puzzleSource, frameRole, attempt);
         this.lastSubmitFrameHash = await this.elementFrameHash(captchaElement);
+      } else if (answered && puzzleSource !== Vendor.FUNCAPTCHA) {
+        this.keepPlansOfThisManyClicks(actionList);
       }
     } finally {
       await this.releasePendingBurst();
@@ -985,9 +1138,13 @@ export class CaptchaKrakenSolver {
    * checkbox picture with a drag.
    */
   private async clickCheckbox(page: Page, widget: Widget, frame: Frame | null): Promise<void> {
-    const box = await this.checkboxBox(frame, widget.vendor);
+    const box = frame ? await this.checkboxBox(frame, widget.vendor) : (this.sel.selectors[widget.vendor].box?.length ? widget.el : null);
     if (box) await this.move(page, box);
-    else await this.performSmoothMove(page, ...await this.findCheckboxOnScreen(widget.el));
+    else {
+      const at = await this.findCheckboxOnScreen(page, widget.el);
+      if (!at) return;
+      await this.performSmoothMove(page, ...at);
+    }
     await this.human.pause(PauseKind.BETWEEN);
     await this.gesture(() => this.human.click(page, this.human.at));
     await this.awaitWhatTheCheckboxOpened(page);
@@ -998,7 +1155,7 @@ export class CaptchaKrakenSolver {
    * a closed shadow root, and a frame can refuse access; both are found on screen instead.
    */
   private async checkboxBox(frame: Frame | null, vendor: Vendor): Promise<ElementHandle | null> {
-    const box = SELECTORS[vendor].box;
+    const box = this.sel.selectors[vendor].box;
     if (!frame || !box?.length) return null;
     try {
       return await frame.waitForSelector(box.join(', '), { state: 'visible', timeout: this.config.detectionTimeoutMs ?? SOLVE_DEFAULTS.detectionTimeoutMs });
@@ -1008,8 +1165,27 @@ export class CaptchaKrakenSolver {
     }
   }
 
-  /** One capture and OpenCV: a point inside the tick box, in page coordinates. No model is asked. */
-  private async findCheckboxOnScreen(el: ElementHandle): Promise<[number, number]> {
+  /**
+   * A point inside the tick box, in page coordinates, or null when the widget passed without drawing one. Turnstile
+   * shows "Verifying…" before its box, so an empty capture is looked at again until `detectionTimeoutMs`.
+   */
+  private async findCheckboxOnScreen(page: Page, el: ElementHandle): Promise<[number, number] | null> {
+    const deadline = Date.now() + (this.config.detectionTimeoutMs ?? SOLVE_DEFAULTS.detectionTimeoutMs);
+    for (;;) {
+      const at = await this.checkboxOnScreen(el);
+      if (at) return at;
+      if (await this.isCaptchaSolved(page)) return null;
+      if (Date.now() >= deadline) {
+        const e: any = new Error('UNSUPPORTED_CAPTCHA: the checkbox widget shows no tick box to click');
+        e.unsupported = true;
+        throw e;
+      }
+      await delay(DETECTION_POLL_MS);
+    }
+  }
+
+  /** One capture and the element detector, no model: a point inside the tick box, or null when none is drawn. */
+  private async checkboxOnScreen(el: ElementHandle): Promise<[number, number] | null> {
     const box = await el.boundingBox();
     if (!box) throw new Error('Could not get bounding box of captcha element');
     const shot = tmp('checkbox');
@@ -1022,11 +1198,7 @@ export class CaptchaKrakenSolver {
     } finally {
       unlink(shot);
     }
-    if (!found) {
-      const e: any = new Error('UNSUPPORTED_CAPTCHA: the checkbox widget shows no tick box to click');
-      e.unsupported = true;
-      throw e;
-    }
+    if (!found) return null;
     const [x, y, w, h] = found.map((v) => v / scale);
     return [box.x + x + w * (0.3 + Math.random() * 0.4), box.y + y + h * (0.3 + Math.random() * 0.4)];
   }
@@ -1047,7 +1219,7 @@ export class CaptchaKrakenSolver {
   }
 
   private getVerifyButton(scope: Scope): Promise<ElementHandle | null> {
-    return this.findControl(scope, SUBMIT_SELECTORS);
+    return this.findControl(scope, this.sel.submit);
   }
 
   /** Any element at `selector` carrying a non-blank value; response fields are hidden, so no visibility filter. */
@@ -1066,19 +1238,15 @@ export class CaptchaKrakenSolver {
     return !!frame && (await visible(frame, [checked])).length > 0;
   }
 
-  private bannerIsFatalAfterRetry(kind: RecaptchaBanner | null): boolean {
-    return kind === RecaptchaBanner.SELECT_MORE || kind === RecaptchaBanner.REJECTED;
-  }
-
   /** Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error. */
   private async bannerKind(page: Page): Promise<RecaptchaBanner | null> {
-    const probes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHALLENGE && SELECTORS[p.vendor].banners);
-    const scopes = await hostScopes(page);
+    const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].banners);
+    const scopes = await hostScopes(page, this.sel.enclave);
     const kinds = await Promise.all(probes.map(async (p) => {
       const [at] = await visibleIn(scopes, [p.selector]);
       const frame = at && await frameOf(at);
       if (!frame) return null;
-      const shown = await Promise.all((SELECTORS[p.vendor].banners ?? []).map(async ([sel, kind]) => (await this.visibleWithText(frame, sel)) ? kind : null));
+      const shown = await Promise.all((this.sel.selectors[p.vendor].banners ?? []).map(async ([sel, kind]) => (await this.visibleWithText(frame, sel)) ? kind : null));
       return shown.find((k) => k !== null) ?? null;
     }));
     return kinds.find((k) => k !== null) ?? null;
@@ -1087,14 +1255,14 @@ export class CaptchaKrakenSolver {
   /** The vendor's own done signal: a response token, a painted success state, or a checked box. */
   private async isCaptchaSolved(page: Page): Promise<boolean> {
     try {
-      const checkboxes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHECKBOX && SELECTORS[p.vendor].checked);
-      const scopes = await hostScopes(page);
+      const checkboxes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHECKBOX && this.sel.selectors[p.vendor].checked);
+      const scopes = await hostScopes(page, this.sel.enclave);
       const signals = await Promise.all([
-        ...RESPONSE_SELECTORS.map((s) => this.hasValue(scopes, s)),
-        visibleIn(scopes, ACCEPTED_SELECTORS).then((found) => found.length > 0),
+        ...this.sel.response.map((s) => this.hasValue(scopes, s)),
+        visibleIn(scopes, this.sel.accepted).then((found) => found.length > 0),
         ...checkboxes.map(async (p) => {
           const [at] = await visibleIn(scopes, [p.selector]);
-          return !!at && this.checkedIn(at, SELECTORS[p.vendor].checked as string);
+          return !!at && this.checkedIn(at, this.sel.selectors[p.vendor].checked as string);
         }),
       ]);
       return signals.some(Boolean);
@@ -1106,14 +1274,14 @@ export class CaptchaKrakenSolver {
   /** A next round has painted, as opposed to the answered frame animating closed. */
   private async isChallengeFreshlyRendered(page: Page): Promise<boolean> {
     try {
-      const probes = WIDGET_PROBES.filter((p) => p.role === FrameRole.CHALLENGE && SELECTORS[p.vendor].fresh);
-      const scopes = await hostScopes(page);
+      const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].fresh);
+      const scopes = await hostScopes(page, this.sel.enclave);
       const fresh = await Promise.all(probes.map(async (p) => {
         const [at] = await visibleIn(scopes, [p.selector]);
         const el = at && await handleOf(at);
         if (!el || (this.lastSubmitFrameHash && (await this.elementFrameHash(el)) === this.lastSubmitFrameHash)) return false;
         const frame = await el.contentFrame();
-        return !!frame && this.visibleWithText(frame, SELECTORS[p.vendor].fresh as string);
+        return !!frame && this.visibleWithText(frame, this.sel.selectors[p.vendor].fresh as string);
       }));
       return fresh.some(Boolean);
     } catch {
@@ -1136,7 +1304,7 @@ export class CaptchaKrakenSolver {
           const bg = getComputedStyle(el).backgroundImage;
           return !!bg && bg !== 'none' && !/url\(["']?["']?\)/.test(bg);
         });
-      }, { prompt: s.fresh ?? '', images: (s.images ?? []).join(',') }, { timeout: this.config.hcaptchaImagesTimeoutMs ?? 3000 });
+      }, { prompt: s.fresh ?? '', images: (s.images ?? []).join(',') }, { timeout: this.config.boardImagesTimeoutMs ?? this.config.hcaptchaImagesTimeoutMs ?? 3000 });
     } catch { /* timed out or detached mid-load; screenshot anyway */ }
   }
 
@@ -1157,13 +1325,13 @@ export class CaptchaKrakenSolver {
       return [];
     }
     const blob = names.join(' ');
-    return VENDORS.filter(([, s]) => s.hosts.some((h) => blob.includes(h))).map(([vendor]) => vendor);
+    return this.sel.vendors.filter(([, s]) => s.hosts.some((h) => blob.includes(h))).map(([vendor]) => vendor);
   }
 
   /** Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame (an invisible badge, an enclave) is not a widget, so what is left is markup the table no longer matches. */
   private async unmatchedVendorFrames(page: Page): Promise<Vendor[]> {
-    const scopes = await hostScopes(page);
-    const counts = await Promise.all(VENDORS.map(async ([vendor, s]) => {
+    const scopes = await hostScopes(page, this.sel.enclave);
+    const counts = await Promise.all(this.sel.vendors.map(async ([vendor, s]) => {
       if (!s.hosts.length) return null;
       const [frames, passive] = await Promise.all([visibleIn(scopes, s.hosts.map((h) => `iframe[src*="${h}"]`)), visibleIn(scopes, s.passive ?? [])]);
       return frames.length > passive.length ? vendor : null;
@@ -1189,13 +1357,13 @@ export class CaptchaKrakenSolver {
    * count: without them this port failed fast in under a second on every GeeTest/Yidun page and disagreed with Python in Tier 3.
    */
   public async hasInteractiveWidgetInDom(page: Page): Promise<boolean> {
-    return (await Promise.all(WIDGET_PROBES.map((p) => page.locator(p.selector).count().catch(() => 0)))).some((n) => n > 0);
+    return (await Promise.all(this.sel.widgetProbes.map((p) => page.locator(p.selector).count().catch(() => 0)))).some((n) => n > 0);
   }
 
   /** Open challenges first, then unsolved checkboxes, then the inline vendors; every probe is queried at once. */
   public async detectCaptcha(page: Page): Promise<Widget | null> {
-    const scopes = await hostScopes(page);
-    const found = await Promise.all(WIDGET_PROBES.map(async (p) => {
+    const scopes = await hostScopes(page, this.sel.enclave);
+    const found = await Promise.all(this.sel.widgetProbes.map(async (p) => {
       const [at] = await visibleIn(scopes, [p.selector]);
       return at && !(await this.alreadyAccepted(scopes, at, p)) ? { ...p, at } : null;
     }));
@@ -1206,22 +1374,22 @@ export class CaptchaKrakenSolver {
 
   /** A checkbox the vendor has already accepted is not a captcha to solve. */
   private async alreadyAccepted(scopes: readonly Scope[], at: Locator, { role, vendor }: WidgetProbe): Promise<boolean> {
-    const { response, checked } = SELECTORS[vendor];
+    const { response, checked } = this.sel.selectors[vendor];
     if (role !== FrameRole.CHECKBOX) return false;
     const [token, box] = await Promise.all([!!response && this.hasValue(scopes, response), !!checked && this.checkedIn(at, checked)]);
     return token || box;
   }
 
   private loraName(cliRoot: string): string {
-    if (this.loraNameCache === null) this.loraNameCache = resolveLoraName({ cliRoot, baseUrl: process.env.VLLM_BASE_URL });
+    if (this.loraNameCache === null) this.loraNameCache = resolveLoraName({ cliRoot, baseUrl: this.baseUrl });
     return this.loraNameCache;
   }
 
-  /** The `--model` argv, or nothing: without VLLM_BASE_URL the CLI can see a credentials file this process cannot. */
+  /** The `--model` argv, or nothing: without a base URL the CLI can see a credentials file this process cannot. */
   private modelName(cliRoot: string): string | undefined {
     const explicit = this.config.model ?? process.env.CAPTCHA_LORA_NAME;
-    const name = explicit || (process.env.VLLM_BASE_URL ? this.loraName(cliRoot) : undefined);
-    if (name && !this.legacyModelWarned && isHostedEndpoint(process.env.VLLM_BASE_URL)
+    const name = explicit || (this.baseUrl ? this.loraName(cliRoot) : undefined);
+    if (name && !this.legacyModelWarned && isHostedEndpoint(this.baseUrl)
         && isLegacyHostedName(name, cliRoot)) {
       this.legacyModelWarned = true;
       console.error(`[captchakraken] ${LEGACY_MODEL_WARNING.replace('{model}', name)}`);
@@ -1403,16 +1571,27 @@ export class CaptchaKrakenSolver {
     }
   }
 
+  /**
+   * Hold the next ask until every tile has painted: a model asked about a half-loaded board answers it.
+   *
+   * Past the timeout a blank tile that has stopped changing is taken as painted (a pale photo, or a tile whose
+   * image never came), and a board with no grid to read is let through. A tile still painting is waited on until
+   * GRID_LOAD_CAP_FACTOR times that, or the solve's deadline.
+   */
   private async waitForGridCellsLoaded(captchaElement: ElementHandle, opts?: { intervalMs?: number; timeoutMs?: number }): Promise<boolean> {
     const interval = opts?.intervalMs ?? this.config.gridLoadPollIntervalMs ?? 250;
     const timeout = opts?.timeoutMs ?? this.config.gridLoadTimeoutMs ?? 8000;
-    return (await this.pollFrames(captchaElement, timeout, interval, async (frames) => {
+    const start = Date.now();
+    const verdict = await this.pollFrames(captchaElement, timeout * GRID_LOAD_CAP_FACTOR, interval, async (frames) => {
       if (frames.length < 2) return undefined;
+      const late = Date.now() - start >= timeout;
       const res = await this.runCvTool('grid-cell-states', { a: frames[0], b: frames[1] }, ['grid-cell-states', frames[0], frames[1]]);
-      const ok = res && res.grid !== null && Array.isArray(res.loaded) && res.loaded.length > 0
-        && Array.isArray(res.empty) && res.empty.length === 0 && Array.isArray(res.changing) && res.changing.length === 0;
-      return ok ? true : undefined;
-    })) === true;
+      if (!res || res.grid === null) return late ? false : undefined;
+      if (!Array.isArray(res.loaded) || !res.loaded.length || !Array.isArray(res.changing) || res.changing.length) return undefined;
+      return !Array.isArray(res.empty) || !res.empty.length || late ? true : undefined;
+    });
+    if (verdict !== true) console.log('[captchakraken] [recaptcha-grid] the board never finished loading; asking about it as it stands');
+    return verdict === true;
   }
 
   private async getGridBoxes(captchaElement: ElementHandle): Promise<{ boxes: number[][]; size: 3 | 4; screenshotW: number; screenshotH: number } | null> {
@@ -1442,13 +1621,25 @@ export class CaptchaKrakenSolver {
     return { x: session.elementBox.x + (x1 + x2) / 2 * session.scaleX, y: session.elementBox.y + (y1 + y2) / 2 * session.scaleY };
   }
 
+  /** Rest the hand on a tile: reach it once, then drift a few pixels inside it. */
   private async hoverCell(page: Page, session: GridSession, cell: number): Promise<void> {
     if (!this.human.hovers) return;
-    const [x1, y1, x2, y2] = session.gridBoxes[0];
-    const center = this.cellCenterPage(cell, session);
+    const [x1, y1, x2, y2] = session.gridBoxes[cell - 1];
+    const left = session.elementBox.x + x1 * session.scaleX, top = session.elementBox.y + y1 * session.scaleY;
+    const right = session.elementBox.x + x2 * session.scaleX, bottom = session.elementBox.y + y2 * session.scaleY;
+    let [x, y] = this.human.at;
+    if (x >= left && x <= right && y >= top && y <= bottom) {
+      x += gauss(IDLE_DRIFT_PX);
+      y += gauss(IDLE_DRIFT_PX);
+    } else {
+      const center = this.cellCenterPage(cell, session);
+      x = center.x + (Math.random() - 0.5) * (right - left) * 0.4;
+      y = center.y + (Math.random() - 0.5) * (bottom - top) * 0.4;
+    }
+    const inset = Math.min(4, (right - left) / 4, (bottom - top) / 4);
     await this.performSmoothMove(page,
-      center.x + (Math.random() - 0.5) * (x2 - x1) * session.scaleX * 0.4,
-      center.y + (Math.random() - 0.5) * (y2 - y1) * session.scaleY * 0.4);
+      Math.min(Math.max(x, left + inset), right - inset),
+      Math.min(Math.max(y, top + inset), bottom - inset));
   }
 
   /** Per-cell state with the session's cached boxes: a blank mid-refresh frame has no lattice to detect. */
@@ -1467,8 +1658,12 @@ export class CaptchaKrakenSolver {
 
   private hoverLoop(page: Page, session: GridSession, cells: number[]): (() => Promise<void>) | undefined {
     if (!cells.length) return undefined;
-    let i = 0;
-    return async () => { await this.hoverCell(page, session, cells[i++ % cells.length]).catch(() => {}); };
+    let due = 0;
+    return async () => {
+      if (Date.now() < due) return;
+      due = Date.now() + IDLE_DRIFT_EVERY_MS[0] + Math.random() * (IDLE_DRIFT_EVERY_MS[1] - IDLE_DRIFT_EVERY_MS[0]);
+      await this.hoverCell(page, session, cells[0]).catch(() => {});
+    };
   }
 
   /**
@@ -1547,6 +1742,12 @@ export class CaptchaKrakenSolver {
         });
         continue;
       }
+      if (action.action === ActionKind.REFRESH) {
+        // A new board replaces this one: nothing clicked on it is submitted, and the next loop reads the new one.
+        const frame = await captchaElement.contentFrame();
+        const refreshed = !!frame && await this.executeRefresh(page, captchaElement, frame, action as RefreshAction, elementBox);
+        return { didInteract: refreshed || performedAction, tokenUsage: allTokenUsage };
+      }
       if (action.action !== ActionKind.CLICK) {
         console.warn(`[recaptcha-grid] round ${round}: unexpected action '${(action as any).action}'; re-solving.`);
         continue;
@@ -1560,6 +1761,11 @@ export class CaptchaKrakenSolver {
       const clickedThisRound: number[] = [];
       for (const bbox of bboxes) {
         const cell = this.bboxToCell(bbox, session.gridBoxes, session.screenshotW, session.screenshotH);
+        if (cell != null && clickedThisRound.includes(cell)) {
+          // Two points in one tile: a second press deselects what the first selected.
+          console.log(`[recaptcha-grid] round ${round}: cell ${cell} is already clicked; not pressing it again.`);
+          continue;
+        }
         await this.executeClick(page, captchaElement, { action: ActionKind.CLICK, target_bounding_box: bbox } as ClickAction, elementBox);
         if (cell != null) { clickedOrder.push(cell); clickedThisRound.push(cell); }
         await this.human.pause(PauseKind.BETWEEN);
@@ -1915,7 +2121,7 @@ export class CaptchaKrakenSolver {
   /** Slice a burst into keyframes and solve them in one model request. The frame number is the guard. */
   private async getAnimatedSolution(framesDir: string): Promise<CliResponse> {
     const { cliRoot, py } = this.resolveCli();
-    const { apiKey = process.env.CAPTCHA_KRAKEN_API_KEY ?? process.env.VLLM_API_KEY } = this.config;
+    const { apiKey } = this;
     const m = this.modelName(cliRoot);
     const args = ['-m', 'captchakraken.cli', 'solve-animated', '--frames-dir', framesDir,
       '--fps', String(this.lastBurstFps ?? this.config.videoBurstFps ?? 10), ...(m ? ['--model', m] : [])];
@@ -1935,7 +2141,7 @@ export class CaptchaKrakenSolver {
 
   /** The routing values and the credential travel in the environment, never in argv. */
   private solveEnvironment(cliRoot: string, apiKey: string | undefined): NodeJS.ProcessEnv {
-    return solveEnv(cliEnv(cliRoot, this.routingEnv()), apiKey, this.resampleLevel);
+    return solveEnv(cliEnv(cliRoot, this.routingEnv()), apiKey);
   }
 
   /** Exit 2 is an unsupported puzzle, exit 3 the hosted API's own refusal; both are relayed, not reworded. */
@@ -2016,28 +2222,54 @@ export class CaptchaKrakenSolver {
     return false;
   }
 
+  private dropPointerHistory(): void {
+    for (const screen of this.pointerHistory) unlink(screen);
+    this.pointerHistory = [];
+  }
+
+  /** A click board with no Verify submits itself at a count, so a plan of any other count leaves its tiles ticked
+   *  and never submits, and the next plan's clicks untick them. */
+  private keepPlansOfThisManyClicks(plan: any[]): void {
+    const clicks = (actions: any[]): number | null => actions.length && actions.every((a) => a?.action === ActionKind.CLICK)
+      ? actions.reduce((n, a) => n + (a.target_bounding_boxes?.length ?? 1), 0)
+      : null;
+    const count = clicks(plan);
+    if (count === null) return;
+    this.fallbackPlans = this.fallbackPlans.filter((other) => [null, count].includes(clicks(other)));
+  }
+
   private resetSolveState(): void {
     this.solutionCache.clear();
+    this.fallbackPlans = [];
+    this.fallbackBoardHash = null;
+    this.fallbackArmed = false;
+    this.dropPointerHistory();
     this.repeatedAnswerSeen = false;
     this.knownAnimated = false;
     this.animatedProbeDone = false;
     this.discardAnimatedPlan();
     this.lastSubmitFrameHash = null;
+    this.submittedOnBoard = false;
     this.keyframeMode = null;
     this.keyframeSteadyScreens = 0;
     this.solveDeadlineAt = 0;
     this.lastAnswerSig = null;
+    this.triedAnswers.clear();
+    this.refreshedBoards.clear();
     this.noProgressRounds = 0;
-    this.resampleLevel = 0;
     this.videoBudgetMs = 0;
     this.videoBudgetGranted = false;
   }
 
-  /** Keyed on the retry mode too: the missed-tiles answer legitimately overlaps the previous one. */
-  private static answerSignature(actions: any[], retryMode: RetryMode | null): string | null {
+  /**
+   * Keyed on the BOARD and the retry mode, not the answer alone. A paged puzzle's next arrow sits at the
+   * same point on every page, so a signature over the actions alone would call a correct page turn a
+   * repeated answer and stop pressing it.
+   */
+  private static answerSignature(actions: any[], retryMode: RetryMode | null, boardHash: string | null): string | null {
     const round3 = (v: any): any => typeof v === 'number' ? Math.round(v * 1000) / 1000 : Array.isArray(v) ? v.map(round3) : v ?? null;
     try {
-      return JSON.stringify([retryMode ?? null, actions.map((a: any) => [a?.action ?? null, round3(a?.target_bounding_boxes),
+      return JSON.stringify([boardHash, retryMode ?? null, actions.map((a: any) => [a?.action ?? null, round3(a?.target_bounding_boxes),
         round3(a?.target_bounding_box), round3(a?.target_coordinates), round3(a?.source_bounding_box), a?.text ?? null])]);
     } catch {
       return null;
@@ -2050,21 +2282,61 @@ export class CaptchaKrakenSolver {
     if (plan?.response) this.animatedPlan = { burstDir: plan.burstDir, response: null };
   }
 
-  /** True when this answer already ran and changed nothing: resample, and let the recording path have a go. */
-  private noteAnswer(actions: any[], retryMode: RetryMode | null): boolean {
-    const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode);
-    if (sig !== null && sig === this.lastAnswerSig) {
+  /** True when this answer already ran and changed nothing: re-ask, and let the recording path have a go. */
+  private noteAnswer(actions: any[], retryMode: RetryMode | null, boardHash: string | null = null): boolean {
+    const sig = CaptchaKrakenSolver.answerSignature(actions, retryMode, boardHash);
+    // A refresh asks for a different board, so the same refresh twice is two boards, not a refused answer. An
+    // answer that could not be signed could not be read either, and is not looked into.
+    if (sig !== null && actions.some((a) => a?.action === ActionKind.REFRESH)) {
+      this.noProgressRounds = 0;
+      this.lastAnswerSig = null;
+      if (boardHash !== null) this.refreshedBoards.add(boardHash);
+      return false;
+    }
+    // A vendor can deal the same picture again, which clears the plans but not what was pressed on it. A paged
+    // puzzle is exempt: coming back to a page after the others is a new question, because the history differs.
+    const tried = sig !== null && boardHash !== null && !this.pointerHistory.length && this.triedAnswers.has(sig);
+    if (sig !== null && (sig === this.lastAnswerSig || tried)) {
       this.noProgressRounds++;
       console.log(`[no-progress] the model returned the same answer again (${this.noProgressRounds} in a row) — the previous one already ran and changed nothing`);
-      this.resampleLevel++;
-      // A raised sample never reaches the wire while the cached animated answer stands in front of it.
+      // A re-ask never reaches the wire while the cached animated answer stands in front of it.
       this.invalidateAnimatedAnswer();
       this.repeatedAnswerSeen = true;
+      // The plan at the front of the queue ran and changed nothing. A board that said nothing to its server has
+      // refused nothing, though, and another plan is one more press.
+      this.fallbackArmed = !this.boardStayedSilent();
       return true;
     }
     this.noProgressRounds = 0;
     this.lastAnswerSig = sig;
+    if (sig !== null) this.triedAnswers.add(sig);
+    this.exchangesAtAnswer = this.verdicts?.exchanges ?? 0;
     return false;
+  }
+
+  /** Whether the round after a repeat can differ. At temperature 0 the same question gets the same answer, so it
+   *  takes a different question (a retry mode, a film) or one of the model's other plans. */
+  private anotherMoveLeft(retryMode: RetryMode | null): boolean {
+    return !!retryMode || this.knownAnimated
+      || (this.config.videoSolveEnabled !== false && this.repeatedAnswerSeen && !this.animatedProbeDone)
+      || (this.fallbackArmed && this.fallbackPlans.length > 0);
+  }
+
+  private boardStayedSilent(): boolean {
+    const log = this.verdicts;
+    return !!log?.listening && log.exchanges === this.exchangesAtAnswer;
+  }
+
+  /** The board's identity, always from a plain photograph: a filmed frame of an unchanged board differs in bytes. */
+  private async boardHash(element: any, shot: string, filmed: boolean): Promise<string> {
+    if (!filmed) return sha1(shot);
+    const plain = tmp('board');
+    try {
+      await this.shot(element, plain, this.config.elementScreenshotTimeoutMs ?? 8000);
+      return sha1(plain);
+    } finally {
+      fs.rmSync(plain, { force: true });
+    }
   }
 
   /** A cache hit costs no inference, and means the answer already ran: the board cycles. */
@@ -2073,7 +2345,7 @@ export class CaptchaKrakenSolver {
     if (cached) {
       console.log('[dedup] this exact picture was already answered and the answer already ran — the challenge is cycling, not still; re-solving it as animated.');
       this.repeatedAnswerSeen = true;
-      return { actions: cached.actions, token_usage: [] };
+      return { ...cached, token_usage: [] };
     }
     const fresh = await ask();
     this.solutionCache.set(cacheKey, fresh);
@@ -2144,36 +2416,27 @@ export class CaptchaKrakenSolver {
     } catch {
       cacheKey = null;
     }
-    const ask = () => this.askModel(imagePath, puzzleSource, retryMode, textMode);
+    const ask = () => this.askModel(imagePath, puzzleSource, retryMode, textMode).catch((e: any) => {
+      // No answer is an empty plan, which presses Skip for a new board. An empty text box is a wrong answer.
+      if (!e?.unsupported || textMode) throw e;
+      return { actions: [], token_usage: [] };
+    });
     return cacheKey ? this.answerFor(cacheKey, ask) : ask();
   }
 
   /** One inference through the CLI. */
   private async askModel(imagePath: string, puzzleSource: Vendor = Vendor.UNKNOWN, retryMode: RetryMode | null = null, textMode = false): Promise<CliResponse> {
     const { cliRoot, py } = this.resolveCli();
-    const { apiKey = process.env.CAPTCHA_KRAKEN_API_KEY ?? process.env.VLLM_API_KEY } = this.config;
-    const args = buildSolveArgs({ imagePath, model: this.modelName(cliRoot), puzzleSource, retryMode, textMode, expert: this.config.expert });
+    const { apiKey } = this;
+    const args = buildSolveArgs({ imagePath, model: this.modelName(cliRoot), puzzleSource, retryMode, textMode,
+      expert: this.config.expert, history: this.pointerHistory });
     console.log(`Executing CaptchaKraken CLI: ${redactCommand([py, ...args].join(' '), apiKey)}`);
     try {
       const { stdout, stderr } = await execFileAsync(py, args, { cwd: cliRoot, env: this.solveEnvironment(cliRoot, apiKey), maxBuffer: 10 * 1024 * 1024, timeout: this.askTimeoutMs(), killSignal: 'SIGKILL' });
       console.log('CaptchaKraken CLI stdout:', stdout);
       if (stderr) console.error('CaptchaKraken CLI stderr:', stderr);
       if (!stdout.trim()) throw new Error(`CLI returned empty output. Stderr: ${stderr}`);
-      let actions: SolverResult = [];
-      let tokenUsage: TokenUsage[] = [];
-      for (const line of stdout.trim().split('\n')) {
-        try {
-          const parsed = JSON.parse(line);
-          if (parsed.actions !== undefined && parsed.token_usage !== undefined) {
-            actions = parsed.actions;
-            tokenUsage = parsed.token_usage;
-            break;
-          }
-          if (Array.isArray(parsed)) actions = parsed;
-          else if (parsed.action && (parsed.target_bounding_box || parsed.target_coordinates || parsed.action === ActionKind.WAIT)) actions = [parsed];
-        } catch { /* not json or not relevant */ }
-      }
-      return { actions, token_usage: tokenUsage };
+      return parseSolveOutput(stdout);
     } catch (error: any) {
       throw this.cliError(error, 'Cannot solve this kind of captcha', 'Failed to execute captcha solver CLI');
     }
@@ -2212,7 +2475,7 @@ export class CaptchaKrakenSolver {
         console.log('[freshness] the widget moved while the model was reading it, with nothing clicked — recording it rather than answering another still.');
       }
       // While a speculative burst is filming, the film is the better answer to "the screen changed".
-      if (opts.recordingInFlight) return { actions: response.actions, token_usage: mergedUsage };
+      if (opts.recordingInFlight) return { ...response, token_usage: mergedUsage };
 
       let changedDuringInference = 0;
       for (let i = 0; i < maxReSolves; i++) {
@@ -2220,7 +2483,7 @@ export class CaptchaKrakenSolver {
         if (++changedDuringInference >= 2 && !this.actedOnBoard && untouched()) {
           this.repeatedAnswerSeen = true;
           console.log('[freshness] the frame changed twice during inference with nothing clicked — this board cycles; recording it rather than re-solving a screen that has gone.');
-          return { actions: response.actions, token_usage: mergedUsage };
+          return { ...response, token_usage: mergedUsage };
         }
         await this.waitForBoardPainted(captchaElement);
         const fresh = tmp(`freshsolve_${Date.now()}`);
@@ -2235,7 +2498,7 @@ export class CaptchaKrakenSolver {
         response = await runQuery(currentPath);
         mergedUsage.push(...response.token_usage);
       }
-      return { actions: response.actions, token_usage: mergedUsage };
+      return { ...response, token_usage: mergedUsage };
     } finally {
       unlink(liveAnchor);
       for (const f of ownedFrames) unlink(f);
@@ -2388,6 +2651,17 @@ export class CaptchaKrakenSolver {
     return null;
   }
 
+  /**
+   * The press point of a hold: the model's own point, the middle of its box. A hold can be on a bar narrower than that
+   * box, and a random spot in it lands off the bar, or close enough to its edge that the hand's drift lets go: the
+   * widget then never fills, and the same answer fails the same way.
+   */
+  private holdPointFor(action: HoldAction, elementBox: Box): [number, number] | null {
+    if (!action.target_bounding_box) return null;
+    const [minX, minY, maxX, maxY] = action.target_bounding_box;
+    return [(minX + maxX) / 2 * elementBox.width, (minY + maxY) / 2 * elementBox.height];
+  }
+
   /** Park on the target first, so only a mouse-down separates the right screen from the click. */
   private async clickWhenFrameMatches(page: Page, element: ElementHandle, action: ClickAction, elementBox: Box, awaitKeyframe: string): Promise<void> {
     const rel = this.clickPointFor(action, elementBox);
@@ -2412,6 +2686,105 @@ export class CaptchaKrakenSolver {
     await this.gesture(() => this.human.click(page, [elementBox.x + rel[0], elementBox.y + rel[1]]));
   }
 
+  /**
+   * Press-and-hold until the widget completes: true when it did, false when the cap ran out. Complete is the vendor's
+   * done signal, the widget closing, or its picture having changed (the fill) and then sat still for HOLD_SETTLE_MS.
+   * When the answer names the fill's line, the fill reaching its end is complete too: see `fillReached`. Except on a
+   * widget that `completesItself` (HUMAN's button): it verifies only once it has shown its done state, and letting go
+   * AT full resets it, so only its own signals end the hold.
+   */
+  private async executeHold(page: Page, element: ElementHandle, action: HoldAction, elementBox: Box,
+                            completesItself = false): Promise<boolean> {
+    this.actedOnBoard = true;
+    const rel = this.holdPointFor(action, elementBox);
+    if (!rel) return false;
+    const first = await this.elementFrameHash(element);
+    const seen = { hash: first, since: Date.now(), changed: false };
+    const shots: [string, string] | null =
+      action.fill_from_bounding_box && action.fill_to_bounding_box && !completesItself ? [tmp('hold_0'), tmp('hold_1')] : null;
+    const looks: FillLook[] = [];
+    const done = async (): Promise<boolean> => {
+      if (await this.isCaptchaSolved(page)) return true;
+      if (!(await element.boundingBox().catch(() => null))) return true;
+      const n = looks.length;
+      if (shots && (await this.fillReached(element, action, elementBox, shots, looks))) return true;
+      // A look that just shot the widget is its frame too: a second screenshot per look slowed the looks enough for
+      // a fast fill to pass the mark unseen between two.
+      const fresh = shots && looks.length > n ? shots[n === 0 ? 0 : 1] : null;
+      const h = fresh ? sha1(fresh) : await this.elementFrameHash(element);
+      if (h !== seen.hash) {
+        Object.assign(seen, { hash: h, since: Date.now(), changed: seen.changed || h !== first });
+        return false;
+      }
+      return seen.changed && Date.now() - seen.since >= HOLD_SETTLE_MS;
+    };
+    try {
+      return await this.gesture(() => hold(this.human, page, [elementBox.x + rel[0], elementBox.y + rel[1]], done, HOLD_MAX_MS));
+    } finally {
+      for (const f of shots ?? []) unlink(f);
+    }
+  }
+
+  /**
+   * One look at a held widget's fill (`fill_tracker.py` behind the CV worker): true once it reaches the answer's `to`,
+   * after waiting out the tracker's `release_in` when the fill arrives between looks.
+   * The first look only shoots the reference, after the press, so the button's own pressed look is not read as fill;
+   * `looks` carries what each later look saw. A look that cannot be shot or read is not a release: the widget's own
+   * signals still end the hold.
+   */
+  private async fillReached(element: ElementHandle, action: HoldAction, elementBox: Box, shots: [string, string], looks: FillLook[]): Promise<boolean> {
+    const [first, current] = shots;
+    const { width: w, height: h } = elementBox;
+    const timeout = this.config.elementScreenshotTimeoutMs ?? 8000;
+    try {
+      if (!looks.length) {
+        const before = performance.now() / 1000;
+        await this.shot(element, first, timeout);
+        looks.push({ t: (before + performance.now() / 1000) / 2, edge: null, k: this.shotScale(first, w) });
+        return false;
+      }
+      // The shot was taken somewhere inside the call; its middle is the best guess, and the release is timed from it.
+      const before = performance.now() / 1000;
+      await this.shot(element, current, timeout);
+      const shotAt = (before + performance.now() / 1000) / 2;
+      const k = looks[0].k!;
+      const history = looks.slice(1).map(({ t, edge }) => ({ t, edge }));
+      const at = (b: [number, number, number, number]): number[] => [((b[0] + b[2]) / 2) * w * k, ((b[1] + b[3]) / 2) * h * k];
+      const gaps = history.slice(1).map((o, i) => o.t - history[i].t);
+      const request = {
+        first, current, start: at(action.fill_from_bounding_box!), end: at(action.fill_to_bounding_box!), t: shotAt,
+        history, first_t: looks[0].t, poll_s: gaps.length ? gaps.reduce((x, y) => x + y, 0) / gaps.length : 0.25, tol: SLIDE_TOLERANCE_PX * k,
+      };
+      const res = await this.runCvTool('fill-step', request, ['fill-step', JSON.stringify(request)]);
+      if (!res?.observation) return false;
+      looks.push(res.observation);
+      if (res.release) {
+        console.log(`[hold] the fill reaches its mark ${(res.release_in ?? 0).toFixed(2)}s after a look ${((res.length - res.edge) / k).toFixed(1)}px short of it`);
+        const wait = (shotAt + (res.release_in ?? 0)) * 1000 - performance.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      }
+      return Boolean(res.release);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Deal a new puzzle: the vendor's own control, else the model's point on one. False when there is neither. */
+  private async executeRefresh(page: Page, element: ElementHandle, scope: Scope, action: RefreshAction, elementBox: Box | null): Promise<boolean> {
+    const control = await this.findControl(scope, this.sel.refresh);
+    if (control) {
+      this.actedOnBoard = true;
+      await this.moveAndClick(page, control);
+    } else if (action.target_bounding_box && elementBox) {
+      await this.executeClick(page, element, { action: ActionKind.CLICK, target_bounding_box: action.target_bounding_box }, elementBox);
+    } else {
+      console.log('The model asked for a new puzzle, and there is no control to deal one; ending the round.');
+      return false;
+    }
+    console.log('Asked for a new puzzle instead of solving this one.');
+    return true;
+  }
+
   private async executeDrag(page: Page, _element: ElementHandle,
                             action: { source_bounding_box: [number, number, number, number]; target_bounding_box: [number, number, number, number] },
                             elementBox: Box) {
@@ -2419,15 +2792,6 @@ export class CaptchaKrakenSolver {
     const center = (bbox: [number, number, number, number]): [number, number] =>
       [elementBox.x + ((bbox[0] + bbox[2]) / 2) * elementBox.width, elementBox.y + ((bbox[1] + bbox[3]) / 2) * elementBox.height];
     await this.gesture(() => this.human.drag(page, center(action.source_bounding_box), center(action.target_bounding_box)));
-  }
-
-  /**
-   * The slider piece's box: the first visible match small enough to be a piece. Runs during detection, so it must
-   * not set `actedOnBoard`: marking there disabled `shouldSpeculate` on every slide solve.
-   */
-  private async measurePieceBox(scope: Scope, widgetWidth: number): Promise<Box | null> {
-    const boxes = await Promise.all((await handles(await visible(scope, PIECE_SELECTORS))).map((h) => h.boundingBox().catch(() => null)));
-    return boxes.find((b): b is Box => !!b && b.width >= MIN_PIECE_PX && b.width <= widgetWidth * MAX_PIECE_FRACTION) ?? null;
   }
 
   private async findControl(scope: Scope, selectors: readonly string[]): Promise<ElementHandle | null> {
@@ -2441,9 +2805,9 @@ export class CaptchaKrakenSolver {
    * BotDetect, whose 280x50 `.BDC_CaptchaDiv` holds only the image while `#captchaCode` sits in a sibling div.
    */
   private async answerBox(scope: Scope, at?: Locator | null): Promise<ElementHandle | null> {
-    const inside = await this.findControl(scope, TEXT_INPUT_SELECTORS);
+    const inside = await this.findControl(scope, this.sel.textInput);
     if (inside !== null || !at) return inside;
-    const around = await Promise.all(['ancestor::fieldset[1]', 'ancestor::form[1]'].map((axis) => this.findControl(at.locator(`xpath=${axis}`), TEXT_INPUT_VENDOR_SELECTORS)));
+    const around = await Promise.all(['ancestor::fieldset[1]', 'ancestor::form[1]'].map((axis) => this.findControl(at.locator(`xpath=${axis}`), this.sel.textInputVendor)));
     return around.find((h) => h !== null) ?? null;
   }
 
@@ -2463,16 +2827,15 @@ export class CaptchaKrakenSolver {
     return true;
   }
 
-  private async trackPiece(element: ElementHandle, beforePath: string, afterPath: string, exclude: [number, number, number, number], travel = 0): Promise<TrackedPiece | null> {
-    try {
-      await this.shot(element, afterPath, this.config.elementScreenshotTimeoutMs ?? 8000);
-      const res = await this.runCvTool('track-piece', { before: beforePath, after: afterPath, exclude, travel },
-        ['track-piece', beforePath, afterPath, JSON.stringify(exclude), String(travel)]);
-      return res && res.bbox ? { bbox: res.bbox, piece: res.piece ?? null } : null;
-    } catch (e) {
-      console.warn('track-piece failed:', e);
+  /** One look of the slide loop (`slide_tracker.py` behind the CV worker); null when the part cannot be followed. */
+  private async slideStep(request: SlideStepRequest): Promise<SlideStepReply | null> {
+    const res = await this.runCvTool('slide-step', request, ['slide-step', JSON.stringify(request)]);
+    // A reply's `error` is the distance still to go; a failure is `{error: why}` with no position.
+    if (!res?.pos) {
+      console.warn(`[slide] ${res?.error ?? 'the tracker gave no answer'}; released where the handle is`);
       return null;
     }
+    return res as SlideStepReply;
   }
 
   private shotScale(shot: string, cssWidth: number): number {
@@ -2480,91 +2843,74 @@ export class CaptchaKrakenSolver {
     return dims && cssWidth > 0 ? dims.width / cssWidth : 1;
   }
 
-  /** Aim the handle at the slot once, then look and correct until the piece is home. Release is the submit. */
-  private async executeSlide(page: Page, element: ElementHandle, scope: Scope, action: DragAction, elementBox: Box): Promise<boolean> {
+  /**
+   * Press the handle, nudge it to see what it moves, then steer that part's point onto its target. Release is the submit.
+   * A generation-3 answer names all three points, so nothing is read from the page but pixels. A generation-2 answer
+   * names only the target: its handle comes from the selector table and the part it moves is whatever moved most.
+   * That path goes when the last generation-2 model does.
+   */
+  private async executeSlide(page: Page, element: ElementHandle, scope: Scope, action: DragAction | SlideAction, elementBox: Box): Promise<boolean> {
     this.actedOnBoard = true;
-    const tb = action.target_bounding_box;
-    const targetX = ((tb[0] + tb[2]) / 2) * elementBox.width;
-
-    const handle = await this.findControl(scope, SLIDER_HANDLE_SELECTORS);
-    if (!handle) {
-      const piece = await this.findControl(scope, PIECE_SELECTORS);
-      const box = piece ? await piece.boundingBox() : null;
+    const { width: w, height: h } = elementBox;
+    const at = (b: [number, number, number, number]): [number, number] => [((b[0] + b[2]) / 2) * w, ((b[1] + b[3]) / 2) * h];
+    const goal = at(action.target_bounding_box);
+    let handle: [number, number];
+    let seed: [number, number] | null;
+    if (action.action === ActionKind.SLIDE) {
+      handle = at(action.handle_bounding_box);
+      seed = at(action.source_bounding_box);
+    } else {
+      const slider = await this.findControl(scope, this.sel.sliderHandle);
+      const piece = slider ? null : await this.findControl(scope, this.sel.piece);
+      const box = await (slider ?? piece)?.boundingBox().catch(() => null);
       if (!box) {
         console.warn('Slide action, but the widget has neither a slider nor a draggable piece.');
         return false;
       }
-      const targetY = ((tb[1] + tb[3]) / 2) * elementBox.height;
-      console.log('No slider track; dragging the piece to the slot directly.');
-      await this.gesture(() => this.human.drag(page, [box.x + box.width / 2, box.y + box.height / 2], [elementBox.x + targetX, elementBox.y + targetY]));
-      return true;
+      handle = [box.x + box.width / 2 - elementBox.x, box.y + box.height / 2 - elementBox.y];
+      // A piece with no track is the handle itself, and what it moves is it.
+      seed = piece ? handle : null;
     }
 
-    const hbox = await handle.boundingBox();
-    if (!hbox) return false;
-    const startX = hbox.x + hbox.width / 2;
-    const holdY = hbox.y + hbox.height / 2;
-    // Mask from the handle's band to the widget's bottom, not the handle's bottom: the filled track moves too, and
-    // masked to the band alone the loop once derived a 135.4px piece on Tencent's track against 42.0px masked to the bottom.
-    const pad = Math.max(4, hbox.height * 0.35);
-    const band: [number, number, number, number] = [0, hbox.y - elementBox.y - pad, elementBox.width, elementBox.height];
-    const shots = [tmp('slide_0'), tmp('slide_1')];
+    const press: [number, number] = [elementBox.x + handle[0], elementBox.y + handle[1]];
+    const probe = goal[0] >= (seed ?? handle)[0] ? SLIDE_PROBE_PX : -SLIDE_PROBE_PX;
+    const timeout = this.config.elementScreenshotTimeoutMs ?? 8000;
+    const [first, probed, current] = [tmp('slide_0'), tmp('slide_1'), tmp('slide_2')];
     try {
-      await this.move(page, handle, { paddingPercentage: 30 });
+      await this.performSmoothMove(page, ...press);
       await this.human.press(page);
       await this.human.pause(PauseKind.GRAB);
-      await this.shot(element, shots[0], this.config.elementScreenshotTimeoutMs ?? 8000);
-      const scale = this.shotScale(shots[0], elementBox.width);
-      const exclude = band.map((v) => v * scale) as [number, number, number, number];
-      const liveCentre = async (): Promise<number | null> => {
-        const b = await this.measurePieceBox(scope, elementBox.width);
-        return b ? b.x + b.width / 2 - elementBox.x : null;
+      await this.shot(element, first, timeout);
+      const k = this.shotScale(first, w);
+      await this.performSmoothMove(page, press[0] + probe, press[1]);
+      await this.human.pause(PauseKind.PROBE);
+      await this.shot(element, probed, timeout);
+      const ask = {
+        first, probe: probed, probe_s: probe * k, goal: [goal[0] * k, goal[1] * k], seed: seed && [seed[0] * k, seed[1] * k],
+        handle: [handle[0] * k, handle[1] * k], bounds: [-handle[0] * k, (w - handle[0]) * k], tol: SLIDE_TOLERANCE_PX * k,
       };
-
-      const restCentre = (await liveCentre()) ?? (startX - elementBox.x);
-      let offset = targetX - restCentre;
-      await this.performSmoothMove(page, startX + offset, holdY);
-
-      const widths: Array<[number, number]> = [];
-      let lastBox: [number, number, number, number] | null = null;
-      let lastPiece: { centre: number, width: number } | null = null;
-      let lastCentre: number | null = null;
-      let ratio = 1;
-      let i = 0;
-      for (; i < SLIDE_MAX_CORRECTIONS; i++) {
-        await this.human.pause(PauseKind.PROBE);
-        const seen = await this.trackPiece(element, shots[0], shots[1], exclude, offset * ratio * scale);
-        if (seen) {
-          widths.push([offset, (seen.bbox[2] - seen.bbox[0]) / scale]);
-          lastBox = seen.bbox;
-          lastPiece = seen.piece;
+      let look = probed;
+      let s: number | [number, number] = probe * k;
+      const history: SlideStepReply['observation'][] = [];
+      for (let moves = 0; ; moves++) {
+        const reply = await this.slideStep({ ...ask, current: look, s, history });
+        if (!reply) break;
+        if (look !== probed) history.push(reply.observation);
+        if (reply.done || moves >= SLIDE_MAX_CORRECTIONS) {
+          if (reply.error > ask.tol) console.warn(`[slide] releasing ${(reply.error / k).toFixed(1)}px off target`);
+          break;
         }
-        const solved = solveSlideGeometry(widths, elementBox.width);
-        ratio = solved.ratio;
-        const live = await liveCentre();
-        const pieceCentre = live !== null ? live
-          : lastPiece !== null ? lastPiece.centre / scale
-            : (lastBox && solved.pieceWidth !== null ? lastBox[2] / scale - solved.pieceWidth / 2 : null);
-        if (pieceCentre === null) continue;
-        lastCentre = pieceCentre;
-        const error = targetX - pieceCentre;
-        console.log(`[slide] ${live !== null ? 'the piece element' : lastPiece !== null ? 'the pixel diff' : "the diff's union"} puts it at ${Math.round(pieceCentre)}px, want ${Math.round(targetX)}px, ratio ${ratio.toFixed(2)}`);
-        if (Math.abs(error) <= SLIDE_TOLERANCE_PX) break;
-        offset += error / ratio;
-        await this.performSmoothMove(page, startX + offset, holdY);
-      }
-      if (lastCentre === null) {
-        console.warn('Slider: the piece never resolved on screen; released where the opening sweep put it.');
-      } else if (i >= SLIDE_MAX_CORRECTIONS) {
-        const settled = await liveCentre();
-        const left = targetX - (settled !== null ? settled : lastCentre);
-        if (Math.abs(left) > SLIDE_TOLERANCE_PX) console.warn(`[slide] out of corrections with ${left >= 0 ? '+' : ''}${left.toFixed(1)}px still to go — releasing off-target`);
+        s = reply.next;
+        const [dx, dy] = Array.isArray(s) ? s : [s, 0];
+        await this.performSmoothMove(page, press[0] + dx / k, press[1] + dy / k);
+        await this.human.pause(PauseKind.PROBE);
+        await this.shot(element, current, timeout);
+        look = current;
       }
       await this.human.pause(PauseKind.SETTLE);
     } finally {
       try { await this.human.release(page); } catch { /* the page may have navigated */ }
-      this.lastInputAt = Date.now();
-      for (const s of shots) unlink(s);
+      for (const f of [first, probed, current]) unlink(f);
     }
     return true;
   }

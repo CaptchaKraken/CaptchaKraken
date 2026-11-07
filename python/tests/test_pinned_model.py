@@ -22,7 +22,7 @@ def test_manifest_has_every_field_config_reads():
         assert key in manifest, f"pinned_model.json is missing '{key}'"
 
 
-def test_config_defaults_come_from_the_manifest(monkeypatch):
+def test_config_defaults_come_from_the_current_registry(monkeypatch):
     for var in (
         "CAPTCHA_BASE_MODEL",
         "CAPTCHA_LORA_ADAPTER",
@@ -32,11 +32,11 @@ def test_config_defaults_come_from_the_manifest(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("VLLM_BASE_URL", "http://127.0.0.1:8000/v1")
 
-    manifest = config.pinned()
-    assert config.base_model() == manifest["base_model"]
-    assert config.lora_adapter() == manifest["lora_adapter"]
-    assert config.lora_revision() == manifest["lora_revision"]
-    assert config.lora_name() == manifest["lora_name"]
+    model = prompts.registry()["models"][prompts.latest_model()]
+    assert config.base_model() == model["base_model"]
+    assert config.lora_adapter() == prompts.latest_model()
+    assert config.lora_revision() == model["lora_revision"]
+    assert config.lora_name() == model["lora_name"]
 
 
 def test_env_still_overrides_the_pin(monkeypatch):

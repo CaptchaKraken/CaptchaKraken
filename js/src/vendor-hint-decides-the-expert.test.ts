@@ -26,9 +26,10 @@ test('an hCaptcha frame not served off the apex host is still hCaptcha', async (
 });
 
 test('the hint matches the same substring the DOM selectors do', () => {
+  const config = JSON.parse(readFileSync(resolve(__dirname, '..', '..', 'captchakraken.config.json'), 'utf8'));
   const selectors = readFileSync(resolve(__dirname, '..', 'src', 'selectors.ts'), 'utf8');
   const solver = readFileSync(resolve(__dirname, '..', 'src', 'solver.ts'), 'utf8');
-  assert.ok(selectors.includes('iframe[src*="hcaptcha"][src*="frame=challenge"]'), 'the challenge selector moved — re-check what the hint keys on');
+  assert.ok(config.vendors.hcaptcha.challenge.includes('iframe[src*="hcaptcha"][src*="frame=challenge"]'), 'the challenge selector moved — re-check what the hint keys on');
   assert.ok(!/includes\('hcaptcha\.com'\)/.test(solver + selectors), 'the apex host is being matched again somewhere; the shape gate will not engage');
 });
 

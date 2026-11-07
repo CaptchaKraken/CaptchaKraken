@@ -1,6 +1,8 @@
 """The vendor hint is whichever SELECTORS entry named the widget, keyed on the `hcaptcha` substring rather than the apex host
-(challenges come off newassets.hcaptcha.com), and `unknown` must stay permissive for every grid shape: the offline grader reports it."""
+(challenges come off newassets.hcaptcha.com). A named vendor the grid expert never trained on gets the pixel expert;
+`unknown` stays permissive for both grid shapes, because the CLI and the offline grader name no vendor."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -26,7 +28,9 @@ def test_an_hcaptcha_frame_not_served_off_the_apex_host_is_still_hcaptcha():
 
 def test_the_hint_matches_the_same_substring_the_dom_selectors_do():
     src = Path(__file__).resolve().parents[1] / "src" / "captchakraken"
-    assert HCAPTCHA_CHALLENGE in (src / "selectors.py").read_text(), "the challenge selector moved"
+    config = Path(__file__).resolve().parents[2] / "captchakraken.config.json"
+    assert HCAPTCHA_CHALLENGE in json.loads(config.read_text())["vendors"]["hcaptcha"]["challenge"], (
+        "the challenge selector moved")
     assert "'hcaptcha.com' in" not in (src / "page_solver.py").read_text(), (
         "the apex host is being matched again somewhere; the shape gate will not engage")
 
@@ -60,5 +64,8 @@ def test_failing_to_name_the_vendor_lets_that_same_lattice_through():
         "gate is off and find_grid's false positives reach the grid expert")
 
 
-def test_vendors_the_engine_does_not_gate_keep_every_shape():
-    assert all(_grid_dims(16, v) == (4, 4) for v in SELECTORS if v not in (Vendor.HCAPTCHA, Vendor.RECAPTCHA))
+def test_only_the_vendors_the_grid_expert_was_trained_on_reach_it():
+    for v in SELECTORS:
+        want = {Vendor.RECAPTCHA: {9, 16}, Vendor.HCAPTCHA: {9}, Vendor.UNKNOWN: {9, 16}}.get(v, set())
+        got = {n for n in (9, 16) if _grid_dims(n, v)}
+        assert got == want, f"{v.value}: grids of {sorted(got)} cells reach the grid expert, not {sorted(want)}"

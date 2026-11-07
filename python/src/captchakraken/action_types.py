@@ -22,6 +22,8 @@ class Action(BaseModel):
     action: ActionKind
     await_keyframe: Optional[str] = None
     frame: Optional[int] = None
+    # Seconds into the clip, on prompt generations that watch an animation as video; `frame` on earlier ones.
+    t: Optional[float] = None
 
 
 class ClickAction(Action):
@@ -52,4 +54,33 @@ class DoneAction(Action):
     action: Literal[ActionKind.DONE]
 
 
-CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction]
+class HoldAction(Action):
+    """Press on the box and keep pressing until the widget completes (prompt generation 3). When the model also named
+    where the fill starts and where to let go, the driver follows the fill along that line and releases at its end."""
+
+    action: Literal[ActionKind.HOLD]
+    target_bounding_box: BoundingBox
+    fill_from_bounding_box: Optional[BoundingBox] = None
+    fill_to_bounding_box: Optional[BoundingBox] = None
+
+
+class RefreshAction(Action):
+    """Load a new puzzle instead of solving this one (prompt generation 3). The box is the model's point on the
+    control, or None when it saw none; the driver presses the vendor's own control first either way."""
+
+    action: Literal[ActionKind.REFRESH]
+    target_bounding_box: Optional[BoundingBox] = None
+
+
+class SlideAction(Action):
+    """Press the handle and move it until the point on the part it moves reaches the target (prompt generation 3).
+    The driver tracks that part on screen and steers; nothing about the widget is read from its DOM."""
+
+    action: Literal[ActionKind.SLIDE]
+    handle_bounding_box: BoundingBox
+    source_bounding_box: BoundingBox
+    target_bounding_box: BoundingBox
+
+
+CaptchaAction = Union[ClickAction, DragAction, TypeAction, WaitAction, DoneAction, HoldAction, RefreshAction,
+                      SlideAction]

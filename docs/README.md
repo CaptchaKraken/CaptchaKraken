@@ -16,11 +16,11 @@ guides. Start here.
 | [🖥️ Self-hosting](./self-hosting.md) | One-command install, model-size gate, server management, configuration, and **updating** (`captchakraken fetch`). |
 | [🧑‍💻 Usage](./usage.md) | Install both ports, the Python one-liner, all four browser frameworks (Playwright / Patchright / camoufox-js / Puppeteer), **how it moves** (mouse / mobile touch / none / your own), and migrating from v1. |
 | [🔄 Staying current](./staying-current.md) | Why `"latest"` plus a kept lockfile pins an old client, the one-line deploy fix, and how to tell which version is running. |
-| [⚙️ How it works](./how-it-works.md) | The detect → grid → click → verify pipeline, the OpenCV grid tracer, the stale-frame freshness guard, and solution dedup. |
+| [⚙️ How it works](./how-it-works.md) | The detect → grid → click → verify pipeline, the element detector, the stale-frame freshness guard, and solution dedup. |
 | [📊 Benchmarks](./benchmarks.md) | The canonical numbers — real captchas driven in a browser, and per-puzzle model accuracy on held-out real captures, with what each measures and why they differ. |
 | [⚡ Performance](./performance.md) | The memory-bandwidth speed model + per-device throughput, and IP-reputation guidance. |
 | [🗺️ Roadmap](./roadmap.md) | What shipped recently, what's in progress, and what's planned (more captcha types). |
-| [⚖️ Licensing](./licensing.md) | Plain-English explainer of the source-available license — what you may and may not build. |
+| [⚖️ Licensing](./licensing.md) | Plain-English explainer of LGPLv3 for the client and all models. |
 
 ## ✅ What it solves today
 
@@ -36,7 +36,7 @@ CaptchaKraken detects the captcha, solves it, clicks, and verifies.
 | ✅ **NetEase Yidun** | Jigsaw, picture-click, icon-click |
 | ✅ **Lemin, Prosopo, Tencent** | Cropped-image, grid, and slide flows |
 | ✅ **Distorted text** | BotDetect, MTCaptcha, Yandex — read and typed, not clicked |
-| ✅ **Animated / video challenges** | Recorded (4 s @ 10 fps), cut into keyframes, solved as one multi-image prompt, then clicked once the widget returns to the chosen frame. The model half shipped with **v1.2**, which `setup.sh` installs and the hosted API serves |
+| ✅ **Animated / video challenges** | Recorded and clipped into frames; the v2 pointer model returns where and when to act, and the driver acts at that moment |
 
 44 puzzle types in all. The per-type record — each puzzle
 driven on the vendor's own demo page, with the attempts scored — is in the

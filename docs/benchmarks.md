@@ -132,10 +132,9 @@ Abyss is ahead by ten points or more on **2** of the 18 types and behind by five
 
 ## Which model the hosted API serves
 
-The current client asks for **Abyss** by name and is served it. A client old
-enough not to name it, and any request that names no model at all, is served
-**Twilight**. Abyss is not downloadable — its weights are hosted only, and that
-is not a release schedule. Twilight's are public and free to self-host. See
+The current client and hosted API use **Midnight V2 4B Q4**, whose weights are
+public under LGPL-3.0-only. The measurements above are historical results for
+the earlier models named in each table, not measurements of Midnight V2. See
 [licensing.md](./licensing.md).
 
 ---

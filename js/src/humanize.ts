@@ -23,21 +23,91 @@ const log = (m: string) => console.log(`[captchakraken] ${m}`);
 const uniform = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 // moveAndClick clicks at the landing point; without this every click would dispatch one redundant move.
 const samePoint = (a: Point, b: Point) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
-const gauss = (sigma: number) => {
+export const gauss = (sigma: number) => {
   let u = 0;
   while (u === 0) u = Math.random();
   return sigma * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
 };
 const closedError = (e: unknown) => /Target closed|Session closed/.test(e instanceof Error ? e.message : String(e));
 
-/** A recorded human movement morphed onto the endpoints; timings are cumulative ms. */
+// What one mouse event may cover. cursory's samples are up to 250 ms and 560 px apart, which the page sees as a
+// cursor that vanishes and reappears: a teleport. A real mouse reports every 8 ms (125 Hz).
+export const MAX_EVENT_GAP_MS = 8;
+export const MAX_EVENT_STEP_PX = 16;
+// How far a reach may swing off the straight line between its endpoints: a fraction of its length, at least a few
+// pixels. cursory morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px wide and a
+// 140 px one 300 px.
+export const MAX_DEVIATION = 0.15;
+export const MIN_DEVIATION_PX = 3;
+
+function nearestOnSegment(p: Point, a: Point, b: Point): Point {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const length2 = dx * dx + dy * dy;
+  if (length2 === 0) return a;
+  const k = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2));
+  return [a[0] + k * dx, a[1] + k * dy];
+}
+
+/** Shrink the path's swing off the segment, shape kept, until it stays within MAX_DEVIATION of it. */
+function tame(points: Point[], start: Point, end: Point): Point[] {
+  const limit = Math.max(MIN_DEVIATION_PX, MAX_DEVIATION * Math.hypot(end[0] - start[0], end[1] - start[1]));
+  const near = points.map((p) => nearestOnSegment(p, start, end));
+  const worst = points.reduce((m, p, i) => Math.max(m, Math.hypot(p[0] - near[i][0], p[1] - near[i][1])), 0);
+  if (worst <= limit) return points;
+  const k = limit / worst;
+  return points.map((p, i) => [near[i][0] + (p[0] - near[i][0]) * k, near[i][1] + (p[1] - near[i][1]) * k] as Point);
+}
+
+/** Fill every gap wider than one mouse report with evenly timed samples along it. */
+function densify(points: Point[], timings: number[]): [Point[], number[]] {
+  const outP: Point[] = points.slice(0, 1), outT = timings.slice(0, 1);
+  for (let j = 1; j < points.length; j++) {
+    const a = points[j - 1], b = points[j], ta = timings[j - 1], tb = timings[j];
+    const n = Math.max(1, Math.ceil((tb - ta) / MAX_EVENT_GAP_MS), Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / MAX_EVENT_STEP_PX));
+    for (let i = 1; i <= n; i++) {
+      const f = i / n;
+      outP.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+      outT.push(ta + (tb - ta) * f);
+    }
+  }
+  return [outP, outT];
+}
+
+/** A recorded human movement morphed onto the endpoints, held near the line between them and sampled at least
+ * once per mouse report; timings are cumulative ms. */
 export function trajectory(start: Point, end: Point, frequency: number): [Point[], number[]] {
   const { points, timings } = generateTrajectory(start, end, { frequency });
-  return [points.map((q) => [Number(q[0]), Number(q[1])] as Point), timings.map(Number)];
+  const s: Point = [Number(start[0]), Number(start[1])], e: Point = [Number(end[0]), Number(end[1])];
+  return densify(tame(points.map((q) => [Number(q[0]), Number(q[1])] as Point), s, e), timings.map(Number));
 }
 
 /** Every inter-gesture wait the driver takes, named, so each device supplies its own table. */
 export const PAUSE_KINDS: readonly PauseKind[] = Object.values(PauseKind);
+/** How often a held press looks at the widget, in ms: a frame hash per look, so not every frame. */
+export const HOLD_POLL_MS: readonly [number, number] = [180, 320];
+
+/**
+ * Press at `to` until `done()` says the widget completed, or `maxMs` passes; true when it completed.
+ * Built on move/press/release so any humanizer can hold. The hand drifts a pixel or so meanwhile, because a
+ * press that does not move for seconds is a synthetic one, and the button is released whatever `done` throws.
+ */
+export async function hold(human: Humanizer, page: Page, to: Point, done: () => Promise<boolean>, maxMs: number): Promise<boolean> {
+  await human.move(page, to);
+  const anchor: Point = [human.at[0], human.at[1]];
+  await human.press(page);
+  const t0 = Date.now();
+  try {
+    for (;;) {
+      await delay(uniform(HOLD_POLL_MS[0], HOLD_POLL_MS[1]));
+      const to: Point = [anchor[0] + gauss(0.8), anchor[1] + gauss(0.8)];
+      await (human.drift ? human.drift(page, to) : human.move(page, to)).catch(() => undefined);
+      if (await done()) return true;
+      if (Date.now() - t0 >= maxMs) return false;
+    }
+  } finally {
+    await human.release(page);
+  }
+}
 
 export interface Humanizer {
   readonly name: string;
@@ -46,6 +116,8 @@ export interface Humanizer {
   at: Point;
   reset(page: Page): Promise<void>;
   move(page: Page, to: Point): Promise<void>;
+  /** A pixel of wander while held; a humanizer without it drifts with `move`. */
+  drift?(page: Page, to: Point): Promise<void>;
   press(page: Page): Promise<void>;
   release(page: Page): Promise<void>;
   click(page: Page, to: Point): Promise<void>;
@@ -68,6 +140,13 @@ export abstract class BaseHumanizer implements Humanizer {
 
   async reset(_page: Page): Promise<void> {}
   abstract move(page: Page, to: Point): Promise<void>;
+  /**
+   * A held hand's pixel of wander. `move` is a reach, and a reach overshoots: on a 1px move it wandered up to 34px,
+   * off a thin bar, which the widget takes for a release.
+   */
+  async drift(page: Page, to: Point): Promise<void> {
+    await this.move(page, to);
+  }
   abstract press(page: Page): Promise<void>;
   abstract release(page: Page): Promise<void>;
   abstract typeText(page: Page, field: PlaywrightElementHandle, text: string): Promise<boolean>;
@@ -99,6 +178,9 @@ export abstract class BaseHumanizer implements Humanizer {
   }
 }
 
+/** How much longer than the bare round trip a step takes when the browser re-draws it as a path of its own. */
+export const BROWSER_PATH_MS = 100;
+
 export class MouseHumanizer extends BaseHumanizer {
   readonly name: HumanizationMode = HumanizationMode.MOUSE;
   readonly hovers = true;
@@ -108,13 +190,18 @@ export class MouseHumanizer extends BaseHumanizer {
   };
   private frequency: number;
   private viewportCache: ViewportSize | null | undefined;
+  /** Undefined until the first move of a solve measures it. */
+  private browserDrawsPath: boolean | undefined;
 
   constructor(start: Point = [0, 0], frequency = 60) {
     super(start);
     this.frequency = frequency;
   }
 
-  async reset(_page: Page): Promise<void> { this.viewportCache = undefined; }
+  async reset(_page: Page): Promise<void> {
+    this.viewportCache = undefined;
+    this.browserDrawsPath = undefined;
+  }
 
   /** The window to keep the cursor inside; null under camoufox, which reports no viewport and whose window we ask instead. */
   private async viewport(page: Page): Promise<ViewportSize | null> {
@@ -133,15 +220,56 @@ export class MouseHumanizer extends BaseHumanizer {
     return this.viewportCache;
   }
 
+  async drift(page: Page, to: Point): Promise<void> {
+    try {
+      await page.mouse.move(to[0], to[1]);
+      this.at = [to[0], to[1]];
+    } catch (e) {
+      if (closedError(e)) log('could not move mouse; page or session closed');
+    }
+  }
+
+  /** Clamp only when the viewport is known: a coordinate pinned to the edge of a guessed one deadlocks camoufox's juggler (upstream #225). */
+  private async clamp(page: Page, [x, y]: Point): Promise<Point> {
+    const viewport = await this.viewport(page);
+    return viewport ? [Math.max(1, Math.min(x, viewport.width - 1)), Math.max(1, Math.min(y, viewport.height - 1))] : [x, y];
+  }
+
+  /**
+   * Whether the browser draws its own path for every mouse.move(), as camoufox's humanize does. Ours on top has every
+   * sample re-drawn: a 1px step took 190ms there against 1ms, and one GeeTest slider 82s against 13s. One short step
+   * towards `to`, timed against a zero-length move (the bare round trip, so a remote browser is not mistaken for
+   * one), tells them apart with no movement the page could single out.
+   */
+  private async measureBrowserPath(page: Page, to: Point): Promise<boolean> {
+    const from = await this.clamp(page, this.at);
+    const d = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    const step = await this.clamp(page, d <= 3 ? to : [from[0] + 3 * (to[0] - from[0]) / d, from[1] + 3 * (to[1] - from[1]) / d]);
+    try {
+      await page.mouse.move(from[0], from[1]);
+      let t = Date.now();
+      await page.mouse.move(from[0], from[1]);
+      const roundTrip = Date.now() - t;
+      t = Date.now();
+      await page.mouse.move(step[0], step[1]);
+      this.at = step;
+      const drawn = Date.now() - t - roundTrip > BROWSER_PATH_MS;
+      if (drawn) log('the browser draws its own pointer paths (camoufox humanize); handing it one move per gesture');
+      return drawn;
+    } catch (e) {
+      if (closedError(e)) log('could not move mouse; page or session closed');
+      return false;
+    }
+  }
+
   async move(page: Page, to: Point): Promise<void> {
     if (samePoint(this.at, to)) return;
+    this.browserDrawsPath ??= await this.measureBrowserPath(page, to);
+    if (this.browserDrawsPath) return this.drift(page, await this.clamp(page, to));
     const [points, timings] = trajectory(this.at, to, this.frequency);
-    // Clamp only when the viewport is known: a coordinate pinned to the edge of a guessed one deadlocks camoufox's juggler (upstream #225).
-    const viewport = await this.viewport(page);
     const startTime = Date.now();
     for (let i = 0; i < points.length; i++) {
-      const cx = viewport ? Math.max(1, Math.min(points[i][0], viewport.width - 1)) : points[i][0];
-      const cy = viewport ? Math.max(1, Math.min(points[i][1], viewport.height - 1)) : points[i][1];
+      const [cx, cy] = await this.clamp(page, points[i]);
       try {
         await page.mouse.move(cx, cy);
       } catch (e) {
@@ -381,6 +509,12 @@ export class MobileHumanizer extends BaseHumanizer {
       const [points, timings] = trajectory(this.at, dest, this.frequency);
       await (await this.touch(page)).move(points.map(([x, y], i) => [x, y, timings[i] - (i ? timings[i - 1] : 0)]));
     }
+    this.at = dest;
+  }
+
+  async drift(page: Page, to: Point): Promise<void> {
+    const dest: Point = [Number(to[0]), Number(to[1])];
+    if (this.down) await (await this.touch(page)).move([[dest[0], dest[1], 0]]);
     this.at = dest;
   }
 

@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from captchakraken.keyframes import write_frame
 from captchakraken.page_solver import PageSolver, PageSolverConfig
 
 
@@ -28,11 +29,10 @@ def test_a_board_that_holds_screens_is_waited_for(monkeypatch, tmp_path):
     monkeypatch.setattr(s, "_screenshot", fake_shot)
     monkeypatch.setattr("captchakraken.page_solver._unlink", lambda *_: None)
 
-    import cv2
     import numpy as np
     ref = tmp_path / "kf.png"
-    cv2.imwrite(str(ref), np.zeros((40, 40, 3), dtype=np.uint8))
-    monkeypatch.setattr(cv2, "imread", lambda *_a, **_k: np.zeros((40, 40, 3), dtype=np.uint8))
+    write_frame(ref, np.zeros((40, 40, 3), dtype=np.uint8))
+    monkeypatch.setattr("captchakraken.keyframes.read_frame", lambda *_a, **_k: np.zeros((40, 40, 3), dtype=np.uint8))
 
     assert s._wait_for_keyframe(object(), str(ref), (0.5, 0.5)) is True
     assert probes["n"] >= 1, "the gate must actually look at the widget"

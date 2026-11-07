@@ -3,7 +3,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { CaptchaKrakenSolver } from './solver';
+import { VerdictLog } from './verdicts';
 
 const ANSWER = { actions: [{ action: 'click', target_bounding_boxes: [[0.1, 0.1, 0.2, 0.2]] }], token_usage: [] };
 
@@ -92,4 +97,106 @@ test('a repeated answer is reported so the round performs nothing', () => {
   assert.equal(solver.noteAnswer(ANSWER.actions, null), false, 'the first answer runs');
   assert.equal(solver.noteAnswer(ANSWER.actions, null), true, 'the same answer again already ran and changed nothing');
   assert.equal(solver.noProgressRounds, 1);
+});
+
+test('the same point on a new page is not a repeat', () => {
+  const { solver } = solverWithFixedAnswer();
+
+  assert.equal(solver.noteAnswer(ANSWER.actions, null, 'page-1'), false);
+  assert.equal(solver.noteAnswer(ANSWER.actions, null, 'page-2'), false, 'a new board has not run this point yet');
+  assert.equal(solver.noteAnswer(ANSWER.actions, null, 'page-2'), true, 'on the same board it is still a repeat');
+});
+
+test("the model's other plans reach the round that needs them", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ck-plans-'));
+  const plan = [{ action: 'click', target_bounding_boxes: [[0.5, 0.5, 0.6, 0.6]] }];
+  const cli = path.join(dir, 'cli.sh');
+  fs.writeFileSync(cli, `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify({ ...ANSWER, fallbacks: [plan] })}\nEOF\n`, { mode: 0o755 });
+  try {
+    const solver: any = new CaptchaKrakenSolver({});
+    solver.resolveCli = () => ({ cliRoot: dir, py: cli });
+    const asked = await solver.askModel(path.join(dir, 'board.png'));
+    assert.deepEqual(asked.fallbacks, [plan], 'askModel should hand on the plans the CLI printed');
+
+    const fresh = await solver.answerFor('same-picture', async () => asked);
+    assert.deepEqual(fresh.fallbacks, [plan]);
+    const cached = await solver.answerFor('same-picture', async () => asked);
+    assert.deepEqual(cached.fallbacks, [plan], 'a repeated picture still has its other plans to try');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the model's other plans survive the check that the board held still", async () => {
+  const plan = [{ action: 'click', target_bounding_boxes: [[0.5, 0.5, 0.6, 0.6]] }];
+  const answer = { ...ANSWER, fallbacks: [plan] };
+  const solver: any = new CaptchaKrakenSolver({});
+  solver.shot = async () => {};
+  solver.waitForBoardPainted = async () => ({ waitedMs: 0 });
+  const guarded = (opts = {}) => solver.solveFrameFreshnessGuarded({}, 'board.png', async () => answer, opts);
+
+  solver.captchaFrameChangedSince = async () => false;
+  assert.deepEqual((await guarded()).fallbacks, [plan], 'a board that held still');
+  assert.deepEqual((await guarded({ recordingInFlight: true })).fallbacks, [plan], 'a recording in flight');
+
+  solver.captchaFrameChangedSince = async () => true;
+  assert.deepEqual((await guarded()).fallbacks, [plan], 'a board that cycled');
+});
+
+function widgetTraffic(): { log: any; say: (type: string) => void } {
+  const listeners = new Set<(r: any) => void>();
+  const log = new VerdictLog({ on: (_: string, l: any) => listeners.add(l), off: () => {} } as any);
+  const say = (type: string) => listeners.forEach((l) => l({
+    url: () => 'https://widget.example/round', status: () => 200, text: async () => '',
+    request: () => ({ resourceType: () => type }),
+  }));
+  return { log, say };
+}
+
+test('a repeat on a board that never answered earns no further press', () => {
+  const { solver } = solverWithFixedAnswer();
+  const { log, say } = widgetTraffic();
+  solver.verdicts = log;
+
+  solver.noteAnswer(ANSWER.actions, null, 'board');
+  say('image');
+  assert.equal(solver.noteAnswer(ANSWER.actions, null, 'board'), true);
+  assert.equal(solver.fallbackArmed, false, 'nothing refused the answer, and another plan is one more press');
+});
+
+test('a repeat after the widget answered moves to the next plan', () => {
+  const { solver } = solverWithFixedAnswer();
+  const { log, say } = widgetTraffic();
+  solver.verdicts = log;
+
+  solver.noteAnswer(ANSWER.actions, null, 'board');
+  say('fetch');
+  assert.equal(solver.noteAnswer(ANSWER.actions, null, 'board'), true);
+  assert.equal(solver.fallbackArmed, true);
+});
+
+test('a page that cannot be listened to keeps the repeat as its only evidence', () => {
+  const { solver } = solverWithFixedAnswer();
+  solver.verdicts = new VerdictLog({} as any);
+
+  solver.noteAnswer(ANSWER.actions, null, 'board');
+  assert.equal(solver.noteAnswer(ANSWER.actions, null, 'board'), true);
+  assert.equal(solver.fallbackArmed, true);
+});
+
+test('a filmed picture and a plain one of the same board are one board', async () => {
+  const { solver } = solverWithFixedAnswer();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'board-'));
+  const plain = Buffer.from('the board, as the element paints it');
+  solver.shot = async (_el: unknown, p: string) => fs.writeFileSync(p, plain);
+  const filmed = path.join(dir, 'filmed.png');
+  const shot = path.join(dir, 'shot.png');
+  fs.writeFileSync(filmed, 'the same board, out of a recording');
+  fs.writeFileSync(shot, plain);
+
+  try {
+    assert.equal(await solver.boardHash(null, filmed, true), await solver.boardHash(null, shot, false));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -11,17 +11,12 @@ from typing import Any, Dict, List, Optional
 import requests
 from PIL import Image
 
-from . import config, errors, prompts
+from . import clipvideo, config, errors, prompts
+from .clipvideo import ClipVideo
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode
 from .server_manager import ensure_server
 
 DEBUG = os.getenv("CAPTCHA_DEBUG", "0") == "1"
-
-# A floor, not a resize, and the AREA is clamped rather than the sides: predictions on a 277x285 GeeTest
-# board landed 80-105px from the hand label at native size and 1-4px once upscaled, and squashing the
-# aspect moves every tile centre.
-MIN_PIXELS = 448 * 448
-
 
 def _encode_image(path: str,
                   budget: "Optional[prompts.PixelBudget]" = None) -> tuple:
@@ -159,28 +154,6 @@ PIXEL_ACTION_PROMPT = _LATEST.action_prompt
 
 
 
-# Greedy only, by measurement: (0.0, 0.35, 0.7) scored 0/5 against 4/5 and made the median failed attempt
-# 24.0s against 13.9s, because a differing re-ask resets the no-progress counter. The level plumbing stays for
-# a network-refusal trigger. Lives here once so the two ports cannot drift (TRIBAL_KNOWLEDGE.md).
-RESAMPLE_TEMPERATURES = (0.0,)
-
-
-def sampling_for_level(level: int) -> Dict[str, Any]:
-    temps = RESAMPLE_TEMPERATURES or (0.0,)
-    temp = temps[min(max(level, 0), len(temps) - 1)]
-    if not temp:
-        return {}
-    return {"temperature": temp, "seed": 1000 + level}
-
-
-def _sampling_from_env() -> Dict[str, Any]:
-    raw = os.environ.get("CAPTCHA_RESAMPLE_LEVEL", "").strip()
-    if not raw:
-        return {}
-    try:
-        return sampling_for_level(int(raw))
-    except ValueError:
-        return {}
 
 
 #: The ceiling on one ask, and the old hardcoded value. Measured why it matters: against the hosted
@@ -206,6 +179,70 @@ def _warn_legacy_model_once(model: str) -> None:
     print(f"[captchakraken] {prompts.LEGACY_MODEL_WARNING.format(model=model)}", file=sys.stderr)
 
 
+def _norm_xy(x: Any, y: Any) -> Optional[tuple]:
+    """A model point on the 0-1000 scale as 0-1; a normalised pair passes, anything off the image is clamped."""
+    try:
+        fx, fy = float(x) / 1000.0, float(y) / 1000.0
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
+        if 0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0:
+            fx, fy = float(x), float(y)
+        else:
+            fx, fy = min(max(fx, 0.0), 1.0), min(max(fy, 0.0), 1.0)
+    return (fx, fy)
+
+
+# Closer than this (0-1 of the board) and two pointer clicks are one target. Small enough that neighbouring icons in a
+# click-in-order puzzle stay two targets.
+REPEATED_POINT = 0.004
+# Closer than this (0-1 of the board) at both ends and two pointer drags move one piece to one place: the server's
+# SAME_PLACE.
+REPEATED_DRAG = 0.025
+#: Refused answers sent back with one pointer ask: the server's MAX_AVOID.
+POINTER_AVOID_MAX = 32
+
+
+def _without_repeated_points(action: Dict[str, Any]) -> Dict[str, Any]:
+    """A pointer click without its repeats. Two click slots that pick the same token answer the same point, and on a
+    tile board the second click deselects what the first selected."""
+    points = action.get("points")
+    if action.get("kind") != PixelAnswerKind.CLICK or not points:
+        return action
+    keep = [i for i, p in enumerate(points)
+            if all(abs(p[0] - q[0]) > REPEATED_POINT or abs(p[1] - q[1]) > REPEATED_POINT for q in points[:i])]
+    if len(keep) == len(points):
+        return action
+    ids = action.get("ids") or []
+    return {**action, "points": [points[i] for i in keep],
+            "ids": [ids[i] for i in keep] if len(ids) == len(points) else ids}
+
+
+def _same_drag(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    return all(abs(a[end][i] - b[end][i]) <= REPEATED_DRAG for end in ("src", "dst") for i in (0, 1))
+
+
+def _is_drag(action: Dict[str, Any]) -> bool:
+    return action.get("kind") == PixelAnswerKind.DRAG
+
+
+def _without_repeated_drags(plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A pointer plan without a drag it already made: the piece is already there, and a board that counts its moves
+    counts the second one. The count head can ask for more drags than there are pieces, and then the extra slots read
+    the same piece and the same target."""
+    out: List[Dict[str, Any]] = []
+    for action in plan:
+        if not (_is_drag(action) and any(_is_drag(o) and _same_drag(action, o) for o in out)):
+            out.append(action)
+    return out
+
+
+def _same_drags(a: List[Dict[str, Any]], b: List[Dict[str, Any]]) -> bool:
+    """Do two plans make the same drags, one after the other?"""
+    return bool(a) and len(a) == len(b) and all(_is_drag(x) and _is_drag(y) and _same_drag(x, y)
+                                                for x, y in zip(a, b))
+
+
 class ActionPlanner:
 
     def __init__(
@@ -223,7 +260,19 @@ class ActionPlanner:
         if config.is_hosted_endpoint(self.base_url) and prompts.is_legacy_hosted_name(self.model):
             _warn_legacy_model_once(self.model)
         self.api_key = api_key or config.api_key()
-        self.sampling: Dict[str, Any] = {}
+        #: The pointer's answers on the current board, oldest first. The pointer's heads are an argmax, so a
+        #: re-ask cannot move them: once the caller sets `avoid_refused`, every ask names these and the
+        #: server answers with its likeliest OTHER answer. The caller clears both when the board changes.
+        self.pointer_answers: List[Dict[str, Any]] = []
+        #: The complete plans the server returned after the first (`actions[1:]`); the next retry uses them
+        #: without asking again. `pointer_has_actions` says the server answered with the list at all, so an
+        #: older server's `avoid` retry still works.
+        self.pointer_fallbacks: List[Dict[str, Any]] = []
+        self.pointer_has_actions = False
+        #: Earlier screens of the same paged puzzle, oldest first, as file paths. A FunCaptcha pager's answer
+        #: depends on the pages already seen; without them the model keeps answering "next arrow".
+        self.pointer_history: List[str] = []
+        self.avoid_refused = False
         #: Seconds a single ask may take. The CALLER owns this: a solve has a budget, and a request
         #: that outlives it cannot be cancelled once it is in flight — the deadline is only read
         #: between steps. Left alone it is the old ceiling; `PageSolver` lowers it to what remains.
@@ -304,7 +353,11 @@ class ActionPlanner:
             mime, b64 = _encode_image(p, self.pixel_budget)
             parts.append({"type": "image_url",
                           "image_url": {"url": f"data:{mime};base64,{b64}"}})
+        return self._chat(prompt, parts, max_tokens=max_tokens, family=family)
 
+    def _chat(self, prompt: str, parts: List[Dict[str, Any]], max_tokens: int,
+              family: Optional[PromptFamily]) -> str:
+        """POST one chat completion: the media parts, then the prompt, in one user message."""
         messages = [
             {
                 "role": "system",
@@ -326,10 +379,6 @@ class ActionPlanner:
             "chat_template_kwargs": {"enable_thinking": False},
             "reasoning_effort": "none",
         }
-        sampling = self.sampling or _sampling_from_env()
-        if sampling:
-            payload.update(sampling)
-
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -345,7 +394,7 @@ class ActionPlanner:
 
         url = f"{self.base_url}/chat/completions"
         self._log(f"POST {url} model={model} max_tokens={max_tokens} "
-                  f"images={len(parts)}")
+                  f"parts={[p['type'] for p in parts]}")
 
         resp = self._http.post(url, headers=headers, json=payload,
                                timeout=self.request_timeout_s or DEFAULT_REQUEST_TIMEOUT_S)
@@ -485,8 +534,111 @@ class ActionPlanner:
                 out.append(iv)
         return out
 
+    #: Generation 4's endpoint, beside /chat/completions: the board in, generation 3's answer shape out.
+    _POINTER_PATH = "/pointer"
+
+    def _ask_pointer(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST one board to the pointer server. It numbers the board's elements, builds the prompt and reads the
+        answer from one prefill, so nothing here is a prompt."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **routing_headers(hosted=config.is_hosted_endpoint(self.base_url)),
+        }
+        url = f"{self.base_url}{self._POINTER_PATH}"
+        self._log(f"POST {url} model={self.model} media={sorted(k for k in body if k not in ('model', 'avoid'))}")
+        if self.avoid_refused and self.pointer_answers:
+            body = {**body, "avoid": self.pointer_answers[-POINTER_AVOID_MAX:]}
+            self._log(f"asking past {len(body['avoid'])} refused answer(s)")
+        resp = self._http.post(url, headers=headers, json={"model": self.model, **body},
+                               timeout=self.request_timeout_s or DEFAULT_REQUEST_TIMEOUT_S)
+        if not resp.ok:
+            raise errors.from_response(resp, url)
+        try:
+            data = resp.json()
+        except ValueError:
+            raise RuntimeError(f"the pointer server returned a non-JSON body from {url}: {(resp.text or '')[:300]}")
+        answer = data.get("answer") if isinstance(data, dict) else None
+        if not isinstance(answer, dict):
+            raise RuntimeError(f"the pointer server's reply from {url} has no answer: {str(data)[:300]}")
+        actions = data.get("actions") if isinstance(data, dict) else None
+        self.pointer_has_actions = isinstance(actions, list) and bool(actions)
+        self.pointer_fallbacks = self._other_plans(answer, actions) if self.pointer_has_actions else []
+        self._log(f"pointer answer: {answer}")
+        self.pointer_answers.append({k: v for k, v in answer.items() if k != "checks"})
+        return answer
+
+    def _other_plans(self, answer: Dict[str, Any], actions: List[Any]) -> List[Dict[str, Any]]:
+        """The server's answers after the first, without any that only repeats a drag of one before it: pressed again
+        on a board that refused it, it costs a move and can tell the board nothing new. The action is taken as read: on
+        1,954 real boards, backups of another action rescued 2, and pressed 237 moves a vendor sees and refuses."""
+        seen = [_without_repeated_drags(self._normalize_general(answer))]
+        out = []
+        for other in [a for a in actions if isinstance(a, dict)][1:]:
+            if other.get("action") != answer.get("action"):
+                continue
+            plan = _without_repeated_drags(self._normalize_general(other))
+            if not any(_same_drags(plan, s) for s in seen):
+                seen.append(plan)
+                out.append(other)
+        return out
+
+    def pointer_fallback_actions(self) -> List[List[Dict[str, Any]]]:
+        """The complete plans after the first, and a refresh when they run out; [] for a non-pointer model."""
+        if not self.pointer_has_actions:
+            return []
+        plans = [[_without_repeated_points(a) for a in _without_repeated_drags(self._normalize_general(f))]
+                 for f in self.pointer_fallbacks]
+        return [p for p in plans if p] + [[{"kind": PixelAnswerKind.REFRESH, "points": []}]]
+
+    def get_pointer_actions(self, image_path: str) -> List[Dict[str, Any]]:
+        """Generation 4 on a still: the screenshot as it is, PNG; the server sizes it and marks it.
+
+        On a retry the server's other complete plans come first, then a refresh: a refused answer is never
+        asked again, and the model's exhausted board is replaced rather than re-queried."""
+        if self.avoid_refused and self.pointer_has_actions:
+            if self.pointer_fallbacks:
+                answer = self.pointer_fallbacks.pop(0)
+                self.pointer_answers.append({k: v for k, v in answer.items() if k != "checks"})
+                self._log(f"pointer fallback: {answer.get('action')}")
+            else:
+                answer = {"action": ActionKind.REFRESH, "points": []}
+                self._log("pointer fallbacks exhausted; asking for a new board")
+            actions = [_without_repeated_points(a) for a in _without_repeated_drags(self._normalize_general(answer))]
+        else:
+            with open(image_path, "rb") as f:
+                raw = f.read()
+            body: Dict[str, Any] = {"image": base64.b64encode(raw).decode()}
+            if self.pointer_history:
+                history = []
+                for path in self.pointer_history[-8:]:
+                    try:
+                        with open(path, "rb") as f:
+                            history.append(base64.b64encode(f.read()).decode())
+                    except OSError:
+                        continue
+                if history:
+                    body["history"] = history
+            actions = [_without_repeated_points(a) for a in
+                       _without_repeated_drags(self._normalize_general(self._ask_pointer(body)))]
+        self._log(f"pointer actions -> {actions}")
+        return actions
+
+    def get_general_actions(self, image_path: str) -> List[Dict[str, Any]]:
+        """Generation 3: the one prompt, whatever the puzzle, and no family to route by."""
+        if self.prompts.pointer:
+            return self.get_pointer_actions(image_path)
+        raw = self._chat_with_image(self.prompts.general or "", image_path, max_tokens=512)
+        actions = self._normalize_general(self._parse_json(raw))
+        self._log(f"general actions -> {actions}")
+        return actions
+
     def get_pixel_actions(self, image_path: str, text_mode: bool = False) -> List[Dict[str, Any]]:
-        prompt = self.prompts.text_prompt() if text_mode else self.prompts.action_prompt
+        if self.prompts.pointer:
+            return self.get_pointer_actions(image_path)
+        if self.prompts.general is not None:
+            return self.get_general_actions(image_path)
+        prompt = self.prompts.text_prompt() if text_mode else self.prompts.pixel_prompt()
         raw = self._chat_with_image(prompt, image_path, max_tokens=512,
                                     family=PromptFamily.TEXT if text_mode else PromptFamily.PIXEL)
         data = self._parse_json(raw)
@@ -495,6 +647,9 @@ class ActionPlanner:
         return actions
 
     def get_keyframe_actions(self, keyframe_paths: List[str]) -> List[Dict[str, Any]]:
+        if self.prompts.sends_video:
+            raise ValueError(f"prompt generation {self.prompts.version} answers from the clip, not from keyframes; "
+                             "use get_video_actions")
         if not keyframe_paths:
             return []
         prompt = self.prompts.video_prompt(len(keyframe_paths))
@@ -507,6 +662,58 @@ class ActionPlanner:
             a["frame"] = frame
         self._log(f"keyframe actions (frame={frame}) -> {actions}")
         return actions
+
+    def video_max_pixels(self) -> int:
+        """The frame budget a clip is cut to: the model's pixel ceiling, as its training frames were cut."""
+        if not self.pixel_budget.maximum:
+            raise ValueError(
+                f"model {self.model!r} declares no pixel ceiling (pixel_budget in models.json, or "
+                f"{prompts.MAX_PIXELS_ENV}), and a video is cut to exactly that size. Register the model's band.")
+        return int(self.pixel_budget.maximum)
+
+    def get_video_actions(self, clip: ClipVideo) -> List[Dict[str, Any]]:
+        """One request carrying the whole clip as video; each action names the moment `t` it acts on, or None."""
+        if not clip.frames:
+            return []
+        if not self.prompts.sends_video:
+            raise ValueError(f"prompt generation {self.prompts.version} answers from keyframes, not from a clip; "
+                             "use get_keyframe_actions")
+        if self.prompts.pointer:
+            data: Any = self._ask_pointer({"frames": [base64.b64encode(clipvideo.encode_jpeg(f)).decode()
+                                                      for f in clip.frames], "fps": clip.fps})
+            general = True
+        else:
+            parts = [{"type": "video_url", "video_url": {"url": clipvideo.data_url(clip)}}]
+            general = self.prompts.general is not None
+            raw = self._chat(self.prompts.video_prompt(), parts, max_tokens=512,
+                             family=None if general else PromptFamily.VIDEO)
+            data = self._parse_json(raw)
+        actions = self._normalize_general(data) if general else self._normalize_pixel(data)
+        t = self._normalize_time(data, clip)
+        for a in actions:
+            a["t"] = t
+        self._log(f"video actions (t={t}) -> {actions}")
+        return actions
+
+    @staticmethod
+    def _normalize_time(data: Any, clip: ClipVideo) -> Optional[float]:
+        """A time outside the clip is None, not clamped: clamping would invent an intent."""
+        if not isinstance(data, dict):
+            return None
+        raw = data.get("t")
+        if raw is None and isinstance(data.get("action"), dict):
+            raw = data["action"].get("t")
+        if isinstance(raw, bool):
+            return None
+        try:
+            t = float(raw)
+        except (TypeError, ValueError):
+            return None
+        # Half a pair's width either side of the first and last label: anything further names no moment shown.
+        slack = 1.0 / clip.fps
+        if not clip.timestamps or not clip.timestamps[0] - slack <= t <= clip.timestamps[-1] + slack:
+            return None
+        return t
 
     @staticmethod
     def _normalize_frame(data: Any, n_keyframes: int) -> Optional[int]:
@@ -523,19 +730,60 @@ class ActionPlanner:
         return n if 1 <= n <= n_keyframes else None
 
     @staticmethod
+    def _normalize_general(data: Any) -> List[Dict[str, Any]]:
+        """Generation 3's answer. Click and refresh are read here because an empty point list means something for
+        them (nothing matches; no control seen) and a click may name boxed ids; drag, hold and type have generation
+        2's shape and go through `_normalize_pixel`."""
+        if not isinstance(data, dict):
+            return []
+        act = data.get("action")
+        if act == ActionKind.SLIDE:
+            return ActionPlanner._normalize_slide(data)
+        if act == ActionKind.HOLD and "press" in data:
+            return ActionPlanner._normalize_hold(data)
+        if act not in (ActionKind.CLICK, ActionKind.REFRESH):
+            return ActionPlanner._normalize_pixel(data)
+        raw_points = data.get("points")
+        points = [xy for xy in (_norm_xy(p[0], p[1]) for p in (raw_points if isinstance(raw_points, list) else [])
+                                if isinstance(p, (list, tuple)) and len(p) >= 2) if xy]
+        if act == ActionKind.REFRESH:
+            return [{"kind": PixelAnswerKind.REFRESH, "points": points[:1]}]
+        raw_ids = data.get("ids")
+        ids = [int(i) for i in (raw_ids if isinstance(raw_ids, list) else [])
+               if not isinstance(i, bool) and str(i).strip().isdigit()]
+        return [{"kind": PixelAnswerKind.CLICK, "points": points, "ids": ids}]
+
+    @staticmethod
+    def _answer_point(data: Dict[str, Any], key: str) -> Optional[tuple]:
+        v = data.get(key)
+        if not isinstance(v, (list, tuple)) or len(v) < 2 or any(isinstance(c, bool) for c in v[:2]):
+            return None
+        return _norm_xy(v[0], v[1])
+
+    @staticmethod
+    def _normalize_hold(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """The press, and the fill's line when both its ends are named: one end alone says nothing about where to let
+        go, so the hold falls back to waiting for the widget to finish."""
+        press = ActionPlanner._answer_point(data, "press")
+        if press is None:
+            return []
+        src, dst = ActionPlanner._answer_point(data, "from"), ActionPlanner._answer_point(data, "to")
+        line = {"src": src, "dst": dst} if src is not None and dst is not None else {}
+        return [{"kind": PixelAnswerKind.HOLD, "points": [press], **line}]
+
+    @staticmethod
+    def _normalize_slide(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """All three points or nothing: a slide missing one has no defined stop, and guessing it would steer the
+        handle to a place the model never named."""
+        handle, src, dst = (ActionPlanner._answer_point(data, k) for k in ("handle", "from", "to"))
+        if handle is None or src is None or dst is None:
+            return []
+        return [{"kind": PixelAnswerKind.SLIDE, "handle": handle, "src": src, "dst": dst}]
+
+    @staticmethod
     def _normalize_pixel(data: Any) -> List[Dict[str, Any]]:
         """Every answer shape the model has been seen to produce, oldest last; `kind` is a PixelAnswerKind."""
-        def norm_xy(x: Any, y: Any) -> Optional[tuple]:
-            try:
-                fx, fy = float(x) / 1000.0, float(y) / 1000.0
-            except (TypeError, ValueError):
-                return None
-            if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
-                if 0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0:
-                    fx, fy = float(x), float(y)
-                else:
-                    fx, fy = min(max(fx, 0.0), 1.0), min(max(fy, 0.0), 1.0)
-            return (fx, fy)
+        norm_xy = _norm_xy
 
         def flat_numbers(v: Any) -> List[float]:
             nums: List[float] = []
@@ -696,6 +944,9 @@ class ActionPlanner:
                     xy = None
                 if xy:
                     pts.append(xy)
+            if pts and data.get("action") == ActionKind.HOLD:
+                # One button, held: a second point would be a second press the widget never asked for.
+                return [{"kind": PixelAnswerKind.HOLD, "points": pts[:1]}]
             if pts:
                 out.append({"kind": PixelAnswerKind.CLICK, "points": pts})
         return out

@@ -1,42 +1,38 @@
 {
   "python": {
-    "version": "3.2.1",
+    "version": "4.0.0",
     "exports": [
       "ActionKind",
-      "ActionPlanner",
-      "AppiumTouchBackend",
-      "Availability",
       "CaptchaAction",
       "CaptchaKrakenAPIError",
+      "CaptchaSolveError",
       "CaptchaSolver",
       "CaptchaWatcher",
-      "CdpTouchBackend",
       "ClickAction",
+      "DEFAULT_CONFIG_PATH",
       "DragAction",
       "ErrorCode",
       "HumanizationMode",
       "Humanizer",
-      "ImageProcessor",
-      "KeyframeMode",
       "MobileHumanizer",
       "MouseHumanizer",
       "NullHumanizer",
       "Outcome",
       "PageSolver",
+      "PageSolverConfig",
       "PauseKind",
       "PromptFamily",
       "RetryMode",
       "RoundVerdict",
-      "SELECTORS",
+      "SelectorConfigError",
       "SolveResult",
       "TouchBackend",
-      "TouchscreenTouchBackend",
       "TypeAction",
       "Vendor",
       "VendorSelectors",
       "Verdict",
       "WaitAction",
-      "add_overlays_to_image",
+      "load_config",
       "solve_captcha",
       "solve_captcha_on_page"
     ],
@@ -45,21 +41,23 @@
       "CaptchaSolver.__init__": "(self, model=None, provider='captchaKrakenApi', api_key=None, expert=None)",
       "CaptchaSolver.solve": "(self, media_path, instruction='', puzzle_source=<Vendor.UNKNOWN: 'unknown'>, retry_mode=None, text_mode=False)",
       "CaptchaSolver.solve_keyframes": "(self, keyframe_paths)",
+      "CaptchaSolver.solve_animated": "(self, recording)",
       "PageSolver.__init__": "(self, config=None, solver=None, **solver_kwargs)",
       "PageSolver.solve": "(self, page)",
       "PageSolver.watch": "(self, page, **options)",
       "solve_captcha_on_page": "(page, **kwargs)",
       "CaptchaKrakenAPIError.__init__": "(self, message, *, status=None, code=None, resolution_url=None, retry_after_seconds=None)",
-      "add_overlays_to_image": "(image_path, boxes, output_path=None, label_position=<LabelPosition.TOP_LEFT: 'top-left'>)",
       "humanize.resolve": "(config)"
     },
     "page_solver_config_fields": [
       "animated_challenge_after_ms",
       "animated_motion_streak",
       "animated_probe_enabled",
+      "board_images_timeout_ms",
       "board_paint_floor",
       "board_paint_poll_ms",
       "board_paint_timeout_ms",
+      "custom_selectors",
       "detection_timeout_ms",
       "element_screenshot_timeout_ms",
       "expert",
@@ -85,6 +83,7 @@
       "recaptcha_fade_onset_grace_ms",
       "recaptcha_max_dynamic_rounds",
       "recaptcha_tile_hover_enabled",
+      "selectors",
       "settle_diff_threshold",
       "settle_frames",
       "settle_poll_ms",
@@ -154,6 +153,7 @@
       "check-movement",
       "detect-selected",
       "fetch",
+      "fill-step",
       "find-checkbox",
       "find-grid",
       "get-numbered-grid",
@@ -163,12 +163,13 @@
       "report-outcome",
       "serve",
       "server",
+      "slide-step",
       "solve-animated",
-      "track-piece",
       "update"
     ],
     "solve_parser": [
       "--expert",
+      "--history",
       "--puzzle-source",
       "--retry-mode",
       "--text-mode",
@@ -221,6 +222,13 @@
     "CAPTCHA_KRAKEN_CLIENT": [
       "python/src/captchakraken/planner.py"
     ],
+    "CAPTCHA_KRAKEN_DETECTOR": [
+      "python/src/captchakraken/pointer/detector.py"
+    ],
+    "CAPTCHA_KRAKEN_DETECTOR_MODEL": [
+      "js/src/solver.ts",
+      "python/src/captchakraken/pointer/detector.py"
+    ],
     "CAPTCHA_KRAKEN_EXTRA_HEADERS": [
       "python/src/captchakraken/planner.py"
     ],
@@ -265,7 +273,8 @@
     ],
     "CAPTCHA_LORA_NAME": [
       "js/src/solver.ts",
-      "python/src/captchakraken/config.py"
+      "python/src/captchakraken/config.py",
+      "python/src/captchakraken/pointer/server.py"
     ],
     "CAPTCHA_LORA_REVISION": [
       "python/src/captchakraken/config.py"
@@ -278,6 +287,9 @@
     ],
     "CAPTCHA_PIXEL_BOX_HALF": [
       "python/src/captchakraken/solver.py"
+    ],
+    "CAPTCHA_POINTER_HOST": [
+      "python/src/captchakraken/server_manager.py"
     ],
     "CAPTCHA_PROMPTS_FILE": [
       "python/src/captchakraken/prompts.py"
@@ -292,20 +304,20 @@
     "CAPTCHA_REQUEST_PRIORITY": [
       "python/src/captchakraken/planner.py"
     ],
-    "CAPTCHA_RESAMPLE_LEVEL": [
-      "js/src/cli-invocation.ts",
-      "python/src/captchakraken/planner.py"
-    ],
     "CAPTCHA_TIMINGS": [
       "js/src/timing.ts",
       "python/src/captchakraken/timing.py"
+    ],
+    "HF_TOKEN": [
+      "python/src/captchakraken/pointer/detector.py"
     ],
     "PYTHONPATH": [
       "js/src/solver.ts"
     ],
     "VLLM_API_KEY": [
       "js/src/solver.ts",
-      "python/src/captchakraken/config.py"
+      "python/src/captchakraken/config.py",
+      "python/src/captchakraken/pointer/server.py"
     ],
     "VLLM_BASE_URL": [
       "js/src/solver.ts",
@@ -331,7 +343,7 @@
     ]
   },
   "model_resolution": {
-    "latest": "CaptchaKraken/CaptchaKraken-Lora-v1.2",
+    "latest": "CaptchaKraken/MidnightV2-4B-q4",
     "registered_models": [
       "CaptchaKraken/Abyss",
       "CaptchaKraken/Abyss-27B",
@@ -343,6 +355,8 @@
       "CaptchaKraken/CaptchaKraken-v1.2-GGUF",
       "CaptchaKraken/CaptchaKrakenV1_Lora",
       "CaptchaKraken/CaptchaKraken_v1.1",
+      "CaptchaKraken/MidnightV2-4B",
+      "CaptchaKraken/MidnightV2-4B-q4",
       "CaptchaKraken/Sunlight-AWQ-4bit",
       "CaptchaKraken/Sunlight-v1.2-AWQ-4bit",
       "CaptchaKraken/Twilight-FP8",
@@ -391,6 +405,7 @@
     ],
     "js_only_config": [
       "apiKey",
+      "baseUrl",
       "idleMouseWander",
       "maxStaleFrameReSolves",
       "maxUnsupportedReSolves",
@@ -420,39 +435,24 @@
       "postinstall": "node scripts/setup-python.js"
     },
     "exports": [
-      "ActionKind",
-      "AppiumTouchBackend",
-      "BaseHumanizer",
       "CaptchaKrakenAPIError",
       "CaptchaKrakenSolver",
-      "CdpTouchBackend",
+      "DEFAULT_CONFIG_PATH",
       "ErrorCode",
       "FrameRole",
-      "HUMANIZATION_MODES",
       "HumanizationMode",
-      "KeyframeMode",
       "MobileHumanizer",
       "MouseHumanizer",
       "NullHumanizer",
       "Outcome",
-      "PAUSE_KINDS",
-      "PaintVerdict",
       "PauseKind",
-      "Phase",
       "PromptFamily",
-      "RecaptchaBanner",
-      "RetryMode",
-      "SELECTORS",
-      "SettleVerdict",
+      "SelectorConfigError",
       "SolveStage",
-      "TouchscreenTouchBackend",
       "Vendor",
       "Verdict",
       "fromPuppeteer",
-      "isOneOf",
-      "resolveHumanizer",
-      "resolveLoraName",
-      "touchBackendFor",
+      "loadConfig",
       "watchPage"
     ],
     "humanization_modes": [
@@ -464,9 +464,12 @@
       "animatedChallengeAfterMs",
       "animatedMotionStreak",
       "apiKey",
+      "baseUrl",
+      "boardImagesTimeoutMs",
       "boardPaintFloor",
       "boardPaintPollMs",
       "boardPaintTimeoutMs",
+      "customSelectors",
       "detectionTimeoutMs",
       "elementScreenshotTimeoutMs",
       "expert",
@@ -497,6 +500,7 @@
       "recaptchaMaxDynamicRounds",
       "recaptchaTileHoverEnabled",
       "repoPath",
+      "selectors",
       "settleDiffThreshold",
       "settleFrames",
       "settlePollMs",

@@ -48,15 +48,16 @@ def _sent_images(payload):
 def test_a_small_image_is_upscaled_to_the_training_floor(tmp_path, captured):
     small = tmp_path / "slider.png"
     Image.new("RGB", (277, 285), "white").save(small)
-    assert 277 * 285 < P.MIN_PIXELS, "fixture must start below the floor"
+    assert 277 * 285 < prompts.DEFAULT_PIXEL_BUDGET.minimum, "fixture must start below the floor"
 
-    P.ActionPlanner(api_key="k", base_url="http://x/v1")._chat_with_images(
+    P.ActionPlanner(api_key="k", base_url="http://x/v1",
+                    model="CaptchaKraken/CaptchaKraken-Lora-v1.2")._chat_with_images(
         "prompt", [str(small)])
 
     (sent,) = _sent_images(captured["payload"])
     w, h = sent.size
-    assert w * h >= P.MIN_PIXELS, (
-        f"sent {w}x{h} = {w * h} px, below the {P.MIN_PIXELS} px training floor — "
+    assert w * h >= prompts.DEFAULT_PIXEL_BUDGET.minimum, (
+        f"sent {w}x{h} = {w * h} px, below the {prompts.DEFAULT_PIXEL_BUDGET.minimum} px training floor — "
         "this is the geometry mismatch that put slider coordinates 80-105 px out")
     assert abs((w / h) - (277 / 285)) < 0.01, "aspect ratio must be preserved"
 
@@ -65,7 +66,7 @@ def test_an_image_inside_an_open_band_is_left_alone(tmp_path):
     big = tmp_path / "grid.png"
     Image.new("RGB", (400, 580), "white").save(big)
     raw = big.read_bytes()
-    open_band = prompts.PixelBudget(minimum=P.MIN_PIXELS, maximum=None, source="test")
+    open_band = prompts.PixelBudget(minimum=prompts.DEFAULT_PIXEL_BUDGET.minimum, maximum=None, source="test")
     assert 400 * 580 > open_band.minimum
 
     _, b64 = P._encode_image(str(big), open_band)

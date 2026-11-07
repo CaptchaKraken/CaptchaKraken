@@ -17,11 +17,11 @@ test('defaults to the registry `latest` entry, not a hardcoded alias', () => {
   assert.equal(resolveLoraName({ cliRoot: CLI_ROOT, env: {} }), expected);
 });
 
-test('the default is a generation-2 model — v1 has no video or text prompt', () => {
+test('the default is a generation-4 pointer model', () => {
   const reg = registry();
   const name = resolveLoraName({ cliRoot: CLI_ROOT, env: {} });
   const repoId = reg.served_aliases[name] ?? name;
-  assert.equal(reg.models[repoId].prompt_version, '2');
+  assert.equal(reg.models[repoId].prompt_version, '4');
 });
 
 test('finds the bundled engine on its own — cliRoot is optional', () => {

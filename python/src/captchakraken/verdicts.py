@@ -14,6 +14,7 @@ from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
 from .kinds import Verdict, Vendor
 
 # The vendors' own HTTP refusal: hCaptcha's frame words a 429 as "Your computer or network has sent too many requests".
+_SCRIPTED_REQUESTS = ("xhr", "fetch", "script")
 _TOO_MANY_REQUESTS = 429
 
 
@@ -104,6 +105,13 @@ def read_verdict(url: str, status: int, body: str) -> Optional[RoundVerdict]:
     return RoundVerdict(vendor, verdict) if verdict is not None else None
 
 
+def _is_a_scripted_request(response: Any) -> bool:
+    try:
+        return response.request.resource_type in _SCRIPTED_REQUESTS
+    except Exception:
+        return False
+
+
 class VerdictLog:
     """Every verdict the page's network carries while a solve runs.
 
@@ -113,6 +121,8 @@ class VerdictLog:
 
     def __init__(self, page: Any) -> None:
         self.verdicts: List[RoundVerdict] = []
+        #: Requests the page's scripts have made. A board that answers a press with none has refused nothing.
+        self.exchanges = 0
         self._read = 0
         self._page = page
         self._attached = False
@@ -125,6 +135,8 @@ class VerdictLog:
     def _on_response(self, response: Any) -> None:
         try:
             url, status = response.url, response.status
+            if _is_a_scripted_request(response):
+                self.exchanges += 1
             if endpoint_for(url) is None:
                 return
             # Decoded leniently, as a browser's text() is: one deal endpoint answers in ciphertext, and its URL alone
@@ -135,6 +147,10 @@ class VerdictLog:
         verdict = read_verdict(url, status, body)
         if verdict is not None:
             self.verdicts.append(verdict)
+
+    @property
+    def listening(self) -> bool:
+        return self._attached
 
     def fresh(self) -> List[RoundVerdict]:
         """The verdicts that arrived since the last call."""

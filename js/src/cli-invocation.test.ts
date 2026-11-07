@@ -1,11 +1,11 @@
-// The key rides in env because argv is world-readable; the args are an array so no shell ever sees them; the LEVEL travels, not a temperature.
+// The key rides in env because argv is world-readable; the args are an array so no shell ever sees them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   API_KEY_ENV,
-  RESAMPLE_LEVEL_ENV,
   buildSolveArgs,
+  parseSolveOutput,
   redactCommand,
   solveEnv,
   type SolveInvocation,
@@ -20,6 +20,12 @@ const invocation: SolveInvocation = {
   model: 'captcha-v12',
   puzzleSource: Vendor.HCAPTCHA,
 };
+
+test('a paged puzzle\'s earlier screens travel as --history, oldest first', () => {
+  const args = buildSolveArgs({ ...invocation, history: ['/tmp/page1.png', '/tmp/page2.png'] });
+  assert.deepEqual(args.filter((a) => a.startsWith('--history=')),
+    ['--history=/tmp/page1.png', '--history=/tmp/page2.png']);
+});
 
 test('the api key never appears in argv', () => {
   const args = buildSolveArgs(invocation);
@@ -70,16 +76,16 @@ test('vendor hint, retry mode and text mode still reach the CLI', () => {
   assert.ok(args.includes('captcha-v12'));
 });
 
-test('a re-ask carries its level to the CLI, and a first look does not', () => {
-  const first = solveEnv({}, 'k');
-  assert.equal(first[RESAMPLE_LEVEL_ENV], undefined,
-    'a first look must stay deterministic');
-  const reask = solveEnv({}, 'k', 2);
-  assert.equal(reask[RESAMPLE_LEVEL_ENV], '2');
+const PLAN_A = [{ action: 'click', target_bounding_boxes: [[0.1, 0.1, 0.2, 0.2]] }];
+const PLAN_B = [{ action: 'click', target_bounding_boxes: [[0.5, 0.5, 0.6, 0.6]] }];
 
-  assert.equal(reask['CAPTCHA_RESAMPLE_TEMPERATURE'], undefined);
+test("the server's other plans survive the CLI's output", () => {
+  const out = parseSolveOutput(`a log line\n${JSON.stringify({ actions: PLAN_A, fallbacks: [PLAN_B], token_usage: [] })}\n`);
+  assert.deepEqual(out.actions, PLAN_A);
+  assert.deepEqual(out.fallbacks, [PLAN_B]);
 });
 
-test('level 0 is not sent at all', () => {
-  assert.equal(solveEnv({}, 'k', 0)[RESAMPLE_LEVEL_ENV], undefined);
+test('an answer without other plans has none', () => {
+  const out = parseSolveOutput(JSON.stringify({ actions: PLAN_A, token_usage: [] }));
+  assert.equal(out.fallbacks, undefined);
 });

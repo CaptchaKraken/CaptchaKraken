@@ -1,0 +1,104 @@
+"""The pointer's prompt is one fixed text with the board between its halves, so
+everything before the board is a prefix every request shares (and vLLM caches),
+and a marked video is drawn and numbered like a still, frame by frame."""
+import os
+import sys
+
+import numpy as np
+import pytest
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from captchakraken.pointer import elements as E
+from captchakraken.pointer import layout as L
+from captchakraken.pointer import service as S
+
+
+class Template:
+    """Qwen's chat template, reduced to the order it writes a user turn in."""
+
+    def apply_chat_template(self, msgs, tokenize=False, add_generation_prompt=False):
+        out = "<|im_start|>user\n"
+        for part in msgs[0]["content"]:
+            if part["type"] == "text":
+                out += part["text"]
+            else:
+                out += f"<|vision_start|><|{part['type']}_pad|><|vision_end|>"
+        return out + "<|im_end|>\n"
+
+
+@pytest.mark.parametrize("video", [False, True])
+def test_the_instruction_comes_before_the_board_and_the_questions_after(video):
+    text = L.chat(Template(), video)
+    pad = L.VIDEO_PAD if video else L.IMAGE_PAD
+    before, after = text.split(pad)
+    assert L.INSTRUCTION in before and L.Q_END not in before
+    assert after.count(L.Q_END) == len(L.QUESTIONS)
+
+
+def test_no_board_changes_the_prompt_text():
+    """Nothing about a board's elements is written into the prompt: the drawn
+    outlines carry them, so two boards send one identical text."""
+    assert L.chat(Template(), False) == L.chat(Template(), False)
+    assert "<|box_end|>" not in L.chat(Template(), False)
+
+
+def _el(cls, x0, y0, x1, y1):
+    m = np.ones((y1 - y0, x1 - x0), bool)
+    return {"class": cls, "box": [x0, y0, x1, y1], "score": 1.0, "mask": ((x0, y0), m)}
+
+
+def test_a_video_element_keeps_its_number_across_the_clip():
+    """A sprite drifting right is one element on every frame; one that appears
+    late gets its own number; numbers follow reading order of first sighting."""
+    frames = [
+        [_el("item", 10 + 4 * f, 50, 40 + 4 * f, 80)] + ([_el("item", 100, 10, 130, 40)] if f >= 2 else [])
+        for f in range(5)
+    ]
+    tracks = E.track(frames)
+    assert len(tracks) == 2
+    top, drifting = tracks              # reading order: the y-10 one first
+    assert [e is not None for e in drifting["frames"]] == [True] * 5
+    assert [e is not None for e in top["frames"]] == [False, False, True, True, True]
+    assert E.on_frame(tracks, 0)[0] is None and E.on_frame(tracks, 0)[1] is not None
+
+
+def test_an_answer_names_the_element_under_its_point():
+    els = [_el("cell", 0, 0, 50, 50), None, _el("cell", 50, 0, 100, 50)]
+    ans = E.ids_for({"action": "click", "points": [[750, 500], [250, 500]]}, (100, 50), els)
+    assert ans["ids"] == [3, 1]
+    drag = E.ids_for({"action": "drag", "drags": [{"from": [250, 500], "to": [990, 990]}]}, (100, 50), els)
+    assert (drag["drags"][0]["from_id"], drag["drags"][0]["to_id"]) == (1, 3)
+    assert "ids" not in E.ids_for({"action": "click", "points": [[1, 1]]}, (100, 50), [])
+
+
+def test_a_cell_filled_by_a_piece_is_numbered_once_as_the_piece():
+    """A drag grid labels each position twice, as its cell and as the piece or
+    slot in it. Numbered twice, a 5x5 board needed 53 numbers and every
+    position read as two choices; the piece is the one that says what it is."""
+    sq = lambda x, y: ((x, y), np.ones((40, 40), bool))  # noqa: E731
+    dets = [{"class": "cell", "box": [0, 0, 40, 40], "score": 1.0, "mask": sq(0, 0)},
+            {"class": "draggable", "box": [2, 2, 38, 38], "score": 1.0, "mask": sq(2, 2)},
+            {"class": "cell", "box": [50, 0, 90, 40], "score": 1.0, "mask": sq(50, 0)},
+            {"class": "drop_target", "box": [50, 0, 90, 40], "score": 1.0, "mask": sq(50, 0)},
+            {"class": "cell", "box": [100, 0, 140, 40], "score": 1.0, "mask": sq(100, 0)}]
+    assert [e["class"] for e in E.number(dets)] == ["draggable", "drop_target", "cell"]
+
+
+def _checked(slots):
+    return {"action": "click", "points": [p for _, p, _ in slots],
+            "checks": {"slots": [{"slot": f"click{k}", "element": e} for k, (_, _, e) in enumerate(slots, 1)]}}
+
+
+def test_the_element_under_a_point_is_checked_against_the_one_the_model_read():
+    """Two answers to "which element", decided apart: agreeing, they back each other; differing, the board was misread."""
+    els = [_el("cell", 0, 0, 50, 50), _el("cell", 50, 0, 100, 50)]
+    agree = S.cross_check(_checked([("a", [250, 500], 1), ("b", [750, 500], 2)]), (100, 50), els)
+    assert [s["under"] for s in agree["checks"]["slots"]] == [1, 2] and agree["checks"]["agree"] is True
+    differ = S.cross_check(_checked([("a", [250, 500], 2)]), (100, 50), els)
+    assert differ["checks"]["slots"][0]["under"] == 1 and differ["checks"]["agree"] is False
+
+
+def test_a_plain_board_has_nothing_to_cross_check():
+    ans = S.cross_check(_checked([("a", [250, 500], None)]), (100, 50), [])
+    assert ans["checks"]["agree"] is None and ans["checks"]["slots"][0]["under"] is None

@@ -54,9 +54,8 @@ def test_our_own_endpoint_gets_the_hosted_model_instead(monkeypatch):
     monkeypatch.setenv("VLLM_BASE_URL", "https://api.captchakraken.com/v1")
     registry = prompts.registered_models()
     served = config.lora_name()
-    assert served != registry[prompts.latest_model()]["lora_name"], (
-        "against our own endpoint the client must ask for the hosted model, "
-        "not the downloadable default")
+    assert served == registry[prompts.latest_model()]["lora_name"], (
+        "v2 serves the same public pointer model from the hosted API and self-hosting")
     assert config.is_hosted_endpoint()
 
 
