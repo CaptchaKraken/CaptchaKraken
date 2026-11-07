@@ -217,3 +217,60 @@ def test_the_planner_names_the_refused_answers_once_told_to(monkeypatch):
     pl._ask_pointer({"image": "AA"})
     assert sent[1]["avoid"] == [{"action": "type", "text": "AB"}]
     assert sent[2]["avoid"] == [{"action": "type", "text": "AB"}, {"action": "type", "text": "AC"}]
+
+
+def _drag(*pairs):
+    return {"action": "drag", "drags": [{"from": list(a), "to": list(b)} for a, b in pairs]}
+
+
+def test_a_repeated_drag_is_not_a_new_answer():
+    a, again = ((100, 500), (800, 200)), ((101, 500), (801, 201))
+    assert Svc._distinct_drags(_drag(a, again)) == _drag(a)
+    assert Svc.same_effect(Svc._distinct_drags(_drag(a, again)), _drag(a))
+    other = ((100, 500), (300, 700))
+    assert Svc._distinct_drags(_drag(a, other)) == _drag(a, other)
+
+
+def test_dropping_a_repeated_drag_renumbers_the_checks_of_the_ones_after_it():
+    a, again, b = ((100, 500), (800, 200)), ((101, 500), (801, 201)), ((300, 300), (600, 600))
+    names = [f"drag{k} {end}" for k in (1, 2, 3) for end in ("from", "to")]
+    ans = {**_drag(a, again, b), "checks": {"slots": [{"slot": n, "tag": n} for n in names]}}
+    slots = Svc._distinct_drags(ans)["checks"]["slots"]
+    assert [(s["slot"], s["tag"]) for s in slots] == [("drag1 from", "drag1 from"), ("drag1 to", "drag1 to"),
+                                                       ("drag2 from", "drag3 from"), ("drag2 to", "drag3 to")]
+
+
+def _planner_answering(monkeypatch, actions):
+    pl = P.ActionPlanner.__new__(P.ActionPlanner)
+    pl.base_url, pl.api_key, pl.model, pl.request_timeout_s = "http://x", "k", "m", None
+    pl.pointer_answers, pl.pointer_fallbacks, pl.pointer_history = [], [], []
+    pl.pointer_has_actions, pl.avoid_refused = False, False
+    pl._log = lambda *_: None
+
+    class Resp:
+        ok = True
+
+        def json(self):
+            return {"answer": actions[0], "actions": actions}
+    pl._http = type("H", (), {"post": lambda self, *a, **k: Resp()})()
+    monkeypatch.setattr(P.config, "is_hosted_endpoint", lambda *_: False)
+    return pl
+
+
+def test_a_plan_that_only_repeats_the_refused_drag_never_comes_back(monkeypatch):
+    """Live: `[A]`, `[A, A']`, `[A, A', A'']` from one server, so a refused drag was pressed five more times."""
+    a, a2, a3 = ((100, 500), (800, 200)), ((101, 500), (801, 201)), ((100, 501), (800, 199))
+    pl = _planner_answering(monkeypatch, [_drag(a), _drag(a, a2), _drag(a, a2, a3)])
+    pl._ask_pointer({})
+    assert pl.pointer_fallbacks == []
+    assert pl.pointer_fallback_actions() == [[{"kind": "refresh", "points": []}]]
+
+
+def test_a_plan_that_moves_something_else_stays(monkeypatch):
+    a, b = ((100, 500), (800, 200)), ((300, 300), (600, 600))
+    moved = ((100, 500), (300, 700))
+    pl = _planner_answering(monkeypatch, [_drag(a), _drag(moved), _drag(a, b)])
+    pl._ask_pointer({})
+    assert len(pl.pointer_fallbacks) == 2
+    plans = pl.pointer_fallback_actions()
+    assert [len(p) for p in plans] == [1, 2, 1] and plans[-1][0]["kind"] == "refresh"

@@ -196,6 +196,9 @@ def _norm_xy(x: Any, y: Any) -> Optional[tuple]:
 # Closer than this (0-1 of the board) and two pointer clicks are one target. Small enough that neighbouring icons in a
 # click-in-order puzzle stay two targets.
 REPEATED_POINT = 0.004
+# Closer than this (0-1 of the board) at both ends and two pointer drags move one piece to one place: the server's
+# SAME_PLACE.
+REPEATED_DRAG = 0.025
 #: Refused answers sent back with one pointer ask: the server's MAX_AVOID.
 POINTER_AVOID_MAX = 32
 
@@ -213,6 +216,31 @@ def _without_repeated_points(action: Dict[str, Any]) -> Dict[str, Any]:
     ids = action.get("ids") or []
     return {**action, "points": [points[i] for i in keep],
             "ids": [ids[i] for i in keep] if len(ids) == len(points) else ids}
+
+
+def _same_drag(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    return all(abs(a[end][i] - b[end][i]) <= REPEATED_DRAG for end in ("src", "dst") for i in (0, 1))
+
+
+def _is_drag(action: Dict[str, Any]) -> bool:
+    return action.get("kind") == PixelAnswerKind.DRAG
+
+
+def _without_repeated_drags(plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A pointer plan without a drag it already made: the piece is already there, and a board that counts its moves
+    counts the second one. The count head can ask for more drags than there are pieces, and then the extra slots read
+    the same piece and the same target."""
+    out: List[Dict[str, Any]] = []
+    for action in plan:
+        if not (_is_drag(action) and any(_is_drag(o) and _same_drag(action, o) for o in out)):
+            out.append(action)
+    return out
+
+
+def _same_drags(a: List[Dict[str, Any]], b: List[Dict[str, Any]]) -> bool:
+    """Do two plans make the same drags, one after the other?"""
+    return bool(a) and len(a) == len(b) and all(_is_drag(x) and _is_drag(y) and _same_drag(x, y)
+                                                for x, y in zip(a, b))
 
 
 class ActionPlanner:
@@ -535,17 +563,29 @@ class ActionPlanner:
             raise RuntimeError(f"the pointer server's reply from {url} has no answer: {str(data)[:300]}")
         actions = data.get("actions") if isinstance(data, dict) else None
         self.pointer_has_actions = isinstance(actions, list) and bool(actions)
-        self.pointer_fallbacks = ([a for a in actions if isinstance(a, dict)][1:]
-                                  if self.pointer_has_actions else [])
+        self.pointer_fallbacks = self._other_plans(answer, actions) if self.pointer_has_actions else []
         self._log(f"pointer answer: {answer}")
         self.pointer_answers.append({k: v for k, v in answer.items() if k != "checks"})
         return answer
+
+    def _other_plans(self, answer: Dict[str, Any], actions: List[Any]) -> List[Dict[str, Any]]:
+        """The server's answers after the first, without any that only repeats a drag of one before it: pressed again
+        on a board that refused it, it costs a move and can tell the board nothing new."""
+        seen = [_without_repeated_drags(self._normalize_general(answer))]
+        out = []
+        for other in [a for a in actions if isinstance(a, dict)][1:]:
+            plan = _without_repeated_drags(self._normalize_general(other))
+            if not any(_same_drags(plan, s) for s in seen):
+                seen.append(plan)
+                out.append(other)
+        return out
 
     def pointer_fallback_actions(self) -> List[List[Dict[str, Any]]]:
         """The complete plans after the first, and a refresh when they run out; [] for a non-pointer model."""
         if not self.pointer_has_actions:
             return []
-        plans = [[_without_repeated_points(a) for a in self._normalize_general(f)] for f in self.pointer_fallbacks]
+        plans = [[_without_repeated_points(a) for a in _without_repeated_drags(self._normalize_general(f))]
+                 for f in self.pointer_fallbacks]
         return [p for p in plans if p] + [[{"kind": PixelAnswerKind.REFRESH, "points": []}]]
 
     def get_pointer_actions(self, image_path: str) -> List[Dict[str, Any]]:
@@ -561,7 +601,7 @@ class ActionPlanner:
             else:
                 answer = {"action": ActionKind.REFRESH, "points": []}
                 self._log("pointer fallbacks exhausted; asking for a new board")
-            actions = [_without_repeated_points(a) for a in self._normalize_general(answer)]
+            actions = [_without_repeated_points(a) for a in _without_repeated_drags(self._normalize_general(answer))]
         else:
             with open(image_path, "rb") as f:
                 raw = f.read()
@@ -577,7 +617,7 @@ class ActionPlanner:
                 if history:
                     body["history"] = history
             actions = [_without_repeated_points(a) for a in
-                       self._normalize_general(self._ask_pointer(body))]
+                       _without_repeated_drags(self._normalize_general(self._ask_pointer(body)))]
         self._log(f"pointer actions -> {actions}")
         return actions
 

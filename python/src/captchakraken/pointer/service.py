@@ -81,6 +81,29 @@ def _distinct_clicks(ans: Dict, els: Sequence[Optional[Dict]] = ()) -> Dict:
 SAME_PLACE = 25
 
 
+def _distinct_drags(ans: Dict) -> Dict:
+    """Drop a drag that repeats an earlier one: the piece is already there, so the
+    plan does nothing more than its shorter self and must not pass as a new answer."""
+    drags = ans.get("drags")
+    if not drags or len(drags) < 2:
+        return ans
+
+    def near(p, q):
+        return abs(p[0] - q[0]) <= SAME_PLACE and abs(p[1] - q[1]) <= SAME_PLACE
+    keep = [k for k, d in enumerate(drags)
+            if not any(near(d["from"], e["from"]) and near(d["to"], e["to"]) for e in drags[:k])]
+    if len(keep) == len(drags):
+        return ans
+    out = {**ans, "drags": [drags[k] for k in keep]}
+    checks = ans.get("checks")
+    if checks is not None:
+        # The slots name a drag by its place in the list, so the ones that stay are renumbered.
+        ends = {f"drag{k + 1} {end}": f"drag{n + 1} {end}" for n, k in enumerate(keep) for end in ("from", "to")}
+        out["checks"] = {**checks, "slots": [{**s, "slot": ends.get(s["slot"], s["slot"])} for s in checks["slots"]
+                                             if not s["slot"].startswith("drag") or s["slot"] in ends]}
+    return out
+
+
 def _places(ans: Dict) -> List:
     """Where performing `ans` presses, in order: an element number where the point
     has one, else the point."""
@@ -389,7 +412,7 @@ def read_answers(d: Dict, size, els, detokenize, stop_id: Optional[int],
             if slots is not None and L._chosen(v)[0] == "type":
                 text = _in_board_script(text, slots)[0]
         ans = L.answer(v, grid, text=text, timestamps=timestamps)
-        ans = cross_check(_distinct_clicks(E.ids_for(ans, size, els), els), size, els)
+        ans = cross_check(_distinct_drags(_distinct_clicks(E.ids_for(ans, size, els), els)), size, els)
         if reading is not None and ans["action"] == "type":
             ans["checks"]["letters"] = reading
             ans["checks"]["letters_agree"] = fold(model) == fold(reading)

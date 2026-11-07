@@ -16,6 +16,9 @@ semantic versioning; v2 is a major, **breaking** release.
   an earlier click had taken, and the detector outlines a whole line as one
   element, so a board asking for both ends got one click. Only a click in the
   same place or the same grid cell is dropped now. This needs the server updated.
+- **A plan never repeats a drag it already made.** The count head can ask for more
+  drags than there are pieces, and the extra slots read the same piece and the same
+  target, which spent a move on boards that count them.
 
 Version 4.0.0.
 
