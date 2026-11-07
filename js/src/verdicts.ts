@@ -55,6 +55,28 @@ const jsonpResult = (body: string): Verdict | null => {
   return result === 'success' ? Verdict.ACCEPTED : result === 'fail' ? Verdict.REJECTED : null;
 };
 
+/** `{"errorCode": "0", "ticket": ...}` when taken. No refusal has been recorded, so the DOM still judges one. */
+const tencentTicket = (body: string): Verdict | null => {
+  const data = parse(body) as { errorCode?: unknown; ticket?: unknown } | null;
+  return data && String(data.errorCode) === '0' && data.ticket ? Verdict.ACCEPTED : null;
+};
+
+/** `callback({"data": {"result": true, ...}, "error": 0})` when taken. No refusal has been recorded. */
+const yidunCheck = (body: string): Verdict | null => {
+  const start = body.indexOf('(');
+  const end = body.lastIndexOf(')');
+  const data = (start >= 0 && start < end ? parse(body.slice(start + 1, end)) : null) as
+    { data?: { result?: unknown } | null } | null;
+  return data?.data?.result === true ? Verdict.ACCEPTED : null;
+};
+
+/** `solved: true` when taken; `solved: false` with `time_end` set when the session ended refused. */
+const arkoseAnswer = (body: string): Verdict | null => {
+  const data = parse(body) as { solved?: unknown; time_end?: unknown } | null;
+  if (data?.solved === true) return Verdict.ACCEPTED;
+  return data?.solved === false && data.time_end != null ? Verdict.REJECTED : null;
+};
+
 const urlOnly = (): Verdict | null => Verdict.NEW_CHALLENGE;
 
 export interface VerdictEndpoint {
@@ -78,6 +100,10 @@ export const VERDICT_ENDPOINTS: Partial<Record<Vendor, readonly VerdictEndpoint[
     { marker: 'geetest.com/verify', read: jsonpResult },
     { marker: 'geetest.com/load', read: urlOnly },
   ],
+  [Vendor.TENCENT]: [{ marker: '/cap_union_new_verify', read: tencentTicket }],
+  [Vendor.YIDUN]: [{ marker: 'dun.163.com/api/v3/check', read: yidunCheck }],
+  // Sites serve this from their own hostnames, so the path is what identifies it.
+  [Vendor.FUNCAPTCHA]: [{ marker: '/fc/ca/', read: arkoseAnswer }],
 };
 
 /** The vendor and endpoint whose marker the URL carries, so a listener reads only the bodies it can judge. */

@@ -135,10 +135,14 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8001)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.45)
+    ap.add_argument("--max-cudagraph-capture-size", type=int, default=None,
+                    help="largest batch vLLM compiles a graph for; each one holds GPU memory (small cards need this)")
     a = ap.parse_args()
     from .service import PointerService
+    capture = a.max_cudagraph_capture_size
     svc = PointerService(a.model, detector=a.detector, letters=a.letters,
-                         gpu_memory_utilization=a.gpu_memory_utilization)
+                         gpu_memory_utilization=a.gpu_memory_utilization,
+                         **({"compilation_config": {"max_cudagraph_capture_size": capture}} if capture else {}))
     ThreadingHTTPServer((a.host, a.port), make_handler(svc)).serve_forever()
 
 

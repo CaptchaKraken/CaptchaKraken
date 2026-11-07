@@ -156,6 +156,15 @@
       },
       "note": "Midnight V2 4B, GPTQ W4A16, with the pointer heads. The default self-hosted and hosted model. The server owns the fixed prompt and reads the answer from one prefill at /v1/pointer."
     },
+    "CaptchaKraken/TwilightV2-2B": {
+      "prompt_version": "4",
+      "kind": "merged",
+      "base_model": "CaptchaKraken/TwilightV2-2B",
+      "lora_revision": "main",
+      "lora_name": "captcha-pointer",
+      "pixel_budget": {"min": 4096, "max": 518400},
+      "note": "Twilight V2 2B at bf16. The smaller model."
+    },
     "CaptchaKraken/MidnightV2-4B": {
       "prompt_version": "4",
       "kind": "merged",

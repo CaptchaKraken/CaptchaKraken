@@ -448,6 +448,7 @@ export class CaptchaKrakenSolver {
     this.budget = new PhaseBudget();
     this.verdicts = null;
     let solvedForReport = false;
+    await this.wakeLocalServer();
     try {
       const result = await this.solveImpl(page);
       if (result) result.phases = this.budget.toObject();
@@ -1430,6 +1431,12 @@ export class CaptchaKrakenSolver {
     } catch {
       return {};
     }
+  }
+
+  /** Loading a model takes as long as the whole solve budget, so a cold server must not spend it. A stopped one says so on the first request. */
+  private async wakeLocalServer(): Promise<void> {
+    const stateDir = process.env.CAPTCHA_KRAKEN_STATE_DIR || path.join(os.homedir(), '.captchakraken');
+    if (fs.existsSync(path.join(stateDir, 'selfhost.json'))) await this.runCliTool(['server', 'ensure']);
   }
 
   /** Start the persistent CV worker once; false when it cannot start, so callers fall back to one-shot spawns. */

@@ -320,20 +320,90 @@ def _server(args):
     try:
         if action == "start":
             return server_manager.start(background=True)
+        if action == "ensure":
+            server_manager.ensure_server()
+            return {"status": "running"}
         if action == "run":
             server_manager.run_foreground()
         if action == "stop":
             return server_manager.stop()
         if action == "status":
             return server_manager.status()
-        _fail(f"unknown server action {action!r} (use start|stop|status|run)", 2)
+        _fail(f"unknown server action {action!r} (use start|ensure|stop|status|run)", 2)
     except SystemExit:
         raise
     except Exception as e:
         _fail(str(e))
 
 
+def _print_server_result(result: dict) -> Any:
+    from . import server_manager
+
+    state = result.get("status")
+    if state in ("running", "already-running"):
+        print(f"Running at {result['base_url']}")
+    elif state == "stopped":
+        print("Stopped. It stays off until: captchakraken start")
+    elif state == "not-running":
+        print("Already stopped. It stays off until: captchakraken start")
+    else:
+        print(f"The server did not come up. Last lines of {server_manager.LOG_FILE}:\n{server_manager.log_tail()}",
+              file=sys.stderr)
+        sys.exit(1)
+    return _SELF_PRINTED
+
+
+def _start(args):
+    from . import config, server_manager
+
+    if not config.selfhost():
+        _fail("Nothing is set up yet. Run: captchakraken fetch")
+    print(f"Starting {config.selfhost().get('title')}...", flush=True)
+    return _print_server_result(server_manager.start(background=True))
+
+
+def _stop(args):
+    from . import server_manager
+
+    return _print_server_result(server_manager.stop())
+
+
+def _status(args):
+    from . import server_manager
+
+    return server_manager.status()
+
+
+def _demo(args):
+    from . import demo
+
+    sys.exit(demo.main(args))
+
+
+_LEGACY_FETCH_FLAGS = {"--weights-only", "--engine-only", "--no-restart", "--dry-run"}
+
+
+def _fetch_setup(args):
+    from . import selfhost
+
+    parser = argparse.ArgumentParser(prog="captchakraken fetch",
+                                     description="Choose a model, a GPU and a startup mode, then install and start it.")
+    parser.add_argument("--yes", "-y", action="store_true", help="ask nothing: previous choices, then the defaults")
+    parser.add_argument("--model", default=None, help="with --yes: " + ", ".join(
+        m.repo.split("/")[-1] for m in selfhost.MODELS))
+    parser.add_argument("--gpu", type=int, default=None, help="with --yes: the nvidia-smi GPU index")
+    parser.add_argument("--startup", default=None, choices=[selfhost.ALWAYS_ON, selfhost.FIRST_SOLVE],
+                        help="with --yes: always on, or start on the first solve")
+    opts = parser.parse_args(args)
+    if not opts.yes and (opts.model or opts.gpu is not None or opts.startup):
+        opts.yes = True
+    sys.exit(selfhost.fetch(yes=opts.yes, model=opts.model, gpu=opts.gpu, startup=opts.startup))
+
+
 def _fetch(args):
+    if not _LEGACY_FETCH_FLAGS & set(args):
+        return _fetch_setup(args)
+
     from . import updater
 
     flags = set(args)
@@ -368,6 +438,10 @@ COMMANDS: Dict[str, Callable[[List[str]], Any]] = {
     "serve": _serve,
     "solve-animated": _solve_animated,
     "server": _server,
+    "start": _start,
+    "stop": _stop,
+    "status": _status,
+    "demo": _demo,
     "fetch": _fetch,
     "update": _fetch,
 }

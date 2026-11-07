@@ -19,12 +19,13 @@ from contextlib import contextmanager
 from dataclasses import InitVar, dataclass, field
 from typing import AbstractSet, Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple, Union
 
-from . import planner
+from . import config, planner
 from .action_types import CaptchaAction
 from .humanize import Humanizer, hold, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
                     RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
 from .selectors import DEFAULT_CONFIG_PATH, DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe
+from .server_manager import ensure_server
 from .solver import AnimatedRecording, CaptchaSolver, UnsupportedCaptchaError, cut_recording
 from .timing import PhaseBudget, timings_enabled
 from .verdicts import RoundVerdict, VerdictLog
@@ -2374,6 +2375,9 @@ class PageSolver:
         return CaptchaWatcher(solver=self, page=page, **options)
 
     def solve(self, page: Any) -> SolveResult:
+        # Loading a model takes as long as the whole solve budget, so a cold server must not spend it.
+        if config.selfhost_active():
+            ensure_server(config.base_url())
         start = _now()
         usage: List[Dict[str, Any]] = []
         self._last_submit_frame_hash = None

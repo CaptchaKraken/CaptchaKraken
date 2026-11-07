@@ -14,8 +14,7 @@
     "js/src/**/*.ts",
     "js/scripts/**/*.{js,mjs}",
     "mcp/src/**/*.ts",
-    "python/src/**/*.py",
-    "setup.sh"
+    "python/src/**/*.py"
   ],
   "ignore": {
     "useGitignore": true,

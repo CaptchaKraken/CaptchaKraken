@@ -109,8 +109,8 @@ generation and the weights drift apart.
   Quote it as written; do not derive, round, or convert anything, and do not
   read a static-image rate as a promise about a browser run.
 - **Never print an API key** into a transcript, a log, or a commit. Use
-  `create_api_key`, which writes it to disk instead. `captchakraken.env` and
-  `.env` hold keys and are never committed.
+  `create_api_key`, which writes it to disk instead. `~/.captchakraken/selfhost.json`
+  and `.env` hold keys and are never committed.
 - **Midnight V2 4B Q4 is the default self-hosted and hosted model.** The v2
   weights are downloadable under LGPL-3.0-only. Older clients keep using their
   registered chat-completion model because the protocols are not interchangeable.

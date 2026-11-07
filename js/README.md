@@ -49,8 +49,8 @@ inference client work out of the box. It ships **no browser** — bring your own
 Playwright-compatible launcher (camoufox and patchright both work).
 
 - Skip the Python bootstrap: `CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP=1`
-- To **self-host** the model, run the repo's `setup.sh` (installs vLLM + weights).
-  Otherwise point `VLLM_BASE_URL` at a server you already run.
+- To **self-host** the model, run `npx captchakraken fetch` (installs vLLM + weights
+  and starts the server). Otherwise point `VLLM_BASE_URL` at a server you already run.
 
 ## No GPU? Use the hosted API
 
@@ -158,7 +158,7 @@ Full details, including writing your own humanizer:
 | `CAPTCHA_BASE_MODEL` | Merged v2 weights vLLM loads | `CaptchaKraken/MidnightV2-4B-q4` |
 | `CAPTCHA_LORA_ADAPTER` | Model repository (HF id or path) | `CaptchaKraken/MidnightV2-4B-q4` |
 | `CAPTCHA_LORA_NAME` | Served model name sent as `model` | `captcha-pointer` |
-| `CAPTCHA_POINTER_DETECTOR` | CNN element detector | path written by `setup.sh` |
+| `CAPTCHA_POINTER_DETECTOR` | CNN element detector | set by `captchakraken fetch` |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` never auto-starts a local server | `1` |
 | `CAPTCHA_KRAKEN_PYTHON` | Interpreter used for the bundled engine | the package's venv, else `python3` |
 | `CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP` | `1` skips the `postinstall` bootstrap | unset |

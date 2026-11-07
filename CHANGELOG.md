@@ -3,6 +3,47 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [4.1.0] - 2026-11-07
+
+### Added
+
+- **`npx captchakraken fetch` (or `pipx run captchakraken fetch`) sets up
+  self-hosting in one go.** It detects your GPUs, asks for a model, a GPU and a
+  startup mode, then installs the stack, downloads the weights, and starts the
+  server. No clone, no PATH edit, no environment variables.
+- **`captchakraken start`, `stop`, `status` and `demo`.** `stop` stays stopped
+  across reboots and solves until `start`.
+- **Twilight V2 2B is registered** and offered by `fetch`.
+
+### Fixed
+
+- **A pointer solve now starts a cold local server.** The docs said the first
+  solve starts it, but 4.0.0 only did that on the legacy chat path, so a solve got
+  "connection refused".
+- **Tencent, YiDun and Arkose passes no longer read as failures.** These widgets
+  stay on screen after accepting, and the client kept going until it reported
+  a failure. It now reads each vendor's answer-check response. Recorded refusals
+  are read too for Arkose; Tencent and YiDun refusals are still judged by the page.
+- **The stock server fits on an 8 GB card.** Cards under 12 GB get a smaller memory
+  reservation and graph set, through `VLLM_GPU_MEMORY_UTILIZATION` and the new
+  `VLLM_MAX_CUDAGRAPH_CAPTURE_SIZE`.
+- **The pointer server starts on the vLLM this package pins.** vLLM 0.29 warms its
+  kernels up with a short made-up prompt, which the pointer heads refused, so a
+  4.0.0 server crashed before it served anything.
+- **A start whose server crashes says so at once.** A crashed server read as still
+  loading, so `server start` waited out its whole timeout, and an always-on
+  service that crashed while loading was restarted for ever.
+- **Calls to a local server skip `HTTP_PROXY`.** Behind a proxy, a local server
+  never read as up.
+- **Loading a model no longer spends the solve's time limit.** A cold server now
+  loads before a solve's clock starts, so the first solve after a reboot does
+  not time out.
+
+### Removed
+
+- **`setup.sh` and `captchakraken.env`.** `captchakraken fetch` replaces both.
+  Environment variables still override it for a server you run yourself.
+
 ## [4.0.0] - 2026-11-06
 
 ### Changed
