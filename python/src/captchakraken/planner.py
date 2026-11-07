@@ -570,10 +570,13 @@ class ActionPlanner:
 
     def _other_plans(self, answer: Dict[str, Any], actions: List[Any]) -> List[Dict[str, Any]]:
         """The server's answers after the first, without any that only repeats a drag of one before it: pressed again
-        on a board that refused it, it costs a move and can tell the board nothing new."""
+        on a board that refused it, it costs a move and can tell the board nothing new. The action is taken as read: on
+        1,954 real boards, backups of another action rescued 2, and pressed 237 moves a vendor sees and refuses."""
         seen = [_without_repeated_drags(self._normalize_general(answer))]
         out = []
         for other in [a for a in actions if isinstance(a, dict)][1:]:
+            if other.get("action") != answer.get("action"):
+                continue
             plan = _without_repeated_drags(self._normalize_general(other))
             if not any(_same_drags(plan, s) for s in seen):
                 seen.append(plan)

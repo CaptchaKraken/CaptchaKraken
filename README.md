@@ -393,6 +393,9 @@ send a board and receive points, paths, text, or a no-answer decision.
 
 Every repository is in the [CaptchaKraken v2 collection](https://huggingface.co/collections/CaptchaKraken/captchakraken-v2).
 The default for both self-hosting and the hosted API is **Midnight V2 4B Q4**.
+
+The published Sunlight V2 pointer heads predate this release's head layout and fail a
+strict load, so use Twilight V2 or Midnight V2 until they are republished.
 The separate [CNN element detectors](https://huggingface.co/CaptchaKraken/CaptchaKrakenV2-CNN-large)
 are included in the same collection.
 

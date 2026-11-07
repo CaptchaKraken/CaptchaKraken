@@ -3,7 +3,7 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [4.0.0] - 2026-11-05
+## [4.0.0] - 2026-11-06
 
 ### Changed
 
@@ -27,6 +27,9 @@ semantic versioning; v2 is a major, **breaking** release.
   target, which spent a move on boards that count them.
 - **A click board with no Verify keeps only plans of the count it submitted at.**
   A plan of another count leaves its tiles ticked and the next plan unticks them.
+- **A backup plan is always the same action as the first answer.** The server
+  still ranks others, but a click after a refused slider is a move the vendor sees
+  and refuses. On 1,954 real boards these backups rescued 2 and pressed 237.
 - **A hold presses the model's own point**, not a random spot in its box, which can
   land off a bar narrower than the box.
 

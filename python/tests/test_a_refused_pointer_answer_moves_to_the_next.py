@@ -274,3 +274,21 @@ def test_a_plan_that_moves_something_else_stays(monkeypatch):
     assert len(pl.pointer_fallbacks) == 2
     plans = pl.pointer_fallback_actions()
     assert [len(p) for p in plans] == [1, 2, 1] and plans[-1][0]["kind"] == "refresh"
+
+
+def test_a_backup_is_never_another_action(monkeypatch):
+    """Gate 2026-11-06: `slide`, then the server's `click` and `drag` plans, on a widget that only takes a slide."""
+    slide = {"action": "slide", "handle": [120, 750], "to": [800, 430]}
+    other = {"action": "slide", "handle": [120, 750], "to": [500, 430]}
+    drag = _drag(((120, 750), (810, 430)))
+    pl = _planner_answering(monkeypatch, [slide, {"action": "click", "points": [[500, 500]]}, drag, other])
+    pl._ask_pointer({})
+    assert [f["action"] for f in pl.pointer_fallbacks] == ["slide"]
+
+
+def test_a_click_keeps_its_backups_of_clicks_and_loses_the_drag(monkeypatch):
+    click = {"action": "click", "points": [[100, 100]]}
+    next_click = {"action": "click", "points": [[300, 300]]}
+    pl = _planner_answering(monkeypatch, [click, _drag(((100, 100), (100, 100))), next_click])
+    pl._ask_pointer({})
+    assert pl.pointer_fallbacks == [next_click]
