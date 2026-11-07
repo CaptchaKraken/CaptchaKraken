@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import struct
 import time
+from types import SimpleNamespace
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -668,6 +669,36 @@ class TestTextCaptchas:
         page = _typing_page()
         assert _solver()._execute_type(page, _Scope({"input[type=text]": FakeElement()}),
                                        {"text": ""}) is False
+
+
+class TestABoardThatSubmitsItself:
+
+    def _run(self, clicks, verify=False):
+        from captchakraken.action_types import ClickAction
+
+        box = [0.2, 0.2, 0.3, 0.3]
+        solver = _solver()
+        solver._solver = SimpleNamespace(planner=SimpleNamespace(pointer_fallbacks=[
+            {"action": "click", "points": [[1, 1]] * 3},
+            {"action": "click", "points": [[1, 1]] * 4},
+            {"action": "refresh", "points": []},
+        ]))
+        page = _typing_page()
+        controls = {".button-submit": FakeElement(box={"x": 300.0, "y": 500.0, "width": 80.0, "height": 30.0})}
+        element = FakeElement(box={"x": 100.0, "y": 100.0, "width": 400.0, "height": 400.0})
+        element._frame = _Scope(controls if verify else {})
+        solver._settle_or_animated = lambda _e: False
+        solver._solve_frame_freshness_guarded = lambda _el, shot, fn: fn(shot)
+        solver._get_solution = lambda *_a, **_k: (
+            [ClickAction(action="click", target_bounding_boxes=[box] * clicks)], [])
+        solver._solve_single(page, _widget(element, Vendor.GEETEST), None)
+        return [(f["action"], len(f["points"])) for f in solver._solver.planner.pointer_fallbacks]
+
+    def test_with_no_verify_only_plans_of_the_count_that_submitted_stay(self):
+        assert self._run(4) == [("click", 4), ("refresh", 0)]
+
+    def test_a_verify_board_takes_any_count(self):
+        assert self._run(4, verify=True) == [("click", 3), ("click", 4), ("refresh", 0)]
 
 
 class TestSlideSubmitPolicy:

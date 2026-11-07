@@ -25,6 +25,8 @@ semantic versioning; v2 is a major, **breaking** release.
 - **A plan never repeats a drag it already made.** The count head can ask for more
   drags than there are pieces, and the extra slots read the same piece and the same
   target, which spent a move on boards that count them.
+- **A click board with no Verify keeps only plans of the count it submitted at.**
+  A plan of another count leaves its tiles ticked and the next plan unticks them.
 
 Version 4.0.0.
 

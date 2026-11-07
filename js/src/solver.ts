@@ -1119,6 +1119,8 @@ export class CaptchaKrakenSolver {
         performedAction = this.submittedOnBoard = true;
         await this.emitStep(captchaElement, SolveStage.SUBMIT, 'submitted (Verify/Next)', puzzleSource, frameRole, attempt);
         this.lastSubmitFrameHash = await this.elementFrameHash(captchaElement);
+      } else if (answered && puzzleSource !== Vendor.FUNCAPTCHA) {
+        this.keepPlansOfThisManyClicks(actionList);
       }
     } finally {
       await this.releasePendingBurst();
@@ -2223,6 +2225,17 @@ export class CaptchaKrakenSolver {
   private dropPointerHistory(): void {
     for (const screen of this.pointerHistory) unlink(screen);
     this.pointerHistory = [];
+  }
+
+  /** A click board with no Verify submits itself at a count, so a plan of any other count leaves its tiles ticked
+   *  and never submits, and the next plan's clicks untick them. */
+  private keepPlansOfThisManyClicks(plan: any[]): void {
+    const clicks = (actions: any[]): number | null => actions.length && actions.every((a) => a?.action === ActionKind.CLICK)
+      ? actions.reduce((n, a) => n + (a.target_bounding_boxes?.length ?? 1), 0)
+      : null;
+    const count = clicks(plan);
+    if (count === null) return;
+    this.fallbackPlans = this.fallbackPlans.filter((other) => [null, count].includes(clicks(other)));
   }
 
   private resetSolveState(): void {

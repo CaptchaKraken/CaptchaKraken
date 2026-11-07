@@ -717,6 +717,18 @@ class PageSolver:
             self._apply_refusals()
         self._fallback_board = board
 
+    def _keep_plans_of_this_many_clicks(self, actions: List[Any]) -> None:
+        """A click board with no Verify submits itself at a count, so a plan of any other count leaves its tiles
+        ticked and never submits, and the next plan's clicks untick them."""
+        plan = [_as_dict(a) for a in actions]
+        if not plan or any(a.get("action") != ActionKind.CLICK for a in plan):
+            return
+        clicks = sum(len(a.get("target_bounding_boxes") or [1]) for a in plan)
+        target = getattr(self._solver, "planner", None)
+        if getattr(target, "pointer_fallbacks", None):
+            target.pointer_fallbacks = [f for f in target.pointer_fallbacks if f.get("action") != ActionKind.CLICK
+                                        or len(f.get("points") or []) == clicks]
+
     def _fresh_board(self) -> None:
         # ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer describes the
         # board it was cut from, so replaying it here presses that board's coordinates onto this one: live, a
@@ -2333,6 +2345,8 @@ class PageSolver:
                 self._move_and_click(page, verify_button)
                 performed = self._submitted_on_board = True
                 self._last_submit_frame_hash = self._element_frame_hash(element)
+            elif answered and puzzle_source != Vendor.FUNCAPTCHA:
+                self._keep_plans_of_this_many_clicks(actions)
         finally:
             _unlink(shot)
             held = self._animated_plan[1] if self._animated_plan else None
