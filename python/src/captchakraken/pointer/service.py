@@ -52,17 +52,23 @@ def cross_check(ans: Dict, size, els: Sequence[Optional[Dict]]) -> Dict:
     return ans
 
 
-def _distinct_clicks(ans: Dict) -> Dict:
-    """Drop a click on an element an earlier click already took: on a tile board
-    the second press deselects the first. Two slots can land on one element from
-    different tokens, which no point-distance check sees."""
-    ids, pts = ans.get("ids"), ans.get("points")
-    if not ids or not pts or len(ids) != len(pts):
+def _distinct_clicks(ans: Dict, els: Sequence[Optional[Dict]] = ()) -> Dict:
+    """Drop a click that repeats an earlier one: in the same place, or anywhere in
+    the same cell, where the second press deselects the first. Two clicks apart on
+    any other element are two answers: a line has two ends to click."""
+    pts = ans.get("points")
+    if not pts:
         return ans
-    keep = [k for k, i in enumerate(ids) if i is None or i not in ids[:k]]
-    if len(keep) == len(ids):
+    ids = ans.get("ids") or [None] * len(pts)
+    in_cell = [i is not None and els[i - 1]["class"] == "cell" for i in ids]
+    keep = [k for k, p in enumerate(pts)
+            if not any((abs(p[0] - q[0]) <= SAME_PLACE and abs(p[1] - q[1]) <= SAME_PLACE)
+                       or (in_cell[k] and ids[j] == ids[k]) for j, q in enumerate(pts[:k]))]
+    if len(keep) == len(pts):
         return ans
-    out = {**ans, "points": [pts[k] for k in keep], "ids": [ids[k] for k in keep]}
+    out = {**ans, "points": [pts[k] for k in keep]}
+    if "ids" in ans:
+        out["ids"] = [ids[k] for k in keep]
     checks = ans.get("checks")
     if checks is not None:
         names = [f"click{k + 1}" for k in keep]
@@ -383,7 +389,7 @@ def read_answers(d: Dict, size, els, detokenize, stop_id: Optional[int],
             if slots is not None and L._chosen(v)[0] == "type":
                 text = _in_board_script(text, slots)[0]
         ans = L.answer(v, grid, text=text, timestamps=timestamps)
-        ans = cross_check(_distinct_clicks(E.ids_for(ans, size, els)), size, els)
+        ans = cross_check(_distinct_clicks(E.ids_for(ans, size, els), els), size, els)
         if reading is not None and ans["action"] == "type":
             ans["checks"]["letters"] = reading
             ans["checks"]["letters_agree"] = fold(model) == fold(reading)

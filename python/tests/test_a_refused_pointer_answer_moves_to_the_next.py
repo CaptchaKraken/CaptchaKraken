@@ -88,6 +88,30 @@ def test_two_clicks_on_one_element_press_it_once():
     assert ans["ids"] == [1] and len(ans["points"]) == 1
 
 
+def wide(cls):
+    """One detected element across vision tokens 21 to 25."""
+    return {**element(21), "class": cls, "box": [32.0, 32.0, 192.0, 64.0],
+            "mask": ((32, 32), np.ones((32, 160), bool))}
+
+
+def test_two_clicks_apart_in_one_cell_press_it_once():
+    d = decision(count=2, slots={"click1": (21, 0.9, []), "click2": (25, 0.9, [])})
+    ans = read(d, 0, [wide("cell")])
+    assert ans["ids"] == [1] and len(ans["points"]) == 1
+
+
+def test_two_clicks_apart_on_one_item_are_both_pressed():
+    """A line is one detected item, and its two ends are two answers."""
+    d = decision(count=2, slots={"click1": (21, 0.9, []), "click2": (25, 0.9, [])})
+    ans = read(d, 0, [wide("item")])
+    assert ans["ids"] == [1, 1] and len(ans["points"]) == 2
+
+
+def test_two_clicks_in_one_place_are_one_click_with_no_elements_to_read():
+    d = decision(count=2, slots={"click1": (21, 0.9, []), "click2": (21, 0.9, [])})
+    assert len(read(d, 0)["points"]) == 1
+
+
 def test_a_retry_never_returns_to_an_answer_already_refused():
     """Live, GeeTest match's second look moved one point, and the 'next' answer moved it back onto the first
     look's refused swap. Every refused answer is avoided, not only the last."""

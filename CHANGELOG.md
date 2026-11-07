@@ -12,6 +12,10 @@ semantic versioning; v2 is a major, **breaking** release.
   `./setup.sh --quant bf16` selects full precision.
 - **CaptchaKraken and all its models are LGPL-3.0-only.** The former custom
   license no longer applies to this release or the v2 weights.
+- **A line's two ends are two clicks.** The server dropped a click on an element
+  an earlier click had taken, and the detector outlines a whole line as one
+  element, so a board asking for both ends got one click. Only a click in the
+  same place or the same grid cell is dropped now. This needs the server updated.
 
 Version 4.0.0.
 

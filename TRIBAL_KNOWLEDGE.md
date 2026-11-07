@@ -156,6 +156,12 @@ named a version that had not been current for weeks.
 so the attempt stops bailing at round 3. A repeated answer instead turns on
 `avoid_refused`, and the pointer answers with its likeliest other answer.
 
+**A second click on one element is usually a second answer.** The detector
+outlines a whole line as one `item`, so one click per element turned both ends of
+a line into one click, on 2 of 3 gauntlet seeds of the board that asks for them.
+Only a cell deselects on a second press, so only a repeat in one cell or one place
+is dropped.
+
 **`BUILTIN_PROMPTS`, `AVAILABILITIES` and `PROMPT_FAMILIES` are pure literals,
 and stay strings even though `kinds.py` has the enums.** The training repo's
 release parity gate reads them by AST without importing the package. An
