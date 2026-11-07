@@ -872,6 +872,17 @@ class PageSolver:
             return float(coords[0]) * element_box["width"], float(coords[1]) * element_box["height"]
         return None
 
+    @staticmethod
+    def _hold_point_for(action: Dict[str, Any], element_box: Dict[str, float]) -> Optional[Tuple[float, float]]:
+        """Element-relative press point of a hold: the model's own point, the middle of its box. A hold can be on a
+        bar narrower than that box, and a random spot in it lands off the bar, or close enough to its edge that the
+        hand's drift lets go: the widget then never fills, and the same answer fails the same way."""
+        bbox = action.get("target_bounding_box")
+        if not bbox:
+            return None
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+        return (x1 + x2) / 2 * element_box["width"], (y1 + y2) / 2 * element_box["height"]
+
     def _execute_click(self, page: Any, action: Dict[str, Any], element_box: Dict[str, float],
                        element: Any = None, await_keyframe: Optional[str] = None) -> None:
         # Every gesture marks the board acted on so the speculative burst is never re-run over a touched board.
@@ -905,7 +916,7 @@ class PageSolver:
         done state, and letting go AT full resets it, so only its own signals end the hold.
         """
         self._acted_on_board = True
-        rel = self._click_point_for(action, element_box)
+        rel = self._hold_point_for(action, element_box)
         if rel is None:
             _log("hold action without a bounding box; skipping")
             return False

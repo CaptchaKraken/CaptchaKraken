@@ -27,6 +27,8 @@ semantic versioning; v2 is a major, **breaking** release.
   target, which spent a move on boards that count them.
 - **A click board with no Verify keeps only plans of the count it submitted at.**
   A plan of another count leaves its tiles ticked and the next plan unticks them.
+- **A hold presses the model's own point**, not a random spot in its box, which can
+  land off a bar narrower than the box.
 
 Version 4.0.0.
 

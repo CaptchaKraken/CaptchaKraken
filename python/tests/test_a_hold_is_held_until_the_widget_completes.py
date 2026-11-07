@@ -136,6 +136,20 @@ def test_the_executor_lets_go_once_the_fill_has_finished(monkeypatch):
     assert s._acted_on_board
 
 
+def test_a_hold_presses_the_models_point_every_time(monkeypatch):
+    """A bar can be narrower than the model's box: a random spot in the box landed off it on 3 boards in 8."""
+    box = Element().box
+    action = {"action": ActionKind.HOLD, "target_bounding_box": [0.25, 0.60, 0.29, 0.64]}
+    want = (box["x"] + 0.27 * box["width"], box["y"] + 0.62 * box["height"])
+    for _ in range(20):
+        s = _solver(monkeypatch, ["a", "b", "c", "c", "c", "c", "c", "c", "c", "c"])
+        monkeypatch.setattr(page_solver.time, "monotonic", iter(x * 0.25 for x in range(1000)).__next__)
+        page = Page()
+        s._execute_hold(page, action, box, Element())
+        at_press = page.mouse.events[page.mouse.events.index(("down",)) - 1]
+        assert at_press == ("move", round(want[0]), round(want[1]))
+
+
 def test_a_widget_that_never_changes_is_held_to_the_cap(monkeypatch):
     monkeypatch.setattr(page_solver, "HOLD_MAX_MS", 0)
     s = _solver(monkeypatch, ["a"])

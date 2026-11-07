@@ -6,6 +6,7 @@ import test from 'node:test';
 import { hold, NullHumanizer } from './humanize.js';
 import { ActionKind, Vendor } from './kinds.js';
 import { SELECTORS, SelectorTable } from './selectors.js';
+import { CaptchaKrakenSolver } from './solver.js';
 import type { Page } from './playwright-types.js';
 
 class RecordingPage {
@@ -54,4 +55,15 @@ test('the vendors whose hold completes on its own are named, so the fill reachin
 test('your own entry is released at its mark unless it says it completes', () => {
   assert.ok(!new SelectorTable({ widget: ['#gauge'] }).selectors[Vendor.UNKNOWN].holdCompletes);
   assert.equal(new SelectorTable({ widget: ['#button'], holdCompletes: true }).selectors[Vendor.UNKNOWN].holdCompletes, true);
+});
+
+// A bar can be narrower than the model's box: a random spot in the box landed off it on 3 boards in 8.
+test('a hold presses the model\'s point every time', () => {
+  const solver: any = new CaptchaKrakenSolver({});
+  const action = { action: ActionKind.HOLD, target_bounding_box: [0.25, 0.6, 0.29, 0.64] };
+  const box = { x: 0, y: 0, width: 400, height: 300 };
+  for (let i = 0; i < 20; i++) {
+    const [x, y] = solver.holdPointFor(action, box);
+    assert.ok(Math.abs(x - 108) < 1e-6 && Math.abs(y - 186) < 1e-6, `pressed ${x},${y}`);
+  }
 });

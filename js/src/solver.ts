@@ -2651,6 +2651,17 @@ export class CaptchaKrakenSolver {
     return null;
   }
 
+  /**
+   * The press point of a hold: the model's own point, the middle of its box. A hold can be on a bar narrower than that
+   * box, and a random spot in it lands off the bar, or close enough to its edge that the hand's drift lets go: the
+   * widget then never fills, and the same answer fails the same way.
+   */
+  private holdPointFor(action: HoldAction, elementBox: Box): [number, number] | null {
+    if (!action.target_bounding_box) return null;
+    const [minX, minY, maxX, maxY] = action.target_bounding_box;
+    return [(minX + maxX) / 2 * elementBox.width, (minY + maxY) / 2 * elementBox.height];
+  }
+
   /** Park on the target first, so only a mouse-down separates the right screen from the click. */
   private async clickWhenFrameMatches(page: Page, element: ElementHandle, action: ClickAction, elementBox: Box, awaitKeyframe: string): Promise<void> {
     const rel = this.clickPointFor(action, elementBox);
@@ -2685,7 +2696,7 @@ export class CaptchaKrakenSolver {
   private async executeHold(page: Page, element: ElementHandle, action: HoldAction, elementBox: Box,
                             completesItself = false): Promise<boolean> {
     this.actedOnBoard = true;
-    const rel = this.clickPointFor({ action: ActionKind.CLICK, target_bounding_box: action.target_bounding_box }, elementBox);
+    const rel = this.holdPointFor(action, elementBox);
     if (!rel) return false;
     const first = await this.elementFrameHash(element);
     const seen = { hash: first, since: Date.now(), changed: false };
