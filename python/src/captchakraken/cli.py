@@ -447,8 +447,39 @@ COMMANDS: Dict[str, Callable[[List[str]], Any]] = {
 }
 
 
+# What `captchakraken --help` leads with: the commands a person types. The rest of COMMANDS are the JS port's.
+USER_COMMANDS = """commands:
+  fetch                 choose a model, a GPU and a startup mode, then install and start it
+  start                 start the local server (it stays on until stop)
+  stop                  stop the local server and keep it off
+  status                show the endpoint, model and whether it is up
+  demo [site ...]       solve the public demo pages with your setup
+  server ensure         start the local server if it should be running
+
+Run `captchakraken <command> --help` for a command's options.
+Given an image path instead, it solves that one image with these options."""
+
+
+# `<command> --help` for the commands that take no parser of their own. Asking for help must never act.
+COMMAND_HELP = {
+    "start": "usage: captchakraken start\n\nStart the local server set up by `captchakraken fetch`. It stays on until stop.",
+    "stop": "usage: captchakraken stop\n\nStop the local server. It stays off, across reboots and solves, until start.",
+    "status": "usage: captchakraken status\n\nPrint the endpoint, the model and whether the server is up, as JSON.",
+    "demo": ("usage: captchakraken demo [--list] [--headed] [site ...]\n\n"
+             "Solve the public demo pages with your setup: all of them, or the sites named.\n"
+             "  --list    list the sites\n  --headed  show the browser"),
+    "server": "usage: captchakraken server {start,ensure,stop,status,run}\n\nManage the local server directly.",
+}
+
+
 def main():
     argv = sys.argv[1:]
+    if not argv:
+        argv = ["--help"]
+        sys.argv.append("--help")
+    if argv[0] in COMMAND_HELP and ("-h" in argv[1:] or "--help" in argv[1:]):
+        print(COMMAND_HELP[argv[0]])
+        return
     if argv and argv[0] in COMMANDS:
         try:
             result = COMMANDS[argv[0]](argv[1:])
@@ -461,7 +492,9 @@ def main():
             print(json.dumps(result))
         return
 
-    parser = argparse.ArgumentParser(description="CaptchaKraken v2 (vLLM)")
+    parser = argparse.ArgumentParser(prog="captchakraken", description=USER_COMMANDS,
+                                     usage="%(prog)s <command> [options]\n       %(prog)s [options] image_path [model]",
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("image_path", help="Path to the captcha image or video")
     parser.add_argument("model", nargs="?", default=None, help="Served LoRA name; defaults to models.json's latest.")
     parser.add_argument("api_provider", nargs="?", default="captchaKrakenApi", choices=["captchaKrakenApi"],

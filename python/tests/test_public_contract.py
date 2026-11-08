@@ -73,7 +73,7 @@ def _error_codes() -> list:
 
 def _solve_parser_flags() -> list:
     src = (PKG / "cli.py").read_text()
-    tail = src[src.index('parser = argparse.ArgumentParser(description="CaptchaKraken v2'):]
+    tail = src[src.index('parser = argparse.ArgumentParser(prog="captchakraken", description=USER_COMMANDS'):]
     return sorted(set(re.findall(r'add_argument\(\s*\n?\s*"(--[a-z-]+|[a-z_]+)"', tail)))
 
 
