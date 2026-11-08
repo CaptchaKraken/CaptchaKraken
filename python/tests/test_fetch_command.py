@@ -75,3 +75,28 @@ def test_cli_fetch_rejects_conflicting_flags(monkeypatch):
     with pytest.raises(SystemExit) as ei:
         cli.main()
     assert ei.value.code == 2
+
+
+@pytest.mark.parametrize("command", ["start", "stop", "status", "demo", "server"])
+def test_a_command_help_prints_and_never_acts(command, monkeypatch, capsys, tmp_path):
+    # `stop --help` once stopped the server and `demo --help` built a venv.
+    monkeypatch.setenv("CAPTCHA_KRAKEN_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(sys, "argv", ["captchakraken", command, "--help"])
+    for name in ("run", "Popen"):
+        monkeypatch.setattr(cli.subprocess, name, lambda *a, **k: pytest.fail("help ran a command"))
+    try:
+        cli.main()
+    except SystemExit as e:
+        assert e.code in (0, None)
+    assert command in capsys.readouterr().out
+    assert not (tmp_path / "state").exists()
+
+
+def test_bare_captchakraken_lists_the_commands(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["captchakraken"])
+    with pytest.raises(SystemExit) as ei:
+        cli.main()
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    for name in ("fetch", "start", "stop", "status", "demo"):
+        assert name in out
