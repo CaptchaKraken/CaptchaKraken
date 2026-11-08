@@ -55,19 +55,27 @@ const jsonpResult = (body: string): Verdict | null => {
   return result === 'success' ? Verdict.ACCEPTED : result === 'fail' ? Verdict.REJECTED : null;
 };
 
-/** `{"errorCode": "0", "ticket": ...}` when taken. No refusal has been recorded, so the DOM still judges one. */
+/**
+ * `{"errorCode": "0", "ticket": ...}` when taken; `{"errorCode": "50", "ticket": ""}` when a wrong slide is refused.
+ * Any other code (rate limits, expired sessions) has not been recorded, so the DOM judges it.
+ */
 const tencentTicket = (body: string): Verdict | null => {
   const data = parse(body) as { errorCode?: unknown; ticket?: unknown } | null;
-  return data && String(data.errorCode) === '0' && data.ticket ? Verdict.ACCEPTED : null;
+  if (!data || typeof data !== 'object') return null;
+  const code = String(data.errorCode);
+  if (code === '0' && data.ticket) return Verdict.ACCEPTED;
+  return code === '50' && !data.ticket ? Verdict.REJECTED : null;
 };
 
-/** `callback({"data": {"result": true, ...}, "error": 0})` when taken. No refusal has been recorded. */
+/** `callback({"data": {"result": true, ...}, "error": 0})` when taken, `"result": false` with `"error": 0` when refused. */
 const yidunCheck = (body: string): Verdict | null => {
   const start = body.indexOf('(');
   const end = body.lastIndexOf(')');
   const data = (start >= 0 && start < end ? parse(body.slice(start + 1, end)) : null) as
-    { data?: { result?: unknown } | null } | null;
-  return data?.data?.result === true ? Verdict.ACCEPTED : null;
+    { data?: { result?: unknown } | null; error?: unknown } | null;
+  if (!data || data.error !== 0) return null;
+  const result = data.data?.result;
+  return result === true ? Verdict.ACCEPTED : result === false ? Verdict.REJECTED : null;
 };
 
 /** `solved: true` when taken; `solved: false` with `time_end` set when the session ended refused. */

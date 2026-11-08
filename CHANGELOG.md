@@ -22,8 +22,9 @@ semantic versioning; v2 is a major, **breaking** release.
   "connection refused".
 - **Tencent, YiDun and Arkose passes no longer read as failures.** These widgets
   stay on screen after accepting, and the client kept going until it reported
-  a failure. It now reads each vendor's answer-check response. Recorded refusals
-  are read too for Arkose; Tencent and YiDun refusals are still judged by the page.
+  a failure. It now reads each vendor's answer-check response, refusals included:
+  a wrong Tencent or YiDun slide is known within about a second and the next board
+  is solved.
 - **The stock server fits on an 8 GB card.** Cards under 12 GB get a smaller memory
   reservation and graph set, through `VLLM_GPU_MEMORY_UTILIZATION` and the new
   `VLLM_MAX_CUDAGRAPH_CAPTURE_SIZE`.

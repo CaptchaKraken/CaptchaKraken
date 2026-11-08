@@ -66,17 +66,25 @@ def _jsonp_result(body: str) -> Optional[Verdict]:
 
 
 def _tencent_ticket(body: str) -> Optional[Verdict]:
-    """`{"errorCode": "0", "ticket": ...}` when taken. No refusal has been recorded, so the DOM still judges one."""
+    """`{"errorCode": "0", "ticket": ...}` when taken; `{"errorCode": "50", "ticket": ""}` when a wrong slide is refused.
+    Any other code (rate limits, expired sessions) has not been recorded, so the DOM judges it."""
     data = _json(body)
-    return Verdict.ACCEPTED if isinstance(data, dict) and str(data.get("errorCode")) == "0" and data.get("ticket") else None
+    if not isinstance(data, dict):
+        return None
+    code = str(data.get("errorCode"))
+    if code == "0" and data.get("ticket"):
+        return Verdict.ACCEPTED
+    return Verdict.REJECTED if code == "50" and not data.get("ticket") else None
 
 
 def _yidun_check(body: str) -> Optional[Verdict]:
-    """`callback({"data": {"result": true, ...}, "error": 0})` when taken. No refusal has been recorded."""
+    """`callback({"data": {"result": true, ...}, "error": 0})` when taken, `"result": false` with `"error": 0` when refused."""
     start, end = body.find("("), body.rfind(")")
     data = _json(body[start + 1:end]) if 0 <= start < end else None
-    result = (data.get("data") or {}).get("result") if isinstance(data, dict) else None
-    return Verdict.ACCEPTED if result is True else None
+    if not isinstance(data, dict) or data.get("error") != 0:
+        return None
+    result = (data.get("data") or {}).get("result")
+    return {True: Verdict.ACCEPTED, False: Verdict.REJECTED}.get(result) if isinstance(result, bool) else None
 
 
 def _arkose_answer(body: str) -> Optional[Verdict]:

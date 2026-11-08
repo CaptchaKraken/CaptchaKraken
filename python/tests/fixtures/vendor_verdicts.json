@@ -122,10 +122,18 @@
    "verdict": "accepted"
   },
   {
-   "name": "Tencent gives no ticket, so the DOM judges it",
+   "name": "Tencent refuses a wrong slide",
    "url": "https://turing.captcha.qcloud.com/cap_union_new_verify",
    "status": 200,
-   "body": "{\"errorCode\": \"50\", \"errMessage\": \"\", \"ticket\": \"\"}",
+   "body": "{\"errorCode\":\"50\",\"randstr\":\"\",\"ticket\":\"\",\"traceId\":\"\",\"errMessage\":\"\",\"sess\":\"SYNTHETIC\"}",
+   "vendor": "tencent",
+   "verdict": "rejected"
+  },
+  {
+   "name": "Tencent answers a code nobody has recorded, so the DOM judges it",
+   "url": "https://turing.captcha.qcloud.com/cap_union_new_verify",
+   "status": 200,
+   "body": "{\"errorCode\": \"9\", \"errMessage\": \"\", \"ticket\": \"\"}",
    "vendor": "tencent",
    "verdict": null
   },
@@ -138,10 +146,18 @@
    "verdict": "accepted"
   },
   {
-   "name": "YiDun does not say yes, so the DOM judges it",
+   "name": "YiDun refuses a wrong slide",
    "url": "https://c.dun.163.com/api/v3/check?referer=SYNTHETIC",
    "status": 200,
-   "body": "__JSONP_synthetic_2({\"data\": {\"result\": false}, \"error\": 0, \"msg\": \"ok\"});",
+   "body": "__JSONP_synthetic_2({\"data\":{\"result\":false,\"zoneId\":\"NANP\",\"token\":\"SYNTHETIC\",\"validate\":\"\"},\"error\":0,\"msg\":\"ok\"});",
+   "vendor": "yidun",
+   "verdict": "rejected"
+  },
+  {
+   "name": "YiDun reports an error, so the DOM judges it",
+   "url": "https://c.dun.163.com/api/v3/check?referer=SYNTHETIC",
+   "status": 200,
+   "body": "__JSONP_synthetic_2({\"data\": null, \"error\": 501, \"msg\": \"SYNTHETIC\"});",
    "vendor": "yidun",
    "verdict": null
   },
