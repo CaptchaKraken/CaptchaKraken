@@ -65,6 +65,38 @@ def _jsonp_result(body: str) -> Optional[Verdict]:
     return {"success": Verdict.ACCEPTED, "fail": Verdict.REJECTED}.get(result) if isinstance(result, str) else None
 
 
+def _tencent_ticket(body: str) -> Optional[Verdict]:
+    """`{"errorCode": "0", "ticket": ...}` when taken; `{"errorCode": "50", "ticket": ""}` when a wrong slide is refused.
+    Any other code (rate limits, expired sessions) has not been recorded, so the DOM judges it."""
+    data = _json(body)
+    if not isinstance(data, dict):
+        return None
+    code = str(data.get("errorCode"))
+    if code == "0" and data.get("ticket"):
+        return Verdict.ACCEPTED
+    return Verdict.REJECTED if code == "50" and not data.get("ticket") else None
+
+
+def _yidun_check(body: str) -> Optional[Verdict]:
+    """`callback({"data": {"result": true, ...}, "error": 0})` when taken, `"result": false` with `"error": 0` when refused."""
+    start, end = body.find("("), body.rfind(")")
+    data = _json(body[start + 1:end]) if 0 <= start < end else None
+    if not isinstance(data, dict) or data.get("error") != 0:
+        return None
+    result = (data.get("data") or {}).get("result")
+    return {True: Verdict.ACCEPTED, False: Verdict.REJECTED}.get(result) if isinstance(result, bool) else None
+
+
+def _arkose_answer(body: str) -> Optional[Verdict]:
+    """`solved: true` when taken; `solved: false` with `time_end` set when the session ended refused."""
+    data = _json(body)
+    if not isinstance(data, dict):
+        return None
+    if data.get("solved") is True:
+        return Verdict.ACCEPTED
+    return Verdict.REJECTED if data.get("solved") is False and data.get("time_end") is not None else None
+
+
 def _url_only(_body: str) -> Optional[Verdict]:
     return Verdict.NEW_CHALLENGE
 
@@ -85,6 +117,10 @@ VERDICT_ENDPOINTS: Mapping[Vendor, Sequence[VerdictEndpoint]] = {
                        VerdictEndpoint("/recaptcha/api2/reload", _new_board)),
     Vendor.GEETEST: (VerdictEndpoint("geetest.com/verify", _jsonp_result),
                      VerdictEndpoint("geetest.com/load", _url_only)),
+    Vendor.TENCENT: (VerdictEndpoint("/cap_union_new_verify", _tencent_ticket),),
+    Vendor.YIDUN: (VerdictEndpoint("dun.163.com/api/v3/check", _yidun_check),),
+    # Sites serve this from their own hostnames, so the path is what identifies it.
+    Vendor.FUNCAPTCHA: (VerdictEndpoint("/fc/ca/", _arkose_answer),),
 }
 
 

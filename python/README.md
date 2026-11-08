@@ -63,9 +63,9 @@ pip install "captchakraken[serve]"   # + the serving stack (vLLM/torch) to self-
 
 The base install is lightweight — everything you need to solve captchas against
 a vLLM server (local or remote). The `[serve]` extra pulls the heavy stack only
-if you want to run the model yourself. The one-command
-[`setup.sh`](https://github.com/CaptchaKraken/CaptchaKraken) installs `[serve]`,
-downloads the weights, and writes an env file for you.
+if you want to run the model yourself. To skip all of that, `pipx run captchakraken
+fetch` asks which model and GPU you want, then installs, downloads and starts it,
+and `captchakraken demo` tries it.
 
 ## No GPU? Use the hosted API
 

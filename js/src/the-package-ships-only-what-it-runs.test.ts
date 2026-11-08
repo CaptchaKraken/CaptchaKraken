@@ -11,6 +11,7 @@ const ROOT = path.join(__dirname, '..');
 const SHIPPED = [
   /^package\.json$/, /^README\.md$/, /^AGENTS\.md$/, /^LICENSE$/, /^NOTICE$/,
   /^dist\//,
+  /^bin\/captchakraken\.js$/,
   /^scripts\/setup-python\.js$/,
   /^python\/(pyproject\.toml|README\.md|AGENTS\.md|LICENSE|NOTICE)$/,
   /^python\/src\/captchakraken\//,

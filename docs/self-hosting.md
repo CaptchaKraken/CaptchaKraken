@@ -5,37 +5,82 @@ Run the model on your own GPU. Screenshots never leave your machine.
 ## One command
 
 ```bash
-git clone https://github.com/CaptchaKraken/CaptchaKraken
-cd CaptchaKraken
-./setup.sh
+npx captchakraken fetch
 ```
 
-The installer defaults to **Midnight V2 4B Q4** (GPTQ W4A16, about 3.6 GB of
-weights), downloads the element detector, installs the tested vLLM stack into
-`python/.venv`, and writes `captchakraken.env`. Use a CUDA GPU with at least
-8 GB of free VRAM.
+Or from Python, with no Node involved:
 
 ```bash
-source captchakraken.env
-captchakraken path/to/captcha.png
+pipx run captchakraken fetch     # or: uvx captchakraken fetch
 ```
 
-The server starts automatically on the first solve and stays running. To manage
-it yourself:
+It detects your NVIDIA GPUs and asks three things:
+
+1. **Which model.** Midnight V2 4B Q4 is the default.
+2. **Which GPU.** Each detected card is listed with its free memory, and a card
+   too small for the model cannot be picked.
+3. **When the server runs.**
+   - **Always on** starts with the machine and restarts if it crashes.
+   - **Warm start** starts now, and after a reboot on the first solve, then
+     stays loaded.
+
+Then it installs the tested serving stack, downloads the weights and the element
+detector, fetches a browser for the demo, starts the server and waits until it
+answers. There is nothing to export and no PATH to edit. Try it:
 
 ```bash
-captchakraken server start
-captchakraken server status
-captchakraken server stop
+captchakraken demo
 ```
 
-`./setup.sh --start` starts it during installation. `./setup.sh --quant bf16`
-selects the full-precision Midnight V2 4B checkpoint instead. Q4 is the default
-on every GPU; the installer no longer changes precision based on memory.
+Use it from your own code with no configuration: every client on this machine
+finds the server through `~/.captchakraken/selfhost.json`.
+
+| Model | Download | GPU |
+|---|---|---|
+| Midnight V2 4B Q4 (default) | 3.8 GB | 8 GB card (measured on an RTX 5060: 5.3 GB in use) |
+| Twilight V2 2B | 4.5 GB | 8 GB card (measured on an RTX 5060: 6.0 GB in use) |
+| Midnight V2 4B (full precision) | 9.1 GB | 16 GB card (estimated from its size, not measured on a 16 GB card) |
+
+Allow about 8 GB of disk for the serving stack as well. Self-hosting needs Linux
+and an NVIDIA GPU; on anything else use the [hosted API](./hosted-api.md).
+
+### Starting and stopping
+
+```bash
+captchakraken stop      # off, and stays off across reboots and solves
+captchakraken start     # back on; waits until it answers
+captchakraken status    # endpoint, model, GPU and startup mode
+```
+
+`stop` is respected: a solve against a stopped server fails with a message
+telling you to run `captchakraken start`, instead of quietly starting it again.
+It does not fall back to the hosted API.
+
+### Changing your mind, and updating
+
+Run `npx captchakraken fetch` again. Your previous answers are where the cursor
+starts, and your key and port are kept. A newer `captchakraken` installs the
+matching serving stack as part of the same run.
+
+### Without a terminal
+
+```bash
+captchakraken fetch --yes                     # previous answers, then the defaults
+captchakraken fetch --model MidnightV2-4B-q4 --gpu 0 --startup always
+captchakraken fetch --model TwilightV2-2B --startup first-solve
+```
+
+### What it leaves on your machine
+
+Everything is under `~/.captchakraken`, apart from the weights in the Hugging
+Face cache, a `~/.local/bin/captchakraken` link, and with **Always on** a systemd
+user unit, `captchakraken-local.service`. To go back to the hosted API, run
+`captchakraken stop` and delete `~/.captchakraken/selfhost.json`. Setting
+`VLLM_BASE_URL` also overrides this install for that process.
 
 ## The endpoint
 
-The server listens on `http://127.0.0.1:8000` and provides:
+The server listens on `127.0.0.1`, on the first free port from 8000 up (`captchakraken status` says which), and provides:
 
 - `POST /v1/pointer` — the v2 board-to-answer inference endpoint
 - `GET /v1/models` — the served model name
@@ -57,9 +102,9 @@ plans, for a retry after the widget refuses it. `answer` repeats the first for
 callers written before `actions`. The shipped Python and JavaScript drivers try
 all three in that order, then refresh the board.
 
-`captchakraken.env` contains a random bearer key. The client and server read it
-from the same file, so no further configuration is needed. Remote vLLM endpoints
-are never auto-started:
+`~/.captchakraken/selfhost.json` holds a random bearer key that only its owner can
+read. The client and server take it from that file, so no further configuration
+is needed. Remote vLLM endpoints are never auto-started:
 
 ```bash
 export VLLM_BASE_URL=http://your-server:8000/v1
@@ -74,11 +119,11 @@ v2 client at an older generation-2 or generation-3 server.
 ## Models and runtimes
 
 The [CaptchaKraken v2 collection](https://huggingface.co/collections/CaptchaKraken/captchakraken-v2)
-contains three model sizes. Midnight V2 4B Q4 is the default; the other merged
-checkpoints can be selected by editing `CAPTCHA_BASE_MODEL` and
-`CAPTCHA_LORA_ADAPTER` together in `captchakraken.env`.
+contains three model sizes. `captchakraken fetch` offers the ones this client can
+load; the Sunlight V2 0.8B heads predate the current output layout and are not
+offered until they are republished.
 
-- **Merged Q4 checkpoints** are the supported one-command vLLM path. The LoRA is
+- **Merged checkpoints** are the supported one-command vLLM path. The LoRA is
   already merged and the pointer heads ship beside it.
 - **LoRA repositories** contain the unmerged adapter and pointer heads for
   further training. They are not interchangeable with the old 9B chat LoRA
@@ -93,15 +138,12 @@ The CNN detector is downloaded from
 [`CaptchaKraken/CaptchaKrakenV2-CNN-large`](https://huggingface.co/CaptchaKraken/CaptchaKrakenV2-CNN-large).
 The client and all CaptchaKraken models are LGPL-3.0-only.
 
-## Updating
+## Updating parts separately
 
-```bash
-./setup.sh --update
-```
-
-Or run `captchakraken fetch --engine-only`. Weight revisions can be pulled with
-`captchakraken fetch --weights-only --no-restart`; restart the server afterward
-to load them.
+`captchakraken fetch` above is the normal path. For a server you manage yourself,
+`captchakraken fetch --engine-only` upgrades the serving stack, and
+`captchakraken fetch --weights-only --no-restart` pulls weight revisions; restart
+the server afterward to load them.
 
 ## Legacy generation-3 chat servers
 
@@ -122,15 +164,19 @@ vllm serve "$CAPTCHA_BASE_MODEL" \
 
 ## Troubleshooting
 
-- **401 from your own server:** run `source captchakraken.env` first.
-- **Connection refused:** run `captchakraken server start` and inspect
-  `~/.captchakraken/vllm.log`.
-- **Unsupported pointer architecture:** use the environment created by
-  `setup.sh`; it installs the tested vLLM and torch versions together.
+- **"The CaptchaKraken server is stopped":** run `captchakraken start`.
+- **The server did not come up:** the command prints the end of
+  `~/.captchakraken/vllm.log`, which holds the whole story.
+- **Out of memory while starting:** another job holds the card. Stop it, or run
+  `captchakraken fetch` and pick a different GPU. Cards under 12 GB already get a
+  smaller memory reservation and graph set automatically.
+- **401 from your own server:** `CAPTCHA_KRAKEN_API_KEY` is ignored for this install
+  unless `VLLM_BASE_URL` also points elsewhere, so check for a `VLLM_BASE_URL` naming
+  another server. `captchakraken fetch` warns when one is set.
+- **Always on does not survive a reboot:** your system refused `loginctl
+  enable-linger`, so the unit only starts when you log in.
 - **404 on `/v1/chat/completions`:** this is the v2 pointer server; use the
   shipped client or `POST /v1/pointer`.
-- **Out of memory:** stop other GPU jobs or lower
-  `VLLM_GPU_MEMORY_UTILIZATION` in `captchakraken.env`.
 
 Set `CAPTCHA_DEBUG=1` for solver diagnostics.
 

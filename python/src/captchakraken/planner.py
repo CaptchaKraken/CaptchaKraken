@@ -14,7 +14,7 @@ from PIL import Image
 from . import clipvideo, config, errors, prompts
 from .clipvideo import ClipVideo
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode
-from .server_manager import ensure_server
+from .server_manager import ensure_server, is_local
 
 DEBUG = os.getenv("CAPTCHA_DEBUG", "0") == "1"
 
@@ -245,6 +245,8 @@ def _same_drags(a: List[Dict[str, Any]], b: List[Dict[str, Any]]) -> bool:
 
 class ActionPlanner:
 
+    _server_ensured = False
+
     def __init__(
         self,
         model: Optional[str] = None,
@@ -286,8 +288,8 @@ class ActionPlanner:
         self.experts = prompts.experts(_prompt_key)
         if self.expert:
             prompts.route(_prompt_key, None, pin=self.expert)
-        self._server_ensured = False
         self._http = requests.Session()
+        self._http.trust_env = not is_local(self.base_url)  # a machine's HTTP_PROXY must not carry a local call
         self.outcome_supported = True
 
     def _model_for(self, family: Optional[PromptFamily]) -> str:
@@ -545,6 +547,15 @@ class ActionPlanner:
             "Content-Type": "application/json",
             **routing_headers(hosted=config.is_hosted_endpoint(self.base_url)),
         }
+        if not self._server_ensured:
+            try:
+                ensure_server(self.base_url)
+            except Exception as e:
+                # On an install `fetch` manages, the reason beats the "connection refused" the request would earn.
+                if config.selfhost_active():
+                    raise
+                self._log(f"ensure_server: {e}")
+            self._server_ensured = True
         url = f"{self.base_url}{self._POINTER_PATH}"
         self._log(f"POST {url} model={self.model} media={sorted(k for k in body if k not in ('model', 'avoid'))}")
         if self.avoid_refused and self.pointer_answers:

@@ -112,6 +112,78 @@
    "body": "{\"pass\": true}",
    "vendor": null,
    "verdict": null
+  },
+  {
+   "name": "Tencent takes the answer",
+   "url": "https://turing.captcha.qcloud.com/cap_union_new_verify",
+   "status": 200,
+   "body": "{\"errorCode\": \"0\", \"randstr\": \"@SYN\", \"ticket\": \"SYNTHETIC-TICKET\", \"traceId\": \"\", \"errMessage\": \"\", \"sess\": \"\"}",
+   "vendor": "tencent",
+   "verdict": "accepted"
+  },
+  {
+   "name": "Tencent refuses a wrong slide",
+   "url": "https://turing.captcha.qcloud.com/cap_union_new_verify",
+   "status": 200,
+   "body": "{\"errorCode\":\"50\",\"randstr\":\"\",\"ticket\":\"\",\"traceId\":\"\",\"errMessage\":\"\",\"sess\":\"SYNTHETIC\"}",
+   "vendor": "tencent",
+   "verdict": "rejected"
+  },
+  {
+   "name": "Tencent answers a code nobody has recorded, so the DOM judges it",
+   "url": "https://turing.captcha.qcloud.com/cap_union_new_verify",
+   "status": 200,
+   "body": "{\"errorCode\": \"9\", \"errMessage\": \"\", \"ticket\": \"\"}",
+   "vendor": "tencent",
+   "verdict": null
+  },
+  {
+   "name": "YiDun takes the answer",
+   "url": "https://c.dun.163.com/api/v3/check?referer=SYNTHETIC",
+   "status": 200,
+   "body": "__JSONP_synthetic_2({\"data\": {\"result\": true, \"zoneId\": \"NANP\", \"token\": \"SYNTHETIC\", \"validate\": \"SYNTHETIC\"}, \"error\": 0, \"msg\": \"ok\"});",
+   "vendor": "yidun",
+   "verdict": "accepted"
+  },
+  {
+   "name": "YiDun refuses a wrong slide",
+   "url": "https://c.dun.163.com/api/v3/check?referer=SYNTHETIC",
+   "status": 200,
+   "body": "__JSONP_synthetic_2({\"data\":{\"result\":false,\"zoneId\":\"NANP\",\"token\":\"SYNTHETIC\",\"validate\":\"\"},\"error\":0,\"msg\":\"ok\"});",
+   "vendor": "yidun",
+   "verdict": "rejected"
+  },
+  {
+   "name": "YiDun reports an error, so the DOM judges it",
+   "url": "https://c.dun.163.com/api/v3/check?referer=SYNTHETIC",
+   "status": 200,
+   "body": "__JSONP_synthetic_2({\"data\": null, \"error\": 501, \"msg\": \"SYNTHETIC\"});",
+   "vendor": "yidun",
+   "verdict": null
+  },
+  {
+   "name": "Arkose takes the answer",
+   "url": "https://client-api.arkoselabs.com/fc/ca/",
+   "status": 200,
+   "body": "{\"response\": \"answered\", \"solved\": true, \"incorrect_guess\": null, \"decryption_key\": null, \"time_end\": null, \"time_end_seconds\": null, \"_challenge_imgs\": null}",
+   "vendor": "funcaptcha",
+   "verdict": "accepted"
+  },
+  {
+   "name": "Arkose ends the session refused",
+   "url": "https://client-api.arkoselabs.com/fc/ca/",
+   "status": 200,
+   "body": "{\"response\": \"answered\", \"solved\": false, \"incorrect_guess\": null, \"decryption_key\": null, \"time_end\": 1700000000, \"time_end_seconds\": 119, \"_challenge_imgs\": null}",
+   "vendor": "funcaptcha",
+   "verdict": "rejected"
+  },
+  {
+   "name": "Arkose says not solved without ending the session, which is no verdict",
+   "url": "https://client-api.arkoselabs.com/fc/ca/",
+   "status": 200,
+   "body": "{\"response\": \"answered\", \"solved\": false, \"time_end\": null}",
+   "vendor": "funcaptcha",
+   "verdict": null
   }
  ]
 }

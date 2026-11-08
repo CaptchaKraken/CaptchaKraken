@@ -1,9 +1,11 @@
 import http.client
 import json
 import sys
+import subprocess
 import threading
+import time
 import types
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -81,3 +83,55 @@ def test_health_is_open_and_the_api_uses_the_server_key(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_a_server_that_crashed_while_loading_is_not_still_running(tmp_path, monkeypatch):
+    """A crashed child stays a zombie until reaped; `start` used to wait out its whole timeout on one."""
+    child = subprocess.Popen([sys.executable, "-c", "raise SystemExit(1)"])
+    pid_file = tmp_path / "vllm.pid"
+    pid_file.write_text(str(child.pid))
+    monkeypatch.setattr(server_manager, "PID_FILE", pid_file)
+
+    deadline = time.time() + 30
+    while server_manager._read_pid() is not None:
+        assert time.time() < deadline, "a dead child still reads as running"
+    child.wait()  # already reaped: Popen tolerates that
+
+
+def test_vllms_startup_batches_are_not_mistaken_for_prompts():
+    torch = pytest.importorskip("torch", exc_type=ImportError)
+    from captchakraken.pointer.vllm_plugin import is_startup_run
+
+    assert is_startup_run(torch.zeros(2048, dtype=torch.long), 49), "the memory profile's all-zero run"
+    assert is_startup_run(torch.arange(2), 49), "0.29's kernel warmup"
+    assert not is_startup_run(torch.arange(1, 800), 49), "a real prompt without markers must still fail"
+
+
+def test_a_machine_proxy_does_not_carry_calls_to_the_local_server(monkeypatch):
+    """Through a proxy, /health on 127.0.0.1 never answers: `start` then waited out its whole timeout."""
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), type("Ok", (BaseHTTPRequestHandler,), {
+        "do_GET": lambda self: (self.send_response(200), self.end_headers()),
+        "log_message": lambda self, *a: None,
+    }))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert server_manager.is_healthy(f"http://127.0.0.1:{server.server_port}/v1")
+    finally:
+        server.shutdown()
+
+
+def test_a_cold_server_loads_before_the_solve_clock_starts(monkeypatch):
+    """A model load is as long as the 45s budget: a warm start used to time out its first solve."""
+    from captchakraken import config, page_solver
+
+    calls = []
+    monkeypatch.setattr(config, "selfhost_active", lambda: {"port": 1})
+    monkeypatch.setattr(page_solver, "ensure_server", lambda url: calls.append(url) or (_ for _ in ()).throw(KeyError("stop here")))
+    monkeypatch.setattr(page_solver, "_now", lambda: pytest.fail("the clock started before the server was up"))
+    with pytest.raises(KeyError):
+        page_solver.PageSolver().solve(object())
+    assert calls

@@ -4,7 +4,7 @@ Send screenshots to `https://api.captchakraken.com/v1`. No GPU, no model
 download, no server to run.
 
 The hosted API answers the current client with **Midnight V2 4B Q4**, the same
-public weights installed by `setup.sh`. It uses the v2 pointer endpoint,
+public weights `captchakraken fetch` installs. It uses the v2 pointer endpoint,
 `POST /v1/pointer`, and the downloadable CNN element detector.
 
 An older client keeps using its registered chat-completion model because its
