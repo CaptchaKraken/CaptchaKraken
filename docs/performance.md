@@ -137,9 +137,7 @@ model — 4070 and below, older Apple **Max** chips (fine on the 4-bit model), A
 > use the **hosted API** instead — it runs the production adapter on our fleet
 > with no GPU of yours involved, at the per-response latency measured above
 > (median 1.36 s end to end, including the network). Sign in at
-> [captchakraken.com](https://captchakraken.com/signin). `setup.sh` estimates
-> your speed from your device's bandwidth (NVIDIA / AMD / Apple) and flags this
-> automatically.
+> [captchakraken.com](https://captchakraken.com/signin).
 
 ## Rate limiting & IP reputation
 

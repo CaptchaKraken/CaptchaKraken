@@ -13,10 +13,56 @@ def pinned() -> Dict[str, Any]:
         return json.load(f)
 
 
+def selfhost_path() -> Path:
+    return state_dir() / "selfhost.json"
+
+
+def runtime_dir() -> Path:
+    """The serving stack `captchakraken fetch` installs."""
+    return state_dir() / "runtime"
+
+
+@lru_cache(maxsize=1)
+def _selfhost_cached(path: str, mtime_ns: int) -> Dict[str, Any]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            values = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return values if isinstance(values, dict) else {}
+
+
+def selfhost() -> Dict[str, Any]:
+    """What `captchakraken fetch` chose, or nothing. Read through the file's mtime: every config call lands here."""
+    path = selfhost_path()
+    try:
+        return _selfhost_cached(str(path), path.stat().st_mtime_ns)
+    except OSError:
+        return {}
+
+
+selfhost.cache_clear = _selfhost_cached.cache_clear  # type: ignore[attr-defined]
+
+
+def _selfhost_url(values: Dict[str, Any]) -> str:
+    return f"http://127.0.0.1:{values.get('port')}/v1"
+
+
+def selfhost_active() -> Dict[str, Any]:
+    """`selfhost()` unless the caller pointed this process at another endpoint, which then owns every other setting."""
+    values = selfhost()
+    if not values:
+        return {}
+    explicit = os.getenv("VLLM_BASE_URL")
+    return values if not explicit or explicit.rstrip("/") == _selfhost_url(values) else {}
+
+
 def base_url() -> str:
-    """Env, then the credentials file, then localhost: a camoufox user who signed up through the MCP had a valid key and no endpoint, so every solve dialled a local port."""
+    """Env, then what `fetch` set up, then the credentials file, then localhost: a camoufox user who signed up through the MCP had a valid key and no endpoint, so every solve dialled a local port."""
+    active = selfhost_active()
     return (
         os.getenv("VLLM_BASE_URL")
+        or (_selfhost_url(active) if active else "")
         or _base_url_from_credentials_file()
         or f"http://localhost:{port()}/v1"
     )
@@ -100,8 +146,10 @@ def _base_url_from_credentials_file() -> str:
 
 
 def api_key() -> str:
+    # The local server's key first: a hosted key left in the environment could only earn a 401 from it.
     return (
-        os.getenv("CAPTCHA_KRAKEN_API_KEY")
+        selfhost_active().get("key")
+        or os.getenv("CAPTCHA_KRAKEN_API_KEY")
         or os.getenv("VLLM_API_KEY")
         or _key_from_credentials_file()
         or "EMPTY"
@@ -115,7 +163,7 @@ def _registry_default(field: str) -> Optional[str]:
 
         models = prompts.registered_models()
         entry = None
-        pin = os.getenv("CAPTCHA_LORA_ADAPTER") or os.getenv("CAPTCHA_LORA_NAME")
+        pin = os.getenv("CAPTCHA_LORA_ADAPTER") or os.getenv("CAPTCHA_LORA_NAME") or selfhost_active().get("model")
         if pin:
             entry = models.get(prompts.canonical_model_id(pin) or "")
         if entry is None:
@@ -127,14 +175,14 @@ def _registry_default(field: str) -> Optional[str]:
 
 
 def base_model() -> str:
-    return os.getenv("CAPTCHA_BASE_MODEL") or _registry_default("base_model") \
+    return os.getenv("CAPTCHA_BASE_MODEL") or selfhost_active().get("model") or _registry_default("base_model") \
         or pinned()["base_model"]
 
 
 def lora_adapter() -> str:
     from . import prompts
 
-    return (os.getenv("CAPTCHA_LORA_ADAPTER") or prompts.latest_model()
+    return (os.getenv("CAPTCHA_LORA_ADAPTER") or selfhost_active().get("model") or prompts.latest_model()
             or pinned()["lora_adapter"])
 
 
@@ -148,6 +196,8 @@ def lora_name() -> str:
     pin = os.getenv("CAPTCHA_LORA_NAME")
     if pin:
         return pin
+    if selfhost_active():
+        return _registry_default("lora_name") or pinned()["lora_name"]
     if is_hosted_endpoint():
         hosted = _hosted_default_name()
         if hosted:
@@ -178,11 +228,26 @@ def _hosted_default_name() -> Optional[str]:
 
 
 def port() -> int:
-    return int(os.getenv("VLLM_PORT", "8000"))
+    return int(os.getenv("VLLM_PORT") or selfhost().get("port") or 8000)
 
 
 def gpu_memory_utilization() -> float:
-    return float(os.getenv("VLLM_GPU_MEMORY_UTILIZATION", "0.80"))
+    return float(os.getenv("VLLM_GPU_MEMORY_UTILIZATION") or selfhost_active().get("gpu_memory_utilization") or 0.80)
+
+
+def max_cudagraph_capture_size() -> Optional[int]:
+    """vLLM reserves memory for a compiled graph per batch size up to this; unset leaves vLLM's own default."""
+    value = os.getenv("VLLM_MAX_CUDAGRAPH_CAPTURE_SIZE", "").strip() or selfhost_active().get("max_cudagraph_capture_size")
+    return int(value) if value else None
+
+
+def serve_model() -> str:
+    """What the server loads: `fetch`'s download directory, which needs no Hub, or the repo id."""
+    return os.getenv("CAPTCHA_BASE_MODEL") or selfhost_active().get("model_path") or base_model()
+
+
+def pointer_detector() -> Optional[str]:
+    return os.getenv("CAPTCHA_POINTER_DETECTOR") or selfhost_active().get("detector")
 
 
 def max_model_len() -> int:

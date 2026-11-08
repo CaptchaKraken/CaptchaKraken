@@ -93,29 +93,26 @@ One command installs **Midnight V2 4B Q4**, its element detector, and the tested
 vLLM stack. Use a CUDA GPU with at least 8 GB of free VRAM.
 
 ```bash
-git clone https://github.com/CaptchaKraken/CaptchaKraken
-cd CaptchaKraken
-./setup.sh
-source captchakraken.env
+npx captchakraken fetch       # or: pipx run captchakraken fetch
+captchakraken demo
 ```
 
-The server starts automatically on the first solve and stays up. To manage it:
+`fetch` asks which model, which GPU and how the server should start, then installs,
+downloads and starts everything. It exports nothing. To manage the server:
 
 ```bash
-captchakraken server start    # background, waits until healthy
-captchakraken server status   # endpoint + which model is served
-captchakraken server stop
+captchakraken start           # waits until healthy
+captchakraken status          # endpoint, model, GPU and startup mode
+captchakraken stop            # stays off until `start`, across reboots and solves
 ```
 
-Useful flags:
+With no terminal, an agent passes the answers as flags:
 
 | Command | Effect |
 |---|---|
-| `./setup.sh --quant q4\|bf16` | Select Q4 (default) or full precision |
-| `./setup.sh --download-only` | Only download weights |
-| `./setup.sh --start` | Start the server during installation |
-| `./setup.sh --update` | Upgrade the serving stack |
-| `captchakraken fetch` | Update from the installed CLI |
+| `captchakraken fetch --yes` | Previous answers, then the defaults |
+| `captchakraken fetch --model TwilightV2-2B --gpu 0 --startup first-solve` | Choose explicitly |
+| `captchakraken fetch --dry-run` | Show what an update would change |
 
 The merged model serves `POST /v1/pointer`. GGUF builds are for advanced
 llama.cpp integrations: stock Ollama cannot evaluate v2's external pointer heads.
@@ -279,7 +276,7 @@ Advanced — only to change **which** model is served:
 | `CAPTCHA_LORA_ADAPTER` | Model repository used for downloads and metadata | `CaptchaKraken/MidnightV2-4B-q4` |
 | `CAPTCHA_LORA_REVISION` | Model git revision | `main` |
 | `CAPTCHA_LORA_NAME` | Name the client sends as `model` | `captcha-pointer` |
-| `CAPTCHA_POINTER_DETECTOR` | v2 CNN element detector | path written by `setup.sh` |
+| `CAPTCHA_POINTER_DETECTOR` | v2 CNN element detector | set by `captchakraken fetch` |
 | `VLLM_PORT` | Local server port | `8000` |
 | `VLLM_GPU_MEMORY_UTILIZATION` | Fraction of VRAM vLLM may use | `0.80` |
 | `VLLM_EXTRA_ARGS` | Extra flags for the local server | empty |
@@ -355,7 +352,7 @@ Common setup problems:
 |---|---|---|
 | `Connection refused` on port 8000 | Hosted key set, endpoint not set | Set `VLLM_BASE_URL`, or run MCP `create_api_key` |
 | vLLM starts when you did not want it | Endpoint is localhost | Set `VLLM_BASE_URL`, or `CAPTCHA_KRAKEN_AUTOSTART=0` |
-| 401 from a local server | Key not forwarded to the CLI | `source captchakraken.env` first |
+| 401 from a local server | `VLLM_BASE_URL` names another server | Unset it, or set that server's key |
 | Solves are wrong on 4×4 grids | Custom client, no cell numbers drawn | See below |
 
 ---
@@ -390,7 +387,7 @@ client unless you have a reason not to.
   registered chat-completion model because the protocols are not interchangeable.
 - **Never print an API key** into a transcript, a log, or a commit. Use the MCP
   flow, which writes it to disk instead.
-- **Do not commit `captchakraken.env`.** It holds a key and is gitignored.
+- **Do not commit `~/.captchakraken/selfhost.json`.** It holds a key.
 - **Respect the license.** CaptchaKraken and all its models are LGPL-3.0-only;
   commercial use and integration are permitted under those terms. See
   [docs/licensing.md](./docs/licensing.md).

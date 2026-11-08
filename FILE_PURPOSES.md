@@ -6,7 +6,7 @@ before editing, or are planning a change that spans modules.
 
 **Tracked means `git ls-files`.** Build output (`js/dist/`, `js/python/`,
 `python/build/`), dependencies (`node_modules/`, `python/.venv/`), caches and
-generated files like `captchakraken.env` are gitignored and get no entry, ever.
+generated files like `captchakraken.env` from older releases are gitignored and get no entry, ever.
 Add or delete a tracked file and this list changes in the same commit.
 
 This file answers "where does X live?". Its companion answers "does a helper for
@@ -78,7 +78,6 @@ answers with a frame number the driver then waits for on screen.
 | `repomix.config.json` | What goes into `repomix-output.md`: the source of all three ports, comments stripped, `.gitignore` honoured so no build output can reach the map. |
 | `README.md` | The landing page: what it is, the demo clips and their counts, install, quickstart, and where the docs are. |
 | `TRIBAL_KNOWLEDGE.md` | The decisions taken in this repo and why they were taken. |
-| `setup.sh` | One command to self-host: install the tested vLLM stack, download Midnight V2 4B Q4 and its detector, and write a sourceable `captchakraken.env`. |
 
 ## `.github/`
 
@@ -125,6 +124,7 @@ answers with a frame number the driver then waits for on screen.
 | `js/tsconfig.json` | The build: `src/` → `dist/`, declarations on. Excludes `*.test.ts` so tests never reach `dist/` and `node:test` never enters the published type surface. |
 | `js/tsconfig.test.json` | The inverse: compiles every test **and everything it imports** to `.test-build/` for `node --test`, so adding a test cannot silently leave it unrun. |
 | `js/scripts/copy-python.mjs` | Build step that copies repo-root `python/` into `js/python/`, because npm can only pack files inside the package root and the engine has exactly one source of truth. Skips tests, venvs and caches. |
+| `js/bin/captchakraken.js` | `npx captchakraken`: forwards to the Python engine's command in the package's own environment. |
 | `js/scripts/setup-python.js` | The `postinstall`: create a venv beside the bundled engine and install it, so `captchakraken` works out of the box. Opt out with `CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP=1`; force an interpreter with `CAPTCHA_KRAKEN_PYTHON`. |
 
 ### `js/src/` — runtime
@@ -292,6 +292,8 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/clipvideo.py` | Turns a recorded clip into the frames a video-generation model watches, and maps the time it answers with back to the recorded frame the driver waits for. A verbatim port of the module the model was trained with. |
 | `python/src/captchakraken/humanize.py` | The Python mirror of `js/src/humanize.ts`: one pluggable object per input device. |
 | `NOTICE` | Third-party licence notices — currently Cursory (LGPL), used as an installed dependency and never vendored. |
+| `python/src/captchakraken/selfhost.py` | `captchakraken fetch`: ask for a model, GPU and startup mode in the terminal, then install the serving stack, download the weights, record the choices in `selfhost.json` and start the server. |
+| `python/src/captchakraken/demo.py` | `captchakraken demo`: solve the vendors' public demo pages through whatever this install points at, from its own small browser environment. |
 | `python/src/captchakraken/server_manager.py` | Hands-off local vLLM lifecycle: start in the background and wait until healthy, run in the foreground, stop, report status, and auto-start on the first solve unless told not to. |
 | `python/src/captchakraken/updater.py` | `captchakraken fetch`: pull newer weights, upgrade the serving stack, and restart a running local server so the change takes effect. |
 | `python/src/captchakraken/errors.py` | `CaptchaKrakenAPIError` and its stable codes: the endpoint may be a local vLLM or the hosted API, and a refusal from the latter has to arrive as something a caller can branch on. |
@@ -351,7 +353,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_private_models.py` | The third availability value: private weights are never a download and never a substitution, however the request is phrased. |
 | `python/tests/test_pinned_model.py` | The pinned adapter entry is internally consistent and resolvable to a prompt generation. |
 | `python/tests/test_a_pin_reads_its_own_entry.py` | A pinned model's fields must be read from its own registry entry, not from whichever entry is latest. |
-| `python/tests/test_setup_sh_model_ids.py` | `setup.sh` hardcodes the adapter it downloads, so the ids in the script and in the registry must agree. |
+| `python/tests/test_fetch_offers_only_what_loads.py` | `captchakraken fetch`: the models it offers load, the choices reach the server and the client with no environment variables, and `stop` stays stopped. |
 | `python/tests/test_min_pixels_upscale.py` | Images below the resolution the adapters were trained at are upscaled, because a too-small image is answered badly rather than refused. |
 | `python/tests/test_pixel_parser.py` | Parser robustness on the click and drag path: the model's output has to survive every shape it legitimately comes back in. |
 | `python/tests/test_expert_routing.py` | Which expert a puzzle routes to, including that an unknown puzzle does not silently pick one. |

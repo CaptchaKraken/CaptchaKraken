@@ -77,8 +77,8 @@ If `CAMOUFOX_BINARY` is unset, camoufox-js falls back to its default binary
 ### Point at a model
 
 ```bash
-source ../captchakraken.env       # VLLM_BASE_URL + CAPTCHA_KRAKEN_API_KEY
-# (produced by ../setup.sh; or export VLLM_BASE_URL yourself for a remote server)
+npx captchakraken fetch           # self-host; nothing to export afterward
+# or export VLLM_BASE_URL yourself for a remote server
 ```
 
 Running the model locally on **Ollama** or **LM Studio**? Those load GGUF, so

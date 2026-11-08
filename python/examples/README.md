@@ -40,7 +40,7 @@ If `CAMOUFOX_BINARY` is unset, camoufox falls back to its default binary
 ### Point at a model
 
 ```bash
-source ../captchakraken.env       # VLLM_BASE_URL + CAPTCHA_KRAKEN_API_KEY
+captchakraken fetch               # self-host; nothing to export afterward
 ```
 
 Running the model locally on **Ollama** or **LM Studio** instead? Those load

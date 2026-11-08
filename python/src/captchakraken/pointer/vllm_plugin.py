@@ -25,6 +25,13 @@ def register() -> None:
         ModelRegistry.register_model(ARCHITECTURE, "captchakraken.pointer.vllm_plugin:PointerQwen3_5")
 
 
+def is_startup_run(ids, markers: int) -> bool:
+    """vLLM's own start-up batches carry no prompt: its memory profile sends all-zero tokens, and
+    0.29's kernel warmup sends `range(2)`. Neither is long enough, or real enough, to hold the question
+    markers. A real prompt that lost its markers is long, so it still fails in `Positions`."""
+    return not bool(ids.any()) or ids.numel() < markers
+
+
 def _model_class():
     import torch
     from vllm.model_executor.layers.pooler.abstract import Pooler
@@ -59,10 +66,8 @@ def _model_class():
                 if h is None:   # a prefill chunk; the request is not finished yet
                     out.append(None)
                     continue
-                if not bool(ids.any()):
-                    # vLLM's start-up profile run: all-zero dummy tokens, no prompt. It
-                    # sizes memory from this output, so it gets one of the real size.
-                    # A real prompt without its markers still fails in Positions.
+                if is_startup_run(ids, len(L.QUESTIONS)):
+                    # vLLM sizes memory from this output, so it gets one of the real size.
                     out.append(torch.zeros(L.PACKED + TRAILER, device=h.device))
                     continue
                 if h.shape[0] != ids.shape[0]:

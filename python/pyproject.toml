@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "captchakraken"
-version = "4.0.0"
+version = "4.1.0"
 description = "Captcha-solving engine and CLI: a v2 pointer model and CNN element detector for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"

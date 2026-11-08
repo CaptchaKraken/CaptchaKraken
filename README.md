@@ -197,19 +197,16 @@ stubborn captcha cannot run up an unbounded bill.
 
 ### Option 2 — Self-host
 
-One command installs the v2 pointer server and downloads **Midnight V2 4B Q4**
-by default, together with its element detector:
+Pick a model, a GPU and how the server should start, and it does the rest:
 
 ```bash
-git clone https://github.com/CaptchaKraken/CaptchaKraken
-cd CaptchaKraken
-./setup.sh
-source captchakraken.env
+npx captchakraken fetch          # or: pipx run captchakraken fetch
+captchakraken demo
 ```
 
-Use a CUDA GPU with at least **8 GB of free VRAM**. Choose the bf16 checkpoint
-with `./setup.sh --quant bf16`. The server starts automatically on the first
-solve and stays up. Hardware notes, server commands, and updating:
+There is nothing to export. `captchakraken start` and `captchakraken stop` turn the
+server on and off. It needs an NVIDIA GPU on Linux, and **Midnight V2 4B Q4**, the
+default, runs on an 8 GB card. Hardware notes and the rest of the commands:
 **[docs/self-hosting.md](./docs/self-hosting.md)**.
 
 > v2 uses a merged pointer model and `/v1/pointer`, not the older chat LoRA
@@ -399,7 +396,7 @@ strict load, so use Twilight V2 or Midnight V2 until they are republished.
 The separate [CNN element detectors](https://huggingface.co/CaptchaKraken/CaptchaKrakenV2-CNN-large)
 are included in the same collection.
 
-`./setup.sh` installs the merged Q4 model, its pointer heads, and the detector.
+`captchakraken fetch` installs a merged model, its pointer heads, and the detector.
 The LoRA repositories are for further training. GGUF repositories include the
 vision projector and pointer heads for custom llama.cpp integrations; stock
 Ollama and `llama-server` alone cannot evaluate those heads and are not a
@@ -411,8 +408,8 @@ They use a different prompt protocol and cannot serve a v2 client.
 | If | Use |
 |---|---|
 | You have no GPU | the [hosted API](./docs/hosted-api.md) |
-| You want the supported one-command setup | **Midnight V2 4B Q4** — `./setup.sh` |
-| You want full precision | `./setup.sh --quant bf16` |
+| You want the supported one-command setup | **Midnight V2 4B Q4** — `npx captchakraken fetch` |
+| You want full precision | Midnight V2 4B, from the same menu |
 | You are building a custom llama.cpp runtime | a **v2 GGUF** repository |
 
 Serving details: **[docs/self-hosting.md](./docs/self-hosting.md)**.
@@ -480,7 +477,6 @@ Reproduce it yourself — the demos in this repo drive a real browser end to end
 cd js
 npm install && npm i -D camoufox-js tsx   # example-only deps
 npx camoufox-js fetch                     # one-time browser download
-source ../captchakraken.env               # written by ./setup.sh
 
 npx tsx examples/demoRecaptcha.ts                      # the demo page above
 npx tsx examples/demoRecaptcha.ts https://your.site/   # or your own page
@@ -499,7 +495,7 @@ Most of the detail lives in the docs hub — start at **[docs/](./docs/README.md
 | Guide | What's in it |
 |---|---|
 | ☁️ [Hosted API](./docs/hosted-api.md) | Sign in, keys, pricing, per-session billing, error codes |
-| 📦 [Self-hosting](./docs/self-hosting.md) | `setup.sh`, model sizes, server management, config, **updating** |
+| 📦 [Self-hosting](./docs/self-hosting.md) | `captchakraken fetch`, model sizes, server management, config, **updating** |
 | 🚀 [Usage](./docs/usage.md) | Install, the 4 browser frameworks, **mouse / mobile / no humanization**, the Python CLI, migrating from v1 |
 | ⚙️ [How it works](./docs/how-it-works.md) | The solve pipeline, `find_grid`, the freshness guard, dedup |
 | 📊 [Benchmarks](./docs/benchmarks.md) | The canonical numbers: real captchas in a browser, and per-puzzle model accuracy |

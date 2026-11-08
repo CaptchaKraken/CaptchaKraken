@@ -226,7 +226,7 @@ Playwright-compatible launcher (vanilla `playwright`, `patchright`,
 `camoufox-js`, …). Install whichever one you want before driving a real solve.
 
 To run a solver against a model you'll need a vLLM server — see
-[`setup.sh`](setup.sh) and [docs/self-hosting.md](docs/self-hosting.md).
+[docs/self-hosting.md](docs/self-hosting.md).
 
 ## Tests & CI
 

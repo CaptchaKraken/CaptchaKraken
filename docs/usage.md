@@ -163,8 +163,8 @@ the live reCAPTCHA demo.
 In every example the solver reads `VLLM_BASE_URL` + `CAPTCHA_KRAKEN_API_KEY`
 from the environment, or from `~/.captchakraken/credentials` if they are unset.
 Set them up either way first — [Hosted API](./hosted-api.md) (no GPU) or
-[Self-hosting](./self-hosting.md#configuration) (`setup.sh`, then
-`source captchakraken.env`). Then `solve()` does detect → grid → click → verify.
+[Self-hosting](./self-hosting.md) (`npx captchakraken fetch`, which needs no
+environment variables). Then `solve()` does detect → grid → click → verify.
 
 ### Playwright (vanilla)
 
@@ -567,7 +567,7 @@ npm install        # builds the solver + a local CLI venv (postinstall)
 
 - The `apiProvider` / `model` / `apiKey` options for Gemini/OpenRouter/Ollama are
   **removed**. v2 talks only to a vLLM server.
-- Set **`VLLM_BASE_URL`** and **`CAPTCHA_KRAKEN_API_KEY`** (or run `setup.sh`,
+- Set **`VLLM_BASE_URL`** and **`CAPTCHA_KRAKEN_API_KEY`** (or run `captchakraken fetch`,
   or point them at the [hosted API](./hosted-api.md)) instead of provider keys.
 - `new CaptchaKrakenSolver()` now needs no model/provider — it defaults to the
   grid LoRA.
