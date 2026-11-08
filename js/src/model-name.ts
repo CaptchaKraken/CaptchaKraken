@@ -33,12 +33,13 @@ export function isHostedEndpoint(baseUrl: string | undefined,
 export const LEGACY_MODEL_WARNING = "The hosted API answers the model name '{model}' with an older model. Remove the model "
   + 'pin (CAPTCHA_LORA_NAME or the model option) to use the current one.';
 
-/** Every name a current client puts on the wire to the hosted API: each routing alias and its expert arms. */
+/** Every name a current client puts on the wire to the hosted API: each routing alias and its expert arms, and the alias of the hosted default (`captcha-pointer` has no arms, and a client sends it unasked). */
 export function routedNames(cliRoot: string = getBundledCliRoot()): Set<string> {
   const out = new Set<string>();
   const reg = readJson(cliRoot, 'models.json');
   for (const [alias, id] of Object.entries(reg?.served_aliases ?? {})) {
     if (alias.startsWith('_') || typeof id !== 'string') continue;
+    if (id === reg?.hosted_default) out.add(alias);
     const declared: Record<string, unknown> = reg?.models?.[id]?.experts ?? {};
     const arms = Object.values(PromptFamily).map((family) => declared[family])
       .filter((n): n is string => typeof n === 'string' && n !== '');

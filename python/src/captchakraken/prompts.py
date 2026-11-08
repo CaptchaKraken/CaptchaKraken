@@ -498,11 +498,15 @@ LEGACY_MODEL_WARNING = ("The hosted API answers the model name '{model}' with an
 
 
 def routed_names() -> set:
-    """Every name a current client puts on the wire to the hosted API: each routing alias and its expert arms."""
+    """Every name a current client puts on the wire to the hosted API: each routing alias and its expert arms,
+    and the alias of the hosted default (`captcha-pointer` has no arms, and a client sends it unasked)."""
     out = set()
-    for alias in served_aliases():
+    default = hosted_default_model()
+    for alias, target in served_aliases().items():
         if alias.startswith("_"):
             continue
+        if default and target == default:
+            out.add(alias)
         arms = experts(alias)
         if arms:
             out.add(alias)

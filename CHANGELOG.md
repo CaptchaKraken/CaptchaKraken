@@ -14,6 +14,11 @@ semantic versioning; v2 is a major, **breaking** release.
   stop the server and `captchakraken demo --help` started building the demo
   environment; each command's `--help` now prints its usage and does nothing
   else.
+- **Hosted solves no longer warn about an "older model".** Since 4.0.0, every
+  hosted solve printed "The hosted API answers the model name 'captcha-pointer'
+  with an older model". That name is the client's own default, and the hosted
+  API answers it with the current pointer model. Nothing was mis-routed; the
+  warning was wrong.
 
 ## [4.1.0] - 2026-11-07
 
