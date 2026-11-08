@@ -3,7 +3,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveLoraName, isHostedEndpoint, getBundledCliRoot } from './model-name';
+import { resolveLoraName, isHostedEndpoint, getBundledCliRoot, isLegacyHostedName } from './model-name';
 
 const CLI_ROOT = getBundledCliRoot();
 const REG = JSON.parse(fs.readFileSync(
@@ -15,6 +15,13 @@ test('our endpoint is asked for the hosted default', () => {
   const repo = REG.served_aliases[name];
   assert.equal(repo, REG.hosted_default,
     `${name} should be an alias of ${REG.hosted_default}`);
+});
+
+test('the name it is asked for is not called an older model', () => {
+  // 4.0.0-4.1.0 warned on every hosted solve: the default alias has no expert arms.
+  const name = resolveLoraName({ cliRoot: CLI_ROOT, env: {}, baseUrl: HOSTED });
+  assert.equal(isLegacyHostedName(name, CLI_ROOT), false);
+  assert.equal(isLegacyHostedName('captcha', CLI_ROOT), true);
 });
 
 test('and asked for the v2 pointer model', () => {

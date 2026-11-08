@@ -22,11 +22,22 @@ def _fresh(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_the_routed_names_are_each_routing_alias_and_its_arms():
+def test_the_routed_names_are_each_routing_alias_and_its_arms_and_the_default():
     routed = prompts.routed_names()
+    default = prompts.hosted_default_model()
     for alias in routed:
-        assert prompts.experts(alias) or any(alias in prompts.experts(a).values() for a in routed)
+        assert (prompts.experts(alias) or any(alias in prompts.experts(a).values() for a in routed)
+                or prompts.served_aliases().get(alias) == default)
     assert not prompts.is_legacy_hosted_name(next(iter(routed)))
+
+
+def test_a_hosted_client_with_no_pin_hears_nothing(monkeypatch, capsys):
+    # 4.0.0-4.1.0 warned on every hosted solve: the default `captcha-pointer` has no arms.
+    from captchakraken import config
+    monkeypatch.setenv("VLLM_BASE_URL", HOSTED)
+    monkeypatch.setattr(config, "selfhost", lambda: {})
+    planner.ActionPlanner(base_url=HOSTED, api_key="SYNTHETIC")
+    assert "older model" not in capsys.readouterr().err
 
 
 def test_a_name_with_no_route_is_warned_about_once(capsys):
