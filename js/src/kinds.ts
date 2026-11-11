@@ -22,6 +22,7 @@ export const Vendor = {
   DINGXIANG: 'dingxiang',
   FUNCAPTCHA: 'funcaptcha',
   PROTON: 'proton',
+  DATADOME: 'datadome',
   UNKNOWN: 'unknown',
 } as const;
 export type Vendor = (typeof Vendor)[keyof typeof Vendor];
