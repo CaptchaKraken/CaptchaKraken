@@ -190,3 +190,27 @@ def test_a_generation_2_piece_with_no_track_is_carried_onto_its_slot():
     _, s = _run(board, legacy, scope=_OneControl(board, PIECE_SELECTORS))
     x, y = board.centre(0)
     assert abs(x + s[0] - board.goal[0]) <= 2.0 and abs(y + s[1] - board.goal[1]) <= 2.0
+
+
+
+class _StoppedHandle(CarriedBoard):
+    """A handle that is its own part, on a track that ends `stop` px to the right: past it the handle stays put,
+    wherever the pointer goes. DataDome's slide-to-the-end bar is one."""
+
+    def __init__(self, stop: float, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.stop = stop
+
+    def render(self, s):
+        dx, dy = s if isinstance(s, (list, tuple)) else (s, 0.0)
+        return super().render((min(dx, self.stop), dy))
+
+
+def test_a_handle_at_the_end_of_its_track_is_let_go_not_pushed_past_it():
+    """A goal past the stop cannot be reached; once a push moves nothing, the pointer goes back to where the push
+    began and lets go. A vendor may cancel a drag whose pointer strays: DataDome snapped its handle home."""
+    board = _StoppedHandle(stop=100.0)
+    x, y = board.centre(0)
+    pointer, s = _run(board, _slide(board, (x, y), (x + 117.0, y)))
+    assert (pointer.presses, pointer.releases) == (1, 1)
+    assert s[0] <= 120.0, f"pushed {s[0]:.0f}px past the press for a handle that stops at {board.stop:.0f}px"

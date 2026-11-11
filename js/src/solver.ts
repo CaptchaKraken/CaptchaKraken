@@ -172,6 +172,17 @@ const SLIDE_MAX_CORRECTIONS = 3;
 // The nudge that shows the tracker what the handle moves: enough to separate the part from still ground, little
 // enough that a piece resting against the board's edge stays on it. Mirrors page_solver.py SLIDE_PROBE_PX.
 const SLIDE_PROBE_PX = 8;
+// A part that moves less than this while the handle travels more than half a probe has reached the end of its track:
+// pushing on only carries the pointer away from the handle. Mirrors page_solver.py SLIDE_STALL_PX.
+const SLIDE_STALL_PX = 1;
+const slideOffset = (s: number | [number, number]): [number, number] => (Array.isArray(s) ? [s[0], s[1]] : [s, 0]);
+/** Did the handle travel while the part stayed put? Each side is the travel and the part's point of one look. */
+const slideStalled = (before: [number | [number, number], [number, number]], now: [number | [number, number], [number, number]], k: number): boolean => {
+  const [ax, ay] = slideOffset(before[0]);
+  const [bx, by] = slideOffset(now[0]);
+  const moved = Math.hypot(now[1][0] - before[1][0], now[1][1] - before[1][1]);
+  return Math.hypot(bx - ax, by - ay) > (SLIDE_PROBE_PX / 2) * k && moved < SLIDE_STALL_PX * k;
+};
 
 interface SlideStepRequest {
   first: string; probe: string; current: string; probe_s: number; s: number | [number, number];
@@ -2899,16 +2910,25 @@ export class CaptchaKrakenSolver {
       let look = probed;
       let s: number | [number, number] = probe * k;
       const history: SlideStepReply['observation'][] = [];
+      let last: [number | [number, number], [number, number]] | null = null;
       for (let moves = 0; ; moves++) {
         const reply = await this.slideStep({ ...ask, current: look, s, history });
         if (!reply) break;
         if (look !== probed) history.push(reply.observation);
+        const pos: [number, number] = [reply.pos[0], reply.pos[1]];
+        if (last && slideStalled(last, [s, pos], k)) {
+          console.warn('[slide] the part stopped following the handle; releasing at the end of its track');
+          const [bx, by] = slideOffset(last[0]);
+          await this.performSmoothMove(page, press[0] + bx / k, press[1] + by / k);
+          break;
+        }
+        last = [s, pos];
         if (reply.done || moves >= SLIDE_MAX_CORRECTIONS) {
           if (reply.error > ask.tol) console.warn(`[slide] releasing ${(reply.error / k).toFixed(1)}px off target`);
           break;
         }
         s = reply.next;
-        const [dx, dy] = Array.isArray(s) ? s : [s, 0];
+        const [dx, dy] = slideOffset(s);
         await this.performSmoothMove(page, press[0] + dx / k, press[1] + dy / k);
         await this.human.pause(PauseKind.PROBE);
         await this.shot(element, current, timeout);

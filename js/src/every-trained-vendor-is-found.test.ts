@@ -54,6 +54,12 @@ test('the AWS WAF card is found', async () => {
   assert.deepEqual(await detect([inline({ tag: 'div', classes: ['amzn-captcha-modal'] })]), ['awswaf', 'unknown']);
 });
 
+test('the DataDome interstitial is found by its frame', async () => {
+  const src = 'https://geo.captcha-delivery.com/captcha/?initialCid=REDACTED&hash=DEADBEEF&cid=REDACTED&t=fe'
+    + '&referer=https%3A%2F%2Fexample.com%2F&s=1&e=deadbeef&dm=cd';
+  assert.deepEqual(await detect([frame(src)]), ['datadome', 'challenge']);
+});
+
 // Measured on captchafox.com: `<div id="cf-widget-<hex>">` holds `.cf-button`, and the puzzle opens in
 // `div.cf-modal > div.cf-modal__wrap > div.cf-modal__challenge` with that box still showing.
 const CAPTCHAFOX_BOX: Measured = { tag: 'div', id: 'cf-widget-2d5fe02ef9734' };

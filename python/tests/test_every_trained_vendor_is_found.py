@@ -74,6 +74,13 @@ def test_proton_is_found_on_the_api_host_and_under_the_apps_own_api():
         assert _detect([_frame(src)]) == (Vendor.PROTON, FrameRole.UNKNOWN), src
 
 
+
+def test_the_datadome_interstitial_is_found_by_its_frame():
+    src = ("https://geo.captcha-delivery.com/captcha/?initialCid=REDACTED&hash=DEADBEEF&cid=REDACTED&t=fe"
+           "&referer=https%3A%2F%2Fexample.com%2F&s=1&e=deadbeef&dm=cd")
+    assert _detect([_frame(src)]) == (Vendor.DATADOME, FrameRole.CHALLENGE)
+
+
 def test_the_aws_waf_card_is_found():
     assert _detect([_inline(Measured("div", classes=("amzn-captcha-modal",)))]) == (Vendor.AWSWAF, FrameRole.UNKNOWN)
 

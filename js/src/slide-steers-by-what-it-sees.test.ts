@@ -40,7 +40,7 @@ interface Rig {
  * the pointer exactly as the real one reads it off the pixels, and plans with the ratio it was told about.
  */
 async function drive(action: any, opts: { dpr?: number; ratio?: number; grabbed?: boolean; lost?: boolean;
-  scope?: any } = {}): Promise<Rig> {
+  scope?: any; stop?: number } = {}): Promise<Rig> {
   const dpr = opts.dpr ?? 1;
   const ratio = opts.ratio ?? 1.27;
   const rig: Rig = { presses: [], moves: [], releases: 0, requests: [], asked: [] };
@@ -61,9 +61,11 @@ async function drive(action: any, opts: { dpr?: number; ratio?: number; grabbed?
     if (opts.lost) return { error: 'nothing moved between the press and the probe' };
     const travel = ((at[0] - down![0]) * dpr);
     const dy = (at[1] - down![1]) * dpr;
+    // `stop`: the track ends that many CSS px into the travel, and the part goes no further.
+    const moved = opts.stop === undefined ? travel : Math.min(travel, opts.stop * dpr);
     // Without a seed (generation 2) the tracker follows whatever moved most: here, the piece.
     const obj: number[] = req.seed ?? [PIECE[0] * dpr, PIECE[1] * dpr];
-    const pos: [number, number] = opts.grabbed ? [obj[0] + travel, obj[1] + dy] : [obj[0] + ratio * travel, obj[1]];
+    const pos: [number, number] = opts.grabbed ? [obj[0] + moved, obj[1] + dy] : [obj[0] + ratio * moved, obj[1]];
     const error = Math.hypot(req.goal[0] - pos[0], req.goal[1] - pos[1]);
     const next = opts.grabbed ? [travel + req.goal[0] - pos[0], dy + req.goal[1] - pos[1]] : travel + (req.goal[0] - pos[0]) / ratio;
     return {
@@ -124,6 +126,16 @@ test('a carried piece is steered in two dimensions', async () => {
   const rig = await drive(carried, { grabbed: true });
   const [x, y] = rig.moves[rig.moves.length - 1];
   assert.ok(Math.abs(x - (ELEMENT.x + SLOT[0])) <= 2 && Math.abs(y - (ELEMENT.y + SLOT[1] + 20)) <= 2, `ended at ${x}, ${y}`);
+});
+
+test('a handle at the end of its track is let go where the push began, not pushed past it', async () => {
+  // DataDome's bar: the handle is its own part, the goal lies past the stop, and a drag that strays is cancelled.
+  const bar = { ...slide, handle_bounding_box: box(HANDLE), source_bounding_box: box(HANDLE),
+    target_bounding_box: box([HANDLE[0] + 117, HANDLE[1]]) };
+  const rig = await drive(bar, { grabbed: true, stop: 100 });
+  const travel = rig.moves[rig.moves.length - 1][0] - rig.presses[0][0];
+  assert.equal(rig.releases, 1);
+  assert.ok(travel <= 120, `released ${travel}px past the press for a handle that stops at 100px`);
 });
 
 test('a generation-2 slide finds its handle by selector and tracks whatever it moved', async () => {

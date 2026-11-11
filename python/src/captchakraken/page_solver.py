@@ -454,6 +454,10 @@ def _has_text(handle: Any) -> bool:
 # The nudge that shows the tracker what the handle moves: enough to separate the part from still ground, little enough
 # that a piece resting against the board's edge stays on it.
 SLIDE_PROBE_PX = 8.0
+# A part that moves less than this while the handle travels more than half a probe has reached the end of its
+# track: pushing on only carries the pointer away from the handle, and a vendor may cancel a drag that strays
+# (DataDome snapped its handle home about 110 px past the stop). Shot pixels at device scale 1.
+SLIDE_STALL_PX = 1.0
 
 # No prompt and no pictures both read as ready: waiting for `.prompt-text` to exist once paid the whole timeout
 # before every board of a challenge that draws none (tower_stack: 18s a round, 2/2 -> 0/2).
@@ -476,6 +480,18 @@ _RESOURCES_JS = """() => {
   }
   return out;
 }"""
+
+
+def _offset(s: Any) -> Tuple[float, float]:
+    """A slide travel as (dx, dy): a number runs along the track, a pair is a carried piece's own offset."""
+    return (float(s[0]), float(s[1])) if isinstance(s, (list, tuple)) else (float(s), 0.0)
+
+
+def _stalled(before: Tuple[Any, Sequence[float]], now: Tuple[Any, Sequence[float]], k: float) -> bool:
+    """Did the handle travel while the part stayed put? Each side is (travel, the part's point) of one look."""
+    (ax, ay), (bx, by) = _offset(before[0]), _offset(now[0])
+    moved = math.hypot(now[1][0] - before[1][0], now[1][1] - before[1][1])
+    return math.hypot(bx - ax, by - ay) > SLIDE_PROBE_PX / 2 * k and moved < SLIDE_STALL_PX * k
 
 
 class PageSolver:
@@ -1115,6 +1131,7 @@ class PageSolver:
                        handle=(handle[0] * k, handle[1] * k), bounds=(-handle[0] * k, (w - handle[0]) * k),
                        tol=self.config.slide_tolerance_px * k)
             look, s, history, moves = probed, probe * k, [], 0
+            last: Optional[Tuple[Any, Sequence[float]]] = None
             while True:
                 try:
                     reply = slide_step(first, probed, look, s=s, history=history, **ask)
@@ -1123,6 +1140,12 @@ class PageSolver:
                     break
                 if look is not probed:
                     history.append(reply["observation"])
+                if last is not None and _stalled(last, (s, reply["pos"]), k):
+                    _log("slider: the part stopped following the handle; releasing at the end of its track")
+                    dx, dy = _offset(last[0])
+                    self._smooth_move(page, press[0] + dx / k, press[1] + dy / k)
+                    break
+                last = (s, reply["pos"])
                 _debug(f"slider: point at ({reply['pos'][0] / k:.1f}, {reply['pos'][1] / k:.1f}), "
                        f"{reply['error'] / k:.1f}px from its target, {reply['kind']}")
                 if reply["done"] or moves >= self.config.slide_max_corrections:
@@ -1130,7 +1153,7 @@ class PageSolver:
                         _log(f"slider: releasing {reply['error'] / k:.1f}px off target")
                     break
                 s = reply["next"]
-                dx, dy = (s[0], s[1]) if reply["grabbed"] else (s, 0.0)
+                dx, dy = _offset(s)
                 self._smooth_move(page, press[0] + dx / k, press[1] + dy / k)
                 self._human.pause(PauseKind.PROBE)
                 self._screenshot(element, current, timeout_ms=timeout)
