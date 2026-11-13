@@ -263,13 +263,12 @@ def availability(model: Optional[str]) -> Availability:
 
 
 def is_licensed(model: Optional[str]) -> bool:
-    # PRIVATE is not a softer LICENSED: refusing a licensed model early replaces a RepositoryNotFoundError that
-    # reads as "not logged in" with the truth, but refusing a private one would stop our own token pulling weights.
+    # A licensed model's Hub refusal means "buy a licence", not "log in": fetch words it differently from a private one.
     return availability(model) == Availability.LICENSED
 
 
 def requires_auth(model: Optional[str]) -> bool:
-    return availability(model) == Availability.PRIVATE
+    return availability(model) in (Availability.PRIVATE, Availability.LICENSED)
 
 
 @dataclass

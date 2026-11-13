@@ -351,7 +351,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_api_error_is_exported.py` | The two ports expose the same error surface: what TypeScript exports, Python must too. |
 | `python/tests/test_api_errors.py` | A hosted-API refusal must arrive as a typed error with a code and a fix, not as an unreadable stack from deep in the client. |
 | `python/tests/test_credentials_file.py` | The key the MCP flow writes is read from the state directory, at the mode it was written with, and is not required in the environment. |
-| `python/tests/test_licensed_models.py` | A model whose weights are not on the Hub must be reported as licensed, not offered as a download. |
+| `python/tests/test_licensed_models.py` | A licensed model downloads with the holder's own Hub token, and a refusal from the Hub names where the licence is sold. |
 | `python/tests/test_private_models.py` | The third availability value: private weights are never a download and never a substitution, however the request is phrased. |
 | `python/tests/test_pinned_model.py` | The pinned adapter entry is internally consistent and resolvable to a prompt generation. |
 | `python/tests/test_a_pin_reads_its_own_entry.py` | A pinned model's fields must be read from its own registry entry, not from whichever entry is latest. |

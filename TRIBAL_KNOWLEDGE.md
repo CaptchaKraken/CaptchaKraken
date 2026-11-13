@@ -225,10 +225,19 @@ broken registry falls through to `pinned_model.json`; it never throws.
 The day the generation-2 `text` family reached ckgate without a marker,
 refusing it cost every distorted-text solve in production for a day. The other
 way round, a benchmark that silently measured the generalist under a bad pin is
-a number nobody can catch. `private` is not a softer `licensed`: refusing early
-on a licensed model replaces a `RepositoryNotFoundError` that reads as "you are
-not logged in" with the truth, but doing the same to a private model would stop
-our own admin token from pulling weights it is entitled to.
+a number nobody can catch.
+
+**`fetch` never refuses a licensed model up front; the Hub decides.** Licensed
+weights sit in a gated repo, and only the Hub knows whether this token's
+account holds a licence today, so a client-side refusal would stop a paying
+holder. A licensed download runs in-process rather than through `hf download`
+so the Hub's refusal arrives as an exception, not an exit code: a 401, a 403 or
+a `RepositoryNotFoundError` (which `GatedRepoError` is) becomes
+`LicensedModelError` naming the plans page, because "repository not found"
+reads as "you are not logged in". `snapshot_download` wraps a 403 on its repo
+lookup in `LocalEntryNotFoundError`, so the check walks `__cause__`. Anything
+else, an outage included, is re-raised untouched rather than blamed on the
+licence.
 
 **`DEFAULT_PIXEL_BUDGET` is a floor on area, not a resize.** On a 277x285 GeeTest board,
 predictions landed 80-105 px from the hand label at native size and 1-4 px once

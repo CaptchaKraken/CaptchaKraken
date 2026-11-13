@@ -89,6 +89,8 @@ serve = [
   "huggingface_hub==1.30.0",
 ]
 dev = [
+  # The licensed-model fetch tests raise the Hub's own refusal types.
+  "huggingface_hub==1.30.0",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
   "mypy==2.3.1",
