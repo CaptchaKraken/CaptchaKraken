@@ -3,6 +3,24 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [4.2.0] - 2026-11-12
+
+### Added
+
+- **DataDome.** Its slide-to-the-end interstitial is found by its
+  captcha-delivery.com frame and solved; a refused session ("You have been
+  blocked") raises `blocked` instead of being asked about again.
+
+### Fixed
+
+- **A slide that reaches the end of its track is let go.** Both ports notice a
+  push that moves the pointer but not the part, return to where it began and
+  release, instead of dragging past the stop (DataDome snaps such a drag home).
+- **Yidun's jigsaw is shot with its slider bar.** The bar sits outside the
+  picture, so the model was answering without the handle in view; the shot now
+  widens to the handle's track. A piece that trails its handle is found again by
+  searching the whole rail.
+
 ## [4.1.1] - 2026-11-07
 
 ### Fixed
