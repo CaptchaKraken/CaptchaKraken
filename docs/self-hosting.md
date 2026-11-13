@@ -145,6 +145,22 @@ The client and all CaptchaKraken models are LGPL-3.0-only.
 `captchakraken fetch --weights-only --no-restart` pulls weight revisions; restart
 the server afterward to load them.
 
+## Licensed weights
+
+Abyss is served through the hosted API to every account. Its weights are in a
+gated Hugging Face repo, `CaptchaKraken/Abyss`, open to Abyss Licence holders:
+buy a licence at <https://captchakraken.com/plans>, add your Hugging Face
+username on that page, then sign in as that account and fetch:
+
+```bash
+hf auth login
+CAPTCHA_LORA_ADAPTER=CaptchaKraken/Abyss captchakraken fetch --weights-only --no-restart
+```
+
+`--dry-run` lists the repo under `needs_auth`. If the Hub refuses the download
+(no token, or an account without access), `fetch` stops and says where to get a
+licence.
+
 ## Legacy generation-3 chat servers
 
 These flags apply only to the old chat-completion models, not the v2 pointer
