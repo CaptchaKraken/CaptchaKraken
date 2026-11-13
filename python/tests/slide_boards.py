@@ -121,17 +121,19 @@ class JigsawBoard(_Board):
     """`picture_ends` (shot px): below it the ground is flat white down to the track, the way a widget frames its
     picture, and the piece rests `y0` from the top, so it can sit just above that flat strip. `flat_rest`: the
     piece rests on flat sky with a flat dark block just ahead of it, as on a Yidun photo, while the slot keeps its
-    texture. `flat_face`: the piece is one flat tone inside its rim, as GeeTest draws a piece cut from a banner; a
+    texture. `lag` (px): the piece trails the handle by half the travel, up to `lag`, as Yidun's does (live
+    2026-11-12, lag 11: an 8px probe moved it 4, 139px moved it 128). `flat_face`: the piece is one flat tone inside its rim, as GeeTest draws a piece cut from a banner; a
     colour sets that tone, and `blank_rim` draws its rim in it too. `shadow=False` draws none.
     `decoy`: a still copy of the piece drawn `decoy` px above the slot. `pale_band`: the ground along the rail from
     `pale_band[0]` to `pale_band[1]` (shot px) is the piece's own face tone, as a white phone screen is to a white
     piece."""
 
     def __init__(self, ratio=1.0, scale=1.0, badge=True, seed=3, y0=70, picture_ends=None, flat_rest=False,
-                 flat_face=False, decoy=None, pale_band=None, blank_rim=False, shadow=True):
+                 flat_face=False, decoy=None, pale_band=None, blank_rim=False, shadow=True, lag=0.0):
         super().__init__(scale, badge)
         k = scale
         self.ratio = ratio
+        self.lag = lag * k
         self.bg = _texture(self.h, self.w, seed)
         if picture_ends is not None:
             self.bg[int(picture_ends):] = 250
@@ -174,7 +176,11 @@ class JigsawBoard(_Board):
 
     def centre(self, s=0.0):
         """The piece's centre (of its square, not its knobs) after the handle travelled s."""
-        return (self.x0 + self.knob + self.size / 2 + self.ratio * s, self.y0 + self.knob + self.size / 2)
+        return (self.x0 + self.knob + self.size / 2 + self.travel(s), self.y0 + self.knob + self.size / 2)
+
+    def travel(self, s):
+        """How far the piece has moved when the handle has travelled s."""
+        return self.ratio * s - math.copysign(min(abs(s) / 2, self.lag), s)
 
     @property
     def goal(self):
@@ -184,7 +190,7 @@ class JigsawBoard(_Board):
         return self.handle0
 
     def render(self, s):
-        x = self.x0 + self.ratio * s
+        x = self.x0 + self.travel(s)
         img = self.ground.copy()
         img = _paste(img, np.zeros_like(self.piece), self.shadow, x + 3 * self.k, self.y0 + 3 * self.k)
         img = _paste(img, self.piece, self.alpha, x, self.y0)

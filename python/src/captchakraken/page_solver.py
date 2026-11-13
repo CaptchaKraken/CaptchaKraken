@@ -198,6 +198,9 @@ class SolveResult:
 #: A typed captcha's text box widens the shot only when it sits by the image: the union may be at most this many
 #: times the image's area. A vendor-named box found in the enclosing form can be a whole login form away.
 ANSWER_BOX_MAX_GROWTH = 4.0
+#: A slider's handle widens the shot only when it sits just outside the picture: the union may be at most this many
+#: times the picture's area. Yidun's bar is 40px under a 175px panel (x1.23).
+SLIDER_TRACK_MAX_GROWTH = 2.0
 
 
 class _WithAnswerBox:
@@ -208,10 +211,14 @@ class _WithAnswerBox:
     strip the pointer read the image as a click puzzle (p(type) 0.46) or doubled a glyph, where the same frame
     with its box read R9VK at p >= 0.89 per character. The answer's points are taken in this union's frame, so
     `bounding_box` is the union everywhere the round reads it; everything else is the element's own.
+
+    The same union carries a slider's handle when the vendor draws its track outside the widget element: Yidun's
+    float layout pops `.yidun_panel` above a separate bar. Every training board shows the bar with its handle, and
+    on the bare panel the pointer had no handle to name, so it dragged the piece (which Yidun ignores) or named the hole.
     """
 
-    def __init__(self, element: Any, box: Any):
-        self._element, self._box = element, box
+    def __init__(self, element: Any, box: Any, max_growth: float = ANSWER_BOX_MAX_GROWTH):
+        self._element, self._box, self._max_growth = element, box, max_growth
 
     def bounding_box(self) -> Optional[Dict[str, float]]:
         a = self._element.bounding_box()
@@ -221,7 +228,7 @@ class _WithAnswerBox:
         x0, y0 = min(a["x"], b["x"]), min(a["y"], b["y"])
         x1 = max(a["x"] + a["width"], b["x"] + b["width"])
         y1 = max(a["y"] + a["height"], b["y"] + b["height"])
-        if (x1 - x0) * (y1 - y0) > ANSWER_BOX_MAX_GROWTH * max(a["width"] * a["height"], 1.0):
+        if (x1 - x0) * (y1 - y0) > self._max_growth * max(a["width"] * a["height"], 1.0):
             return a
         return {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
 
@@ -1050,6 +1057,39 @@ class PageSolver:
     def _find_control(self, scope: Any, selectors: Sequence[str]) -> Optional[Any]:
         first = next(iter(_visible(scope, selectors)), None)
         return _handle_of(first) if first is not None else None
+
+    def _track_outside(self, scope: Any, vendor: Any, element: Any, at: Any = None) -> Optional[Any]:
+        """The track of the first of the vendor's own slider handles that is visible with its centre outside the widget.
+
+        It is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
+        `.yidun_control`, a sibling of the `.yidun_panel` the widget resolves to. A match inside the widget is passed
+        over, not taken as the answer: Yidun lists its piece (`.yidun_jigsaw`, in the panel) as a handle too. The
+        track (the handle's parent) is returned rather than the handle, whose box moves as it slides and would
+        resize the frame.
+        """
+        own = getattr(self._sel.selectors.get(vendor), "slider_handle", None)
+        if not own:
+            return None
+        # Widening the shot is a nicety: a scope that cannot be searched (a detached frame) leaves the shot as it was.
+        try:
+            wheres = [scope, *((at.locator(f"xpath=ancestor::*[{k}]") for k in (1, 2)) if at is not None else ())]
+            a = element.bounding_box()
+            if not a:
+                return None
+            for where in wheres:
+                for found in _visible(where, own):
+                    handle = _handle_of(found)
+                    b = handle.bounding_box() if handle is not None else None
+                    if not b:
+                        continue
+                    cx, cy = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+                    if a["x"] <= cx <= a["x"] + a["width"] and a["y"] <= cy <= a["y"] + a["height"]:
+                        continue
+                    return _handle_of(found.locator("xpath=..")) or handle
+        except Exception:
+            return None
+        return None
+        return None
 
     def _answer_box(self, scope: Any, at: Any = None) -> Optional[Any]:
         """The text box inside the widget, else a vendor-named one in its enclosing fieldset/form.
@@ -2226,6 +2266,11 @@ class PageSolver:
         if text_mode:
             _log("widget has a text box; solving as a distorted-text captcha")
             element = _WithAnswerBox(element, answer_box)
+        elif puzzle_source not in VENDORS_WITH_BESPOKE_HANDLING:
+            track = self._track_outside(scope, puzzle_source, element, widget.at)
+            if track is not None:
+                _log("the slider track sits outside the widget; photographing the two as one")
+                element = _WithAnswerBox(element, track, SLIDER_TRACK_MAX_GROWTH)
 
         # A reCAPTCHA board is read by its grid below, not filmed.
         filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode
