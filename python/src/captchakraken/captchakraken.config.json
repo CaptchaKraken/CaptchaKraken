@@ -377,6 +377,24 @@
         "iframe[src*=\"/core/v4/captcha\"]"
       ]
     },
+    "datadome": {
+      "note": "The interstitial is one full-viewport iframe served from geo.captcha-delivery.com/captcha/, so it is the challenge itself, with no checkbox. Its visual mode is a slide-to-the-end bar; the handle is `.slider` inside `.sliderContainer`, and a pass reloads the host page. A refused session gets a 'You have been blocked' page in the same frame, under the same URL.",
+      "hosts": [
+        "captcha-delivery.com"
+      ],
+      "challenge": [
+        "iframe[src*=\"captcha-delivery.com/captcha\"]"
+      ],
+      "blocked": [
+        "body.dd-response-page--hard-block .captcha__human__title"
+      ],
+      "slider_handle": [
+        ".sliderContainer .slider"
+      ],
+      "refresh": [
+        "#captcha__reload__button"
+      ]
+    },
     "unknown": {
       "hosts": []
     }

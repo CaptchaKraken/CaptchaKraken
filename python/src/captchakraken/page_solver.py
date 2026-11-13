@@ -198,6 +198,9 @@ class SolveResult:
 #: A typed captcha's text box widens the shot only when it sits by the image: the union may be at most this many
 #: times the image's area. A vendor-named box found in the enclosing form can be a whole login form away.
 ANSWER_BOX_MAX_GROWTH = 4.0
+#: A slider's handle widens the shot only when it sits just outside the picture: the union may be at most this many
+#: times the picture's area. Yidun's bar is 40px under a 175px panel (x1.23).
+SLIDER_TRACK_MAX_GROWTH = 2.0
 
 
 class _WithAnswerBox:
@@ -208,10 +211,14 @@ class _WithAnswerBox:
     strip the pointer read the image as a click puzzle (p(type) 0.46) or doubled a glyph, where the same frame
     with its box read R9VK at p >= 0.89 per character. The answer's points are taken in this union's frame, so
     `bounding_box` is the union everywhere the round reads it; everything else is the element's own.
+
+    The same union carries a slider's handle when the vendor draws its track outside the widget element: Yidun's
+    float layout pops `.yidun_panel` above a separate bar. Every training board shows the bar with its handle, and
+    on the bare panel the pointer had no handle to name, so it dragged the piece (which Yidun ignores) or named the hole.
     """
 
-    def __init__(self, element: Any, box: Any):
-        self._element, self._box = element, box
+    def __init__(self, element: Any, box: Any, max_growth: float = ANSWER_BOX_MAX_GROWTH):
+        self._element, self._box, self._max_growth = element, box, max_growth
 
     def bounding_box(self) -> Optional[Dict[str, float]]:
         a = self._element.bounding_box()
@@ -221,7 +228,7 @@ class _WithAnswerBox:
         x0, y0 = min(a["x"], b["x"]), min(a["y"], b["y"])
         x1 = max(a["x"] + a["width"], b["x"] + b["width"])
         y1 = max(a["y"] + a["height"], b["y"] + b["height"])
-        if (x1 - x0) * (y1 - y0) > ANSWER_BOX_MAX_GROWTH * max(a["width"] * a["height"], 1.0):
+        if (x1 - x0) * (y1 - y0) > self._max_growth * max(a["width"] * a["height"], 1.0):
             return a
         return {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
 
@@ -454,6 +461,10 @@ def _has_text(handle: Any) -> bool:
 # The nudge that shows the tracker what the handle moves: enough to separate the part from still ground, little enough
 # that a piece resting against the board's edge stays on it.
 SLIDE_PROBE_PX = 8.0
+# A part that moves less than this while the handle travels more than half a probe has reached the end of its
+# track: pushing on only carries the pointer away from the handle, and a vendor may cancel a drag that strays
+# (DataDome snapped its handle home about 110 px past the stop). Shot pixels at device scale 1.
+SLIDE_STALL_PX = 1.0
 
 # No prompt and no pictures both read as ready: waiting for `.prompt-text` to exist once paid the whole timeout
 # before every board of a challenge that draws none (tower_stack: 18s a round, 2/2 -> 0/2).
@@ -476,6 +487,18 @@ _RESOURCES_JS = """() => {
   }
   return out;
 }"""
+
+
+def _offset(s: Any) -> Tuple[float, float]:
+    """A slide travel as (dx, dy): a number runs along the track, a pair is a carried piece's own offset."""
+    return (float(s[0]), float(s[1])) if isinstance(s, (list, tuple)) else (float(s), 0.0)
+
+
+def _stalled(before: Tuple[Any, Sequence[float]], now: Tuple[Any, Sequence[float]], k: float) -> bool:
+    """Did the handle travel while the part stayed put? Each side is (travel, the part's point) of one look."""
+    (ax, ay), (bx, by) = _offset(before[0]), _offset(now[0])
+    moved = math.hypot(now[1][0] - before[1][0], now[1][1] - before[1][1])
+    return math.hypot(bx - ax, by - ay) > SLIDE_PROBE_PX / 2 * k and moved < SLIDE_STALL_PX * k
 
 
 class PageSolver:
@@ -1035,6 +1058,39 @@ class PageSolver:
         first = next(iter(_visible(scope, selectors)), None)
         return _handle_of(first) if first is not None else None
 
+    def _track_outside(self, scope: Any, vendor: Any, element: Any, at: Any = None) -> Optional[Any]:
+        """The track of the first of the vendor's own slider handles that is visible with its centre outside the widget.
+
+        It is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
+        `.yidun_control`, a sibling of the `.yidun_panel` the widget resolves to. A match inside the widget is passed
+        over, not taken as the answer: Yidun lists its piece (`.yidun_jigsaw`, in the panel) as a handle too. The
+        track (the handle's parent) is returned rather than the handle, whose box moves as it slides and would
+        resize the frame.
+        """
+        own = getattr(self._sel.selectors.get(vendor), "slider_handle", None)
+        if not own:
+            return None
+        # Widening the shot is a nicety: a scope that cannot be searched (a detached frame) leaves the shot as it was.
+        try:
+            wheres = [scope, *((at.locator(f"xpath=ancestor::*[{k}]") for k in (1, 2)) if at is not None else ())]
+            a = element.bounding_box()
+            if not a:
+                return None
+            for where in wheres:
+                for found in _visible(where, own):
+                    handle = _handle_of(found)
+                    b = handle.bounding_box() if handle is not None else None
+                    if not b:
+                        continue
+                    cx, cy = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+                    if a["x"] <= cx <= a["x"] + a["width"] and a["y"] <= cy <= a["y"] + a["height"]:
+                        continue
+                    return _handle_of(found.locator("xpath=..")) or handle
+        except Exception:
+            return None
+        return None
+        return None
+
     def _answer_box(self, scope: Any, at: Any = None) -> Optional[Any]:
         """The text box inside the widget, else a vendor-named one in its enclosing fieldset/form.
 
@@ -1115,6 +1171,7 @@ class PageSolver:
                        handle=(handle[0] * k, handle[1] * k), bounds=(-handle[0] * k, (w - handle[0]) * k),
                        tol=self.config.slide_tolerance_px * k)
             look, s, history, moves = probed, probe * k, [], 0
+            last: Optional[Tuple[Any, Sequence[float]]] = None
             while True:
                 try:
                     reply = slide_step(first, probed, look, s=s, history=history, **ask)
@@ -1123,6 +1180,12 @@ class PageSolver:
                     break
                 if look is not probed:
                     history.append(reply["observation"])
+                if last is not None and _stalled(last, (s, reply["pos"]), k):
+                    _log("slider: the part stopped following the handle; releasing at the end of its track")
+                    dx, dy = _offset(last[0])
+                    self._smooth_move(page, press[0] + dx / k, press[1] + dy / k)
+                    break
+                last = (s, reply["pos"])
                 _debug(f"slider: point at ({reply['pos'][0] / k:.1f}, {reply['pos'][1] / k:.1f}), "
                        f"{reply['error'] / k:.1f}px from its target, {reply['kind']}")
                 if reply["done"] or moves >= self.config.slide_max_corrections:
@@ -1130,7 +1193,7 @@ class PageSolver:
                         _log(f"slider: releasing {reply['error'] / k:.1f}px off target")
                     break
                 s = reply["next"]
-                dx, dy = (s[0], s[1]) if reply["grabbed"] else (s, 0.0)
+                dx, dy = _offset(s)
                 self._smooth_move(page, press[0] + dx / k, press[1] + dy / k)
                 self._human.pause(PauseKind.PROBE)
                 self._screenshot(element, current, timeout_ms=timeout)
@@ -2203,6 +2266,11 @@ class PageSolver:
         if text_mode:
             _log("widget has a text box; solving as a distorted-text captcha")
             element = _WithAnswerBox(element, answer_box)
+        elif puzzle_source not in VENDORS_WITH_BESPOKE_HANDLING:
+            track = self._track_outside(scope, puzzle_source, element, widget.at)
+            if track is not None:
+                _log("the slider track sits outside the widget; photographing the two as one")
+                element = _WithAnswerBox(element, track, SLIDER_TRACK_MAX_GROWTH)
 
         # A reCAPTCHA board is read by its grid below, not filmed.
         filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode

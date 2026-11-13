@@ -131,6 +131,7 @@ answers with a frame number the driver then waits for on screen.
 
 | File | Purpose |
 |---|---|
+| `js/src/a-slider-is-shown-with-its-handle.test.ts` | A widget whose slider bar sits outside it (Yidun's panel and bar are siblings) is photographed together with the bar's track; a handle far from the widget leaves the shot alone. |
 | `js/src/index.ts` | The package's public surface, and the worked examples in its doc comments. |
 | `js/src/solver.ts` | `CaptchaKrakenSolver`: the driver. Finds the widget, screenshots it, asks the engine for a plan, performs it, decides whether the vendor accepted, and goes round again if not; it tries the pointer's other complete plans before refreshing the board. |
 | `js/src/kinds.ts` | Every closed set of names the driver uses — vendors, action kinds, verdicts, phases, error codes — as `as const` objects mirrored one-for-one in `kinds.py`. |
@@ -324,6 +325,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 |---|---|
 | `python/tests/test_a_pointer_answer_always_carries_points.py` | Every pointer answer is its points: the click, drag, slide, type, hold and moment shapes the heads decode to. |
 | `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer` and never runs find_grid; its answer is performed like generation 3's. |
+| `python/tests/test_a_slider_is_shown_with_its_handle.py` | The Python twin: the shot widens to a vendor handle's track found beside the widget, skips a handle inside it (Yidun's piece), stays one size while the handle moves, caps the growth, and survives a scope that cannot be searched. |
 | `python/tests/test_an_element_is_outlined_by_its_mask.py` | The overlay traces each element's mask, keeps its tags readable and off one another, and its look is frozen by a hash. |
 | `python/tests/test_old_config_names_still_work.py` | A config written for an older release still loads: a renamed option is read under its new name, retired ones are accepted. |
 | `python/tests/test_the_offset_head_learns.py` | The point offset head learns from hidden states at the base model's scale instead of saturating on its first step. |

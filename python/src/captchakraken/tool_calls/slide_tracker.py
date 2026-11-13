@@ -1091,7 +1091,16 @@ def slide_step(first: Image, probe: Image, current: Image, *, probe_s: Offset, s
     if _same(current, probe):
         params, corr = measure(first, probe, seg, guess=seg.probe, reach_px=2.0, reach_deg=1.0)
     else:
-        params, corr = measure(first, current, seg, guess=predict(samples, seg, cur))
+        guess = predict(samples, seg, cur)
+        try:
+            params, corr = measure(first, current, seg, guess=guess)
+        except TrackingError:
+            # A part that trails its handle reads a short gain off the probe: Yidun's lags by half the travel up to
+            # ~11px, so an 8px probe moved it 4 and the plan sent the handle twice as far as it needed. The part then
+            # lands far outside the reach around the guess. On a rail the whole track is cheap to search.
+            if _rail(seg) is None:
+                raise
+            params, corr = measure(first, current, seg, guess=guess, reach_px=float(a.shape[1]))
         samples.append(Sample(cur, params))
     pos = transform_point(params, seg.centroid, point)
     dist = math.hypot(goal[0] - pos[0], goal[1] - pos[1])

@@ -125,21 +125,30 @@ const HANDLE_TIMEOUT_MS = 1000;
 const ANSWER_BOX_MAX_GROWTH = 4;
 
 /**
+ * A slider's handle widens the shot only when it sits just outside the picture: the union may be at most this many
+ * times the picture's area. Yidun's bar is 40px under a 175px panel (x1.23).
+ */
+const SLIDER_TRACK_MAX_GROWTH = 2;
+
+/**
  * A typed captcha's image and its text box, photographed and pointed into as one element.
+ * The same union carries a slider's handle when the vendor draws its track outside the widget element: Yidun's
+ * float layout pops `.yidun_panel` above a separate bar. Every training board shows the bar with its handle, and on
+ * the bare panel the pointer had no handle to name, so it dragged the piece (which Yidun ignores) or named the hole.
  *
  * BotDetect's widget element is a 280x50 strip holding only the image; its text box is a sibling. Every training
  * board and every real capture of a typed captcha shows the box under the image, and on the bare strip the pointer
  * read the image as a click puzzle or doubled a glyph. The answer's points are taken in this union's frame, so
  * `boundingBox` is the union everywhere the round reads it; everything else is the element's own.
  */
-export function withAnswerBox(el: ElementHandle, box: ElementHandle): ElementHandle {
+export function withAnswerBox(el: ElementHandle, box: ElementHandle, maxGrowth = ANSWER_BOX_MAX_GROWTH): ElementHandle {
   const union = async () => {
     const a = await el.boundingBox();
     const b = a ? await box.boundingBox() : null;
     if (!a || !b) return a;
     const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
     const x1 = Math.max(a.x + a.width, b.x + b.width), y1 = Math.max(a.y + a.height, b.y + b.height);
-    if ((x1 - x0) * (y1 - y0) > ANSWER_BOX_MAX_GROWTH * Math.max(a.width * a.height, 1)) return a;
+    if ((x1 - x0) * (y1 - y0) > maxGrowth * Math.max(a.width * a.height, 1)) return a;
     return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
   };
   return new Proxy(el, {
@@ -172,6 +181,17 @@ const SLIDE_MAX_CORRECTIONS = 3;
 // The nudge that shows the tracker what the handle moves: enough to separate the part from still ground, little
 // enough that a piece resting against the board's edge stays on it. Mirrors page_solver.py SLIDE_PROBE_PX.
 const SLIDE_PROBE_PX = 8;
+// A part that moves less than this while the handle travels more than half a probe has reached the end of its track:
+// pushing on only carries the pointer away from the handle. Mirrors page_solver.py SLIDE_STALL_PX.
+const SLIDE_STALL_PX = 1;
+const slideOffset = (s: number | [number, number]): [number, number] => (Array.isArray(s) ? [s[0], s[1]] : [s, 0]);
+/** Did the handle travel while the part stayed put? Each side is the travel and the part's point of one look. */
+const slideStalled = (before: [number | [number, number], [number, number]], now: [number | [number, number], [number, number]], k: number): boolean => {
+  const [ax, ay] = slideOffset(before[0]);
+  const [bx, by] = slideOffset(now[0]);
+  const moved = Math.hypot(now[1][0] - before[1][0], now[1][1] - before[1][1]);
+  return Math.hypot(bx - ax, by - ay) > (SLIDE_PROBE_PX / 2) * k && moved < SLIDE_STALL_PX * k;
+};
 
 interface SlideStepRequest {
   first: string; probe: string; current: string; probe_s: number; s: number | [number, number];
@@ -825,6 +845,12 @@ export class CaptchaKrakenSolver {
     if (textMode) {
       console.log('Widget has a text box; solving as a distorted-text captcha.');
       captchaElement = withAnswerBox(captchaElement, answerBox);
+    } else if (!VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource)) {
+      const track = await this.trackOutside(scope, puzzleSource, captchaElement, widget.at);
+      if (track) {
+        console.log('The slider track sits outside the widget; photographing the two as one.');
+        captchaElement = withAnswerBox(captchaElement, track as ElementHandle, SLIDER_TRACK_MAX_GROWTH);
+      }
     }
 
     // A reCAPTCHA board is read by its grid below, not filmed.
@@ -2807,6 +2833,35 @@ export class CaptchaKrakenSolver {
   }
 
   /**
+   * The track of the first of the vendor's own slider handles that is visible with its centre outside the widget
+   * element's box. It is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
+   * `.yidun_control`, a sibling of the `.yidun_panel` the widget resolves to. A match inside the widget is passed over,
+   * not taken as the answer: Yidun lists its piece (`.yidun_jigsaw`, in the panel) as a handle too. The track (the
+   * handle's parent) is returned rather than the handle, whose box moves as it slides and would resize the frame.
+   */
+  private async trackOutside(scope: Scope, vendor: Vendor, el: ElementHandle, at?: Locator | null): Promise<ElementHandle | null> {
+    const own = this.sel.selectors[vendor]?.sliderHandle;
+    if (!own?.length) return null;
+    // Widening the shot is a nicety: a scope that cannot be searched (a detached frame) leaves the shot as it was.
+    try {
+      const a = await el.boundingBox();
+      if (!a) return null;
+      for (const where of [scope, ...(at ? [1, 2].map((k) => at.locator(`xpath=ancestor::*[${k}]`)) : [])]) {
+        for (const found of await visible(where, own)) {
+          const b = await (await handleOf(found))?.boundingBox();
+          if (!b) continue;
+          const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+          if (cx >= a.x && cx <= a.x + a.width && cy >= a.y && cy <= a.y + a.height) continue;
+          return (await handleOf(found.locator('xpath=..'))) ?? handleOf(found);
+        }
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  /**
    * The text box inside the widget, else a vendor-named one in its enclosing fieldset/form, never the page: the generic
    * tail outside the widget is how a captcha's answer lands in a login form's username box. The widening exists for
    * BotDetect, whose 280x50 `.BDC_CaptchaDiv` holds only the image while `#captchaCode` sits in a sibling div.
@@ -2899,16 +2954,25 @@ export class CaptchaKrakenSolver {
       let look = probed;
       let s: number | [number, number] = probe * k;
       const history: SlideStepReply['observation'][] = [];
+      let last: [number | [number, number], [number, number]] | null = null;
       for (let moves = 0; ; moves++) {
         const reply = await this.slideStep({ ...ask, current: look, s, history });
         if (!reply) break;
         if (look !== probed) history.push(reply.observation);
+        const pos: [number, number] = [reply.pos[0], reply.pos[1]];
+        if (last && slideStalled(last, [s, pos], k)) {
+          console.warn('[slide] the part stopped following the handle; releasing at the end of its track');
+          const [bx, by] = slideOffset(last[0]);
+          await this.performSmoothMove(page, press[0] + bx / k, press[1] + by / k);
+          break;
+        }
+        last = [s, pos];
         if (reply.done || moves >= SLIDE_MAX_CORRECTIONS) {
           if (reply.error > ask.tol) console.warn(`[slide] releasing ${(reply.error / k).toFixed(1)}px off target`);
           break;
         }
         s = reply.next;
-        const [dx, dy] = Array.isArray(s) ? s : [s, 0];
+        const [dx, dy] = slideOffset(s);
         await this.performSmoothMove(page, press[0] + dx / k, press[1] + dy / k);
         await this.human.pause(PauseKind.PROBE);
         await this.shot(element, current, timeout);

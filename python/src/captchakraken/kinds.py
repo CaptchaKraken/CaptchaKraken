@@ -22,6 +22,7 @@ class Vendor(StrEnum):
     DINGXIANG = "dingxiang"
     FUNCAPTCHA = "funcaptcha"
     PROTON = "proton"
+    DATADOME = "datadome"
     UNKNOWN = "unknown"
 
 

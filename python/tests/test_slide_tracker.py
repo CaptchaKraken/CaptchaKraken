@@ -385,3 +385,12 @@ def test_the_cv_worker_answers_a_slide_step_request_line(tmp_path):
     reply = json.loads(out[1])
     assert reply["id"] == 7 and reply["ok"], reply
     assert abs(reply["result"]["pos"][0] - b.centre(8)[0]) < 0.6 and reply["result"]["kind"] == "slide"
+
+
+@pytest.mark.parametrize("goal_dx", [73, 110, 137])
+def test_a_piece_that_trails_its_handle_is_found_where_the_short_probe_gain_overshot(goal_dx):
+    # Yidun live, 2026-11-12: the probe reads a gain of 0.5, the first move lands the piece 50-120px past the guess
+    b = JigsawBoard(lag=11)
+    b.slot = (b.x0 + goal_dx, b.slot[1])
+    s, _, reply = _drive(b, b.centre(), b.goal)
+    assert abs(b.centre(s)[0] - b.goal[0]) <= 3
