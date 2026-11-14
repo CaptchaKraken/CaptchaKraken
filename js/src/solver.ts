@@ -315,6 +315,10 @@ export class CaptchaKrakenSolver {
   private videoBudgetGranted = false;
   private human: Humanizer;
   private sel: SelectorTable = DEFAULT_TABLE;
+  /** A stylesheet that takes every verdict message out of a photograph, laid out as if it had never been shown. */
+  private get feedbackHidden(): string {
+    return this.sel.feedback.map((s) => `${s} { display: none !important; }`).join('\n');
+  }
   private stepIndex = 0;
   private solveStartMs = 0;
   private cvWorker: ChildProcessWithoutNullStreams | null = null;
@@ -410,17 +414,17 @@ export class CaptchaKrakenSolver {
    * repaints nothing, and measured twice as fast. `disabled` freezes CSS animation, which once sliced GeeTest svg to
    * a static clip; callers filming motion pass `allow`.
    */
-  private async shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled'): Promise<void> {
+  private async shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled', style?: string): Promise<void> {
     const page = this.page as Page;
     const view = await viewportOf(page);
     const rect = (await layoutIsTheViewport(page, view)) ? await this.rectInView(el, view) : null;
     if (!rect) {
       // Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
       // coordinates, so the element photographs itself.
-      await el.screenshot({ path: p, timeout, animations });
+      await el.screenshot({ path: p, timeout, animations, style });
       return;
     }
-    fs.writeFileSync(p, cropPng(await page.screenshot({ timeout, animations }), rect, view.width));
+    fs.writeFileSync(p, cropPng(await page.screenshot({ timeout, animations, style }), rect, view.width));
   }
 
   private async rectOf(el: ElementHandle): Promise<CaptureRect> {
@@ -904,7 +908,7 @@ export class CaptchaKrakenSolver {
     } else {
       await this.ph(Phase.SCREENSHOT, () => this.shot(captchaElement, screenshotPath, cfg.elementScreenshotTimeoutMs ?? 8000));
     }
-    const boardHash = await this.boardHash(captchaElement, screenshotPath, filmed);
+    const boardHash = await this.boardHash(captchaElement);
     // A refresh that brought the same picture back has replaced nothing, and every plan has been spent on it.
     if (this.refreshedBoards.has(boardHash)) throw new Error('No progress: the board came back unchanged after a refresh.');
     if (this.stepIndex === 0) {
@@ -2395,12 +2399,15 @@ export class CaptchaKrakenSolver {
     return !!log?.listening && log.exchanges === this.exchangesAtAnswer;
   }
 
-  /** The board's identity, always from a plain photograph: a filmed frame of an unchanged board differs in bytes. */
-  private async boardHash(element: any, shot: string, filmed: boolean): Promise<string> {
-    if (!filmed) return sha1(shot);
+  /**
+   * The board's identity, from a photograph of its own: a filmed frame of an unchanged board differs in bytes, and so
+   * does one wearing the vendor's verdict message, a toast that comes and goes over the same board (see
+   * TRIBAL_KNOWLEDGE.md). The message is left out of the picture, not waited out.
+   */
+  private async boardHash(element: any): Promise<string> {
     const plain = tmp('board');
     try {
-      await this.shot(element, plain, this.config.elementScreenshotTimeoutMs ?? 8000);
+      await this.shot(element, plain, this.config.elementScreenshotTimeoutMs ?? 8000, 'disabled', this.feedbackHidden);
       return sha1(plain);
     } finally {
       fs.rmSync(plain, { force: true });

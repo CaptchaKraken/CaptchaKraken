@@ -83,7 +83,7 @@ ConfigSource = Union[str, "os.PathLike[str]", Mapping[str, Any]]
 
 _FIELDS = {f.name: f for f in fields(VendorSelectors)}
 _ONE = {"response", "checked", "accepted", "fresh"}
-_GENERIC = ("submit_text", "text_input", "slider_handle", "piece")
+_GENERIC = ("submit_text", "text_input", "slider_handle", "piece", "feedback")
 
 
 class SelectorConfigError(ValueError):
@@ -266,6 +266,9 @@ class SelectorTable:
         self.slider_handle: Sequence[str] = (*self._of_every_vendor("slider_handle"), *loaded.generic["slider_handle"])
         self.refresh: Sequence[str] = self._of_every_vendor("refresh")
         self.piece: Sequence[str] = (*self._of_every_vendor("piece"), *loaded.generic["piece"])
+        # The verdict messages a widget shows over its board: every vendor's banners, then the generic ones.
+        self.feedback: Sequence[str] = (*(sel for _, v in self.vendors for sel, _kind in v.banners),
+                                        *loaded.generic["feedback"])
 
     def _of_every_vendor(self, key: str) -> Sequence[str]:
         assert key in {f.name for f in fields(VendorSelectors)}
