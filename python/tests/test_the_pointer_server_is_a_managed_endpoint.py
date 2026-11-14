@@ -48,12 +48,11 @@ def test_the_pointer_engine_never_uses_prefix_caching(monkeypatch):
         Svc.PointerService("/model", enable_prefix_caching=True)
 
 
-def test_the_default_server_runs_the_q4_pointer(monkeypatch):
-    monkeypatch.setenv("CAPTCHA_POINTER_DETECTOR", "/models/detector_r18.pt")
+def test_the_default_server_runs_the_q4_pointer():
     cmd = server_manager.build_serve_command()
     assert cmd[1:4] == ["-m", "captchakraken.pointer.server", "--model"]
     assert cmd[4] == "CaptchaKraken/MidnightV2-4B-q4"
-    assert cmd[cmd.index("--detector") + 1] == "/models/detector_r18.pt"
+    assert "--detector" not in cmd
 
 
 def test_health_is_open_and_the_api_uses_the_server_key(monkeypatch):

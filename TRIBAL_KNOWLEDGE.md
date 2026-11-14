@@ -128,15 +128,20 @@ on the training side to compare behaviour (the fixtures in
 `test_keyframes*.py`) rather than bytes. Every threshold in the file was
 measured, not guessed, and the measurement now sits beside each constant.
 
-**Grid screenshots are sent with cell numbers drawn on them.** The client runs
-`find_grid`, has `overlay.py` render the numbered labels, and sends that image,
+**Grid screenshots are sent with cell numbers drawn on them** (chat models). The
+client reads each cell from the reCAPTCHA challenge frame's tiles
+(`td.rc-imageselect-tile`, scaled onto the screenshot), has `overlay.py` render
+the numbered labels, and sends that image,
 because the model reads those labels and was never trained to invent a numbering.
 Skip the overlay and reCAPTCHA 4×4 scores zero without raising anything — it
 looks exactly like a broken model.
 
 **`find_grid` reads the element detector, not the pixels.** Every grid solve
-rests on the CNN's grid and cell boxes (`pointer/detector.py`); a board it
-misreads is fixed by training the detector, not by a geometry rule here.
+rested on the CNN's grid and cell boxes (`pointer/detector.py`); a board it
+misread was fixed by training the detector, not by a geometry rule here.
+*Superseded in 5.0.0:* the client has no detector and no `find_grid()`; a
+reCAPTCHA grid's cells come from the DOM tiles, and the pointer model reads the
+bare board.
 
 **One page carries every published number.** `docs/benchmarks.md` holds the
 end-to-end browser counts and the static-image rates, deliberately as counts
@@ -157,7 +162,7 @@ so the attempt stops bailing at round 3. A repeated answer instead turns on
 `avoid_refused`, and the pointer answers with its likeliest other answer.
 
 **A second click on one element is usually a second answer.** The detector
-outlines a whole line as one `item`, so one click per element turned both ends of
+(removed in 5.0.0) outlined a whole line as one `item`, so one click per element turned both ends of
 a line into one click, on 2 of 3 gauntlet seeds of the board that asks for them.
 Only a cell deselects on a second press, so only a repeat in one cell or one place
 is dropped.
@@ -187,7 +192,9 @@ declares `experts`. The driver still decides how the board is SHOWN — a grid
 that `find_grid` and `_grid_dims` accept is sent with its
 cells numbered, anything else as the plain picture — because the model was
 trained on exactly what those two would number. Its `ids` name cells; when
-they name none, the cells its points land in do.
+they name none, the cells its points land in do. *Since 5.0.0* both are gone:
+only a reCAPTCHA grid, whose cells the DOM tiles give, is numbered; every other
+board goes as the plain picture.
 
 **An animated board on generation 3 is a video, and the answer names WHEN in
 seconds.** `clipvideo.py` sends the recorded frames as one
@@ -503,10 +510,11 @@ install` reads, and a test reads the real `npm pack` list.
 
 ## Grid detection
 
-`find_grid` reads the CNN element detector's grid and cell boxes; it has no
-thresholds of its own beyond the lattice fallback for a board the detector
-under-reads (`LATTICE_MIN_FILLED`). The selection marks below are still pixel
-tests on the cells it returns.
+Since 5.0.0 the client finds no grid in the picture: the CNN element detector
+and `find_grid()` are gone, and a reCAPTCHA grid's cells are the challenge frame's
+`td.rc-imageselect-tile` rectangles scaled onto the screenshot (`_dom_grid` /
+`domGrid`; fewer than four tiles, or no frame, is no grid). The selection marks
+below are still pixel tests on those cells (`tool_calls/find_grid.py`).
 
 **The teal selected-badge detector requires white within 2 px of the teal
 hull.** Sky with a white pole in it satisfied the old test: 74 phantom
@@ -848,6 +856,8 @@ longer exists here.
 that measure detection rates over it skip when the directory is absent, which is
 the case in every clean checkout, so the hermetic gate covers the geometry rules
 rather than the rates. It is also part of why the Python floor is where it is.
+*Superseded in 5.0.0:* those tests went with the detector; grids come from the
+DOM tiles.
 
 **Dead code was carrying part of the coverage gap.** Removing four unreferenced
 `find_grid` tracer helpers, three unreferenced overlay drawing functions, a

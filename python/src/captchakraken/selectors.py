@@ -43,6 +43,9 @@ class VendorSelectors:
     fresh: Optional[str] = None
     # Inside the challenge frame: the pictures a board is made of; the driver waits for each to have painted.
     images: Sequence[str] = ()
+    # Inside the challenge frame: the tiles of the board's grid, in reading order. Where each one is placed is read
+    # from the DOM, to click it and to watch it reload.
+    tiles: Sequence[str] = ()
     # Inside the widget: the vendor's own submit control, tried after the generic text probes.
     submit: Sequence[str] = ()
     # Inside the challenge frame: verdict banners and what each means.
@@ -140,28 +143,18 @@ def _entry(where: str, raw: Any, hosts_required: bool = True) -> VendorSelectors
     return VendorSelectors(**kw)
 
 
-#: The element detector a config may choose (see `pointer.detector`).
-DETECTOR_CHOICES = ("auto", "standard", "lite")
-
-
 class SelectorConfig(NamedTuple):
-    """A loaded config: the caller's own entry, every vendor's in detection order, the generic fallbacks, and which
-    element detector runs."""
+    """A loaded config: the caller's own entry, every vendor's in detection order, and the generic fallbacks."""
     custom: Optional[VendorSelectors]
     vendors: Mapping[Vendor, VendorSelectors]
     generic: Mapping[str, Tuple[str, ...]]
-    detector: str = "auto"
 
 
 def _parse(name: str, doc: Mapping[str, Any], base: Optional[SelectorConfig]) -> SelectorConfig:
     for key in doc:
+        # `detector` chose an element detector the client no longer has; a config written for one still loads.
         if not key.startswith("_") and key not in ("detector", "custom", "vendors", "generic"):
-            raise SelectorConfigError(f"{name}: {key}: not a config key (detector, custom, vendors, generic)")
-    detector = base.detector if base else "auto"
-    if "detector" in doc:
-        if not isinstance(doc["detector"], str) or doc["detector"].strip().lower() not in DETECTOR_CHOICES:
-            raise SelectorConfigError(f"{name}: detector: {doc['detector']!r} is not one of {', '.join(DETECTOR_CHOICES)}")
-        detector = doc["detector"].strip().lower()
+            raise SelectorConfigError(f"{name}: {key}: not a config key (custom, vendors, generic)")
     custom = base.custom if base else None
     if "custom" in doc:
         custom = None if doc["custom"] is None else _entry(f"{name}: custom", doc["custom"], hosts_required=False)
@@ -193,7 +186,7 @@ def _parse(name: str, doc: Mapping[str, Any], base: Optional[SelectorConfig]) ->
         generic[key] = _strings(f"{name}: generic.{key}", value)
     if base is None and set(generic) != set(_GENERIC):
         raise SelectorConfigError(f"{name}: generic: missing {sorted(set(_GENERIC) - set(generic))}")
-    return SelectorConfig(custom, vendors, generic, detector)
+    return SelectorConfig(custom, vendors, generic)
 
 
 def load_config(source: Optional[ConfigSource] = None) -> SelectorConfig:

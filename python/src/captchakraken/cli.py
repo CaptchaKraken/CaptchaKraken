@@ -1,4 +1,4 @@
-"""The `captchakraken` CLI: one-shot solves, the detector tool calls, the CV worker, and server management.
+"""The `captchakraken` CLI: one-shot solves, the pixel tool calls, the CV worker, and server management.
 
 `captchakraken image.png [model] [api_provider] [api_key] [--puzzle-source ...]` solves one still.
 Exit codes: 1 failure, 2 unsupported puzzle, 3 the hosted API refused.
@@ -106,37 +106,11 @@ def fill_step(req: dict) -> dict:
         return {"error": str(e)}
 
 
-def _find_grid(args):
-    from .tool_calls.find_grid import find_grid
-
-    _need(args, 1, "find-grid image.png")
-    return find_grid(_image(args[0]))
-
-
 def _find_checkbox(args):
     from .tool_calls.find_checkbox import find_checkbox
 
     _need(args, 1, "find-checkbox image.png")
     return find_checkbox(_image(args[0]))
-
-
-def _detect_selected(args):
-    from .tool_calls.find_grid import detect_selected_cells, find_grid
-
-    _need(args, 1, "detect-selected image.png")
-    boxes = find_grid(_image(args[0]))
-    if not boxes:
-        return {"error": "No grid detected"}
-    selected, loading = detect_selected_cells(args[0], boxes)
-    return {"selected": selected, "loading": loading}
-
-
-def _get_numbered_grid(args):
-    from .tool_calls.find_grid import find_grid, get_numbered_grid_overlay
-
-    _need(args, 1, "get-numbered-grid image.png")
-    boxes = find_grid(_image(args[0]))
-    return {"overlay_image": get_numbered_grid_overlay(args[0], boxes)} if boxes else {"error": "No grid detected"}
 
 
 def _check_movement(args):
@@ -152,17 +126,8 @@ def _check_movement(args):
     return {"has_movement": ImageProcessor.detect_movement(args[0], args[1], threshold)}
 
 
-def _grid_cell_states(args):
-    from .tool_calls.find_grid import find_grid
-
-    _need(args, 2, "grid-cell-states imgA.png imgB.png")
-    a, b = _image(args[0]), _image(args[1])
-    boxes = find_grid(b)
-    return grid_cell_states(a, b, boxes) if boxes else {"grid": None}
-
-
 def _grid_cell_states_fixed(args):
-    """Boxes supplied by the caller: a blank mid-refresh frame has no lattice to detect."""
+    """Boxes supplied by the caller, read from the vendor's DOM: the pixels alone do not say where the tiles are."""
     _need(args, 3, "grid-cell-states-fixed imgA.png imgB.png '<json grid_boxes>'")
     a, b = _image(args[0]), _image(args[1])
     try:
@@ -216,15 +181,9 @@ def _serve(args):
     """Persistent CV worker: one JSON request per stdin line, one JSON reply per stdout line."""
     from .image_processor import ImageProcessor
     from .tool_calls.find_checkbox import find_checkbox
-    from .tool_calls.find_grid import find_grid
 
     def handle(req):
         cmd = req.get("cmd")
-        if cmd == "find-grid":
-            return find_grid(req["image"])
-        if cmd == "grid-cell-states":
-            boxes = find_grid(req["b"])
-            return grid_cell_states(req["a"], req["b"], boxes) if boxes else {"grid": None}
         if cmd == "grid-cell-states-fixed":
             boxes = [tuple(int(v) for v in box) for box in req["grid_boxes"]]
             if not boxes:
@@ -423,12 +382,8 @@ def _fetch(args):
 
 
 COMMANDS: Dict[str, Callable[[List[str]], Any]] = {
-    "find-grid": _find_grid,
     "find-checkbox": _find_checkbox,
-    "detect-selected": _detect_selected,
-    "get-numbered-grid": _get_numbered_grid,
     "check-movement": _check_movement,
-    "grid-cell-states": _grid_cell_states,
     "grid-cell-states-fixed": _grid_cell_states_fixed,
     "match-region": _match_region,
     "board-painted": _board_painted,

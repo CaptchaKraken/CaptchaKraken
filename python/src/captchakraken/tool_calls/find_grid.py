@@ -1,19 +1,15 @@
-"""A board's grid of tiles, and the state of each tile.
+"""The state of each tile of a board's grid, read from pixels.
 
-`find_grid` asks the element detector (`pointer.detector`) for the board's grid
-and the cells inside it, and returns the cells in reading order when they make
-a whole lattice. The detector was trained on every vendor's boards, grids and
-not-grids alike, so a board of cards, a sprite sheet or a keyframe of moving
-tiles is simply not a `grid` to it.
-
-The rest reads pixels inside cells the grid has already given: a vendor's
-"selected" mark, a tile still loading, an empty slot, a tile fading in.
+The grid itself comes from the vendor's DOM (`PageSolver._dom_grid`): where the
+challenge frame placed each tile. Given those cells, this reads the pixels inside
+them: a vendor's "selected" mark, a tile still loading, an empty slot, a tile
+fading in.
 """
 
 from __future__ import annotations
 
 import tempfile
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from PIL import Image
@@ -23,128 +19,6 @@ from ..kinds import LabelPosition
 from ..overlay import add_overlays_to_image
 
 Box = Tuple[int, int, int, int]
-
-#: Below these the detector is guessing: measured on real captures, every true
-#: grid and its cells score above them and no not-grid board's grid does.
-GRID_MIN_SCORE = 0.5
-CELL_MIN_SCORE = 0.5
-#: A row starts where a cell's top sits more than this share of a cell below the row's.
-ROW_BREAK = 0.5
-#: A tile is a cell whatever else it looks like: a flat-coloured tile (a blank one
-#: mid-fade, a plain colour) reads as a jigsaw piece (`draggable`) or an `item`.
-#: Inside the grid, one the size of the cells (within this share) that no cell box
-#: already covers fills its slot.
-TILE_CLASSES = ("draggable", "item")
-TILE_SIZE_TOL = 0.25
-#: A lattice the detector saw most of: when its cells do not form whole rows (a
-#: gutter it missed merges two tiles, a faint one splits none), a grid box whose
-#: slots are this share filled, every row and column with at least one, is the
-#: lattice. Two real reCAPTCHA 4x4 photo boards came back with 14 and 17 cells.
-LATTICE_MIN_FILLED = 0.75
-
-
-def _iou(a: Sequence[float], b: Sequence[float]) -> float:
-    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
-    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
-    inter = ix * iy
-    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
-    return inter / union if union > 0 else 0.0
-
-
-def _with_tiles(cells: List[List[float]], tiles: List[List[float]]) -> List[List[float]]:
-    """`cells` plus every tile the size of a cell that no cell (or tile already taken) overlaps."""
-    if not cells:
-        return cells
-    w = float(np.median([c[2] - c[0] for c in cells]))
-    h = float(np.median([c[3] - c[1] for c in cells]))
-    out = list(cells)
-    for t in tiles:
-        if abs((t[2] - t[0]) - w) <= TILE_SIZE_TOL * w and abs((t[3] - t[1]) - h) <= TILE_SIZE_TOL * h \
-                and all(_iou(t, c) < 0.3 for c in out):
-            out.append(t)
-    return out
-
-
-def _cells_in(grid: Sequence[float], cells: List[List[float]]) -> List[List[float]]:
-    x0, y0, x1, y1 = grid
-    return [c for c in cells if x0 <= (c[0] + c[2]) / 2 <= x1 and y0 <= (c[1] + c[3]) / 2 <= y1]
-
-
-def _rows(cells: List[List[float]]) -> List[List[List[float]]]:
-    """Cells grouped into rows, top to bottom, each row left to right."""
-    h = float(np.median([c[3] - c[1] for c in cells]))
-    rows: List[List[List[float]]] = []
-    for c in sorted(cells, key=lambda c: c[1]):
-        if rows and c[1] - rows[-1][0][1] <= ROW_BREAK * h:
-            rows[-1].append(c)
-        else:
-            rows.append([c])
-    return [sorted(r, key=lambda c: c[0]) for r in rows]
-
-
-def _lattice(grid: Sequence[float], cells: List[List[float]]) -> Optional[List[List[float]]]:
-    """The rows x columns lattice `cells` mostly fill inside `grid`, each slot at its
-    column's and row's median edges; None when they do not fill one."""
-    w = float(np.median([c[2] - c[0] for c in cells]))
-    h = float(np.median([c[3] - c[1] for c in cells]))
-    gx0, gy0, gx1, gy1 = grid
-    centres = [((c[0] + c[2]) / 2, (c[1] + c[3]) / 2) for c in cells]
-
-    def pitch(axis: int, size: float, other: float) -> Optional[float]:
-        """Median step to the next cell along `axis`, so gutters of any width count."""
-        steps = [min((q[axis] - p[axis] for q in centres
-                      if q[axis] - p[axis] > 0.5 * size and abs(q[1 - axis] - p[1 - axis]) < 0.5 * other),
-                     default=None) for p in centres]
-        steps = [d for d in steps if d is not None]
-        return float(np.median(steps)) if steps else None
-    px, py = pitch(0, w, h), pitch(1, h, w)
-    if px is None or py is None:
-        return None
-    cols, rows = int(round((gx1 - gx0 - w) / px)) + 1, int(round((gy1 - gy0 - h) / py)) + 1
-    if cols < 2 or rows < 2:
-        return None
-    # Slot k along an axis is centred at the grid edge + half a cell + k pitches.
-    sx, sy = gx0 + ((gx1 - gx0) - (cols - 1) * px - w) / 2, gy0 + ((gy1 - gy0) - (rows - 1) * py - h) / 2
-    slot = {}
-    for c in cells:
-        cw, ch = c[2] - c[0], c[3] - c[1]
-        if abs(cw - w) > TILE_SIZE_TOL * w or abs(ch - h) > TILE_SIZE_TOL * h:
-            continue                     # two tiles read as one, or a piece of one
-        k = (int(round(((c[1] + c[3]) / 2 - sy - h / 2) / py)), int(round(((c[0] + c[2]) / 2 - sx - w / 2) / px)))
-        if not (0 <= k[0] < rows and 0 <= k[1] < cols):
-            continue
-        slot.setdefault(k, c)
-    if len(slot) < LATTICE_MIN_FILLED * rows * cols \
-            or {r for r, _ in slot} != set(range(rows)) or {c for _, c in slot} != set(range(cols)):
-        return None
-    xs = [(float(np.median([c[0] for (_, j), c in slot.items() if j == col])),
-           float(np.median([c[2] for (_, j), c in slot.items() if j == col]))) for col in range(cols)]
-    ys = [(float(np.median([c[1] for (i, _), c in slot.items() if i == row])),
-           float(np.median([c[3] for (i, _), c in slot.items() if i == row]))) for row in range(rows)]
-    return [[xs[j][0], ys[i][0], xs[j][1], ys[i][1]] for i in range(rows) for j in range(cols)]
-
-
-def find_grid(image_path: str) -> Optional[List[Box]]:
-    """The cells of the board's grid in reading order, as (x0, y0, x1, y1) pixels;
-    None when the board has no grid, or its cells do not form whole rows of one length."""
-    from ..pointer.detector import detect_file
-
-    dets = detect_file(image_path)
-    grids = [d for d in dets if d["class"] == "grid" and d["score"] >= GRID_MIN_SCORE]
-    if not grids:
-        return None
-    grid = max(grids, key=lambda d: d["score"])["box"]
-    cells = _cells_in(grid, [d["box"] for d in dets if d["class"] == "cell" and d["score"] >= CELL_MIN_SCORE])
-    cells = _with_tiles(cells, _cells_in(grid, [d["box"] for d in dets
-                                                if d["class"] in TILE_CLASSES and d["score"] >= CELL_MIN_SCORE]))
-    if len(cells) < 4:
-        return None
-    rows = _rows(cells)
-    if len(rows) < 2 or len({len(r) for r in rows}) != 1 or len(rows[0]) < 2:
-        lattice = _lattice(grid, cells)
-        return None if lattice is None else [tuple(int(round(v)) for v in c) for c in lattice]
-    return [tuple(int(round(v)) for v in c) for r in rows for c in r]
-
 
 # ── colour ──────────────────────────────────────────────────────────────
 

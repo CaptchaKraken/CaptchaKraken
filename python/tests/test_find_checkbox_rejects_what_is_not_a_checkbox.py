@@ -1,8 +1,8 @@
-"""The tick box the driver clicks, found by the element detector on real vendor widgets.
+"""The tick box the driver clicks, found by pixel arithmetic on real vendor widgets.
 
 A false positive clicks the page background; a false negative never starts the solve.
-The widgets in `fixtures/checkbox/` were photographed in a language the detector never
-trained on, so passing them means it reads the widget, not that it remembers the picture.
+The widgets in `fixtures/checkbox/` were photographed in Japanese, whose text holds
+square glyphs (ロ) a box finder must not take for the box.
 """
 
 import os
@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import captchakraken.pointer.detector as detector
 from captchakraken.tool_calls.find_checkbox import find_checkbox
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "checkbox")
@@ -20,8 +19,7 @@ GRIDS = os.path.join(os.path.dirname(__file__), "fixtures", "grid")
 #: Widget picture -> the tick box on it (x0, y0, x1, y1), as the vendor's DOM placed it.
 #: GeeTest v4 is not here: its whole "click to verify" bar is the target, and the driver
 #: clicks it through the config's `box` selector without a screenshot (see
-#: test_an_in_page_button_with_no_tick_box_is_clicked_where_it_is). The lite detector
-#: does not find a box that fills the whole shot, and nothing asks it to.
+#: test_an_in_page_button_with_no_tick_box_is_clicked_where_it_is).
 TICK_BOXES = {
     "recaptcha_light.png": (13, 23, 41, 51),
     "recaptcha_dark_compact_2x.png": (26, 57, 82, 113),
@@ -33,19 +31,6 @@ TICK_BOXES = {
 }
 #: A ticked or passed widget has nothing left to click.
 TICKED = ["recaptcha_ticked_1.5x.png", "hcaptcha_ticked.png", "turnstile_passed.png"]
-
-
-@pytest.fixture(params=sorted(detector.WEIGHTS), autouse=True)
-def model(request, monkeypatch):
-    """Both released detectors: lite runs on every small or slow machine."""
-    if os.getenv("CAPTCHA_KRAKEN_DETECTOR"):
-        pytest.skip("CAPTCHA_KRAKEN_DETECTOR pins one local file; both released models are tested without it")
-    monkeypatch.setenv("CAPTCHA_KRAKEN_DETECTOR_MODEL", request.param)
-    detector.local.cache_clear()
-    detector._detect_file.cache_clear()
-    yield request.param
-    detector.local.cache_clear()
-    detector._detect_file.cache_clear()
 
 
 def _iou(a, b):

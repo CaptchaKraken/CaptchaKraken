@@ -35,6 +35,11 @@ export interface VendorSelectors {
   readonly fresh?: string;
   /** Inside the challenge frame: the pictures a board is made of; the driver waits for each to have painted. */
   readonly images?: readonly string[];
+  /**
+   * Inside the challenge frame: the tiles of the board's grid, in reading order. Where each one is placed is read from
+   * the DOM, to click it and to watch it reload.
+   */
+  readonly tiles?: readonly string[];
   /** Inside the widget: the vendor's own submit control, tried after the generic text probes. */
   readonly submit?: readonly string[];
   /** Inside the challenge frame: verdict banners and what each means. */
@@ -63,7 +68,8 @@ export interface SelectorConfigFile {
   readonly custom?: Record<string, unknown> | null;
   readonly vendors?: Record<string, Record<string, unknown>>;
   readonly generic?: Record<string, readonly string[]>;
-  readonly detector?: DetectorModel;
+  /** Left from the element detector the client no longer has: still accepted, and ignored. */
+  readonly detector?: string;
   readonly [comment: `_${string}`]: unknown;
 }
 
@@ -80,24 +86,14 @@ export interface SelectorConfig {
   readonly custom: CustomSelectors | null;
   readonly vendors: ReadonlyArray<readonly [Vendor, VendorSelectors]>;
   readonly generic: Readonly<Record<GenericKey, readonly string[]>>;
-  /** Which element detector the engine runs: see `DETECTOR_MODELS`. */
-  readonly detector: DetectorModel;
 }
-
-/**
- * The element detector's weights: `lite` keeps a board near 100 ms on one vCPU, `standard` is the larger network, and
- * `auto` takes `lite` on a machine of two CPUs or fewer, else times one board and takes `standard` when it fits.
- * `CAPTCHA_KRAKEN_DETECTOR_MODEL` in the environment overrides the config.
- */
-export const DETECTOR_MODELS = ['auto', 'standard', 'lite'] as const;
-export type DetectorModel = (typeof DETECTOR_MODELS)[number];
 
 const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece'] as const;
 type GenericKey = (typeof GENERIC)[number];
 // The file is spelled as the Python port's fields; these three are camelCase here.
 const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
 const FIELDS = ['hosts', 'challenge', 'checkbox', 'enclave', 'widget', 'response', 'checked', 'box', 'accepted', 'fresh',
-  'images', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'piece', 'refresh', 'hold_completes'];
+  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'piece', 'refresh', 'hold_completes'];
 const ONE = new Set(['response', 'checked', 'accepted', 'fresh']);
 const BANNERS = new Set<string>(Object.values(RecaptchaBanner));
 const VENDOR_VALUES = new Set<string>(Object.values(Vendor));
@@ -151,16 +147,10 @@ function entry(where: string, raw: unknown, hostsRequired = true): VendorSelecto
 function parse(name: string, doc: unknown, base: SelectorConfig | null): SelectorConfig {
   if (!isObject(doc)) throw new SelectorConfigError(`${name}: the top level must be an object`);
   for (const key of Object.keys(doc)) {
+    // `detector` chose an element detector the client no longer has; a config written for one still loads.
     if (!key.startsWith('_') && !['detector', 'custom', 'vendors', 'generic'].includes(key)) {
-      throw new SelectorConfigError(`${name}: ${key}: not a config key (detector, custom, vendors, generic)`);
+      throw new SelectorConfigError(`${name}: ${key}: not a config key (custom, vendors, generic)`);
     }
-  }
-  let detector: DetectorModel = base?.detector ?? 'auto';
-  if ('detector' in doc) {
-    if (!(DETECTOR_MODELS as readonly unknown[]).includes(doc.detector)) {
-      throw new SelectorConfigError(`${name}: detector: ${JSON.stringify(doc.detector)} is not one of ${DETECTOR_MODELS.join(', ')}`);
-    }
-    detector = doc.detector as DetectorModel;
   }
   let custom = base?.custom ?? null;
   if ('custom' in doc) custom = doc.custom === null ? null : entry(`${name}: custom`, doc.custom, false);
@@ -190,7 +180,7 @@ function parse(name: string, doc: unknown, base: SelectorConfig | null): Selecto
   }
   const absent = GENERIC.filter((k) => !generic[k]);
   if (absent.length) throw new SelectorConfigError(`${name}: generic: missing ${JSON.stringify(absent)}`);
-  return { custom, vendors: [...vendors], generic: generic as Record<GenericKey, readonly string[]>, detector };
+  return { custom, vendors: [...vendors], generic: generic as Record<GenericKey, readonly string[]> };
 }
 
 function read(file: string): unknown {

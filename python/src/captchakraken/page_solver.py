@@ -468,6 +468,11 @@ SLIDE_STALL_PX = 1.0
 
 # No prompt and no pictures both read as ready: waiting for `.prompt-text` to exist once paid the whole timeout
 # before every board of a challenge that draws none (tower_stack: 18s a round, 2/2 -> 0/2).
+_TILE_RECTS_JS = """(sel) => Array.from(document.querySelectorAll(sel))
+  .map((e) => e.getBoundingClientRect())
+  .filter((r) => r.width > 0 && r.height > 0)
+  .map((r) => [r.left, r.top, r.right, r.bottom])"""
+
 _BOARD_IMAGES_READY_JS = """({ prompt, images }) => {
     const vis = (el) => !!el && el.getClientRects().length > 0
         && getComputedStyle(el).visibility !== 'hidden';
@@ -514,9 +519,6 @@ class PageSolver:
         self._solver = solver or CaptchaSolver(**solver_kwargs)
         self._human: Humanizer = resolve_humanizer(self.config)
         self._sel = SelectorTable(self.config.custom_selectors, config=self.config.selectors)
-        # The config's `detector`: which element detector finds this solver's grids and tick boxes.
-        from .pointer import detector as _detector
-        _detector.configure(self._sel.config.detector)
         self._last_submit_frame_hash: Optional[str] = None
         self._deadline_ms: Optional[float] = None
         self._budget: Optional[PhaseBudget] = None
@@ -788,14 +790,30 @@ class PageSolver:
 
     # ── the shared half, in-process ──────────────────────────────────────
 
-    def _find_grid(self, image_path: str) -> Optional[List[Sequence[int]]]:
-        from .tool_calls.find_grid import find_grid
+    def _dom_grid(self, element: Any, image_path: str) -> Optional[List[Sequence[int]]]:
+        """The board's tiles as (x0, y0, x1, y1) pixels of `image_path`, a screenshot of `element`, in reading order.
 
-        try:
-            return find_grid(image_path)
-        except Exception as exc:
-            _debug(f"find_grid failed: {exc}")
+        Read from the vendor's own markup, not the picture: a tile is where the challenge frame placed it. A tile's
+        rectangle is in the frame's CSS pixels, which start at the iframe's corner, so it scales straight onto the
+        screenshot. None when the vendor names no tiles or the frame shows none.
+        """
+        sel = self._sel.selectors.get(Vendor.RECAPTCHA)
+        dims = _read_png_dimensions(image_path)
+        if sel is None or not sel.tiles or not dims:
             return None
+        try:
+            frame = element.content_frame()
+            box = element.bounding_box()
+            if frame is None or not box or box["width"] <= 0 or box["height"] <= 0:
+                return None
+            rects = frame.evaluate(_TILE_RECTS_JS, ",".join(sel.tiles))
+        except Exception as exc:
+            _debug(f"reading the grid's tiles failed: {exc}")
+            return None
+        sx, sy = dims[0] / box["width"], dims[1] / box["height"]
+        boxes = [(int(round(x0 * sx)), int(round(y0 * sy)), int(round(x1 * sx)), int(round(y1 * sy)))
+                 for x0, y0, x1, y1 in rects or ()]
+        return boxes if len(boxes) >= 4 else None
 
     def _has_movement(self, path_a: str, path_b: str, threshold: float) -> bool:
         from .image_processor import ImageProcessor
@@ -1430,7 +1448,7 @@ class PageSolver:
             _delay(_DETECTION_POLL_MS)
 
     def _checkbox_on_screen(self, element: Any) -> Optional[Tuple[float, float]]:
-        """One capture and the element detector, no model: a point inside the tick box, or None when none is drawn."""
+        """One capture and plain pixel arithmetic, no model: a point inside the tick box, or None when none is drawn."""
         from .tool_calls.find_checkbox import find_checkbox
 
         box = element.bounding_box()
@@ -1594,7 +1612,7 @@ class PageSolver:
         def judge(frames, elapsed):
             if len(frames) < 2:
                 return None
-            boxes = self._find_grid(frames[1])
+            boxes = self._dom_grid(element, frames[1])
             if not boxes:
                 return False if elapsed >= cfg.grid_load_timeout_ms else None
             states = self._grid_cell_states(frames[0], frames[1], boxes)
@@ -1645,7 +1663,7 @@ class PageSolver:
         path = _tmp_png("findgrid")
         try:
             self._screenshot(element, path, timeout_ms=self.config.element_screenshot_timeout_ms)
-            boxes = self._find_grid(path)
+            boxes = self._dom_grid(element, path)
             dims = _read_png_dimensions(path)
             if not boxes or len(boxes) not in (9, 16) or not dims:
                 return None

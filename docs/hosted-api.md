@@ -5,7 +5,7 @@ download, no server to run.
 
 The hosted API answers the current client with **Midnight V2 4B Q4**, the same
 public weights `captchakraken fetch` installs. It uses the v2 pointer endpoint,
-`POST /v1/pointer`, and the downloadable CNN element detector.
+`POST /v1/pointer`, and is sent the bare board.
 
 An older client keeps using its registered chat-completion model because its
 prompts and inference protocol belong to that generation. There is no silent

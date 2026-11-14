@@ -3,6 +3,33 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [5.0.0] - Unreleased
+
+### Removed (breaking)
+
+- **The element detector.** The client runs no CNN. `onnxruntime` is no longer
+  a dependency and no detector weights are downloaded; `captchakraken fetch`
+  downloads the model alone. The pointer models score higher on the bare board
+  than with the detector's numbered marks (TwilightV2-2B 72.6% against 68.2%,
+  MidnightV2-4B q4 75.1% against 70.8%, on 1,067 real boards), so every board is
+  now sent bare.
+- `find_grid`, `config.pointer_detector()`, the CLI commands `find-grid`,
+  `detect-selected`, `get-numbered-grid` and `grid-cell-states`, and the
+  `CAPTCHA_POINTER_DETECTOR`, `CAPTCHA_KRAKEN_DETECTOR` and
+  `CAPTCHA_KRAKEN_DETECTOR_MODEL` variables. A `detector` key in
+  `captchakraken.config.json` is ignored rather than refused.
+- The letter detector beside the pointer model: a typed code is read by the
+  model alone. The pointer server ignores `marked`, returns `"elements": []`, and
+  still accepts `--detector` and `--letters` so an existing unit file starts it.
+
+### Changed
+
+- **A reCAPTCHA grid's cells come from its markup.** The selector config's new
+  `tiles` field names them (`td.rc-imageselect-tile`); both ports read each
+  tile's rectangle in the challenge frame and scale it onto the screenshot.
+- **The tick box is found with pixel arithmetic:** the largest flat, square
+  region closed in by an outline, with no model.
+
 ## [4.2.0] - 2026-11-12
 
 ### Added

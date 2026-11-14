@@ -88,14 +88,10 @@ def build_serve_command() -> "list[str]":
     from . import prompts
 
     if prompts.resolve(config.lora_adapter()).pointer:
-        detector = config.pointer_detector()
-        if not detector:
-            raise RuntimeError("No detector is set up for the pointer server. Run: captchakraken fetch")
         capture = config.max_cudagraph_capture_size()
         return [
             _serve_python(), "-m", "captchakraken.pointer.server",
             "--model", config.serve_model(),
-            "--detector", detector,
             "--host", os.getenv("CAPTCHA_POINTER_HOST", "127.0.0.1"),
             "--port", str(config.port()),
             "--gpu-memory-utilization", str(config.gpu_memory_utilization()),

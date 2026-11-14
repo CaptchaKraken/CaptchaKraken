@@ -36,7 +36,7 @@ The flow of one solve, whichever port you start from:
 ```
 your Page  ──>  driver (js/src/solver.ts  or  python/.../page_solver.py)
                   │  screenshot the widget
-                  ├─>  find_grid (CPU detector) ──> overlay.py draws cell numbers
+                  ├─>  reCAPTCHA cells from the DOM tiles ──> overlay.py draws cell numbers
                   ├─>  planner.py ──> HTTP ──> vLLM endpoint (local or hosted)
                   │                             prompts.py picks the generation
                   │                             models.json says which, per model
@@ -47,7 +47,7 @@ your Page  ──>  driver (js/src/solver.ts  or  python/.../page_solver.py)
 
 The TypeScript driver owns no inference of its own: it shells out to the bundled
 Python CLI (`js/src/cli-invocation.ts` → `python/src/captchakraken/cli.py`), so
-grid detection and prompting have exactly one implementation. The two ports are
+cell-state checks and prompting have exactly one implementation. The two ports are
 otherwise mirrors of each other, and `contract.json` is what holds them level.
 
 Animated challenges take one extra stage: the driver records a burst,
@@ -162,7 +162,8 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/limits.test.ts` | The `5 < 8 < 10` round-cap ordering against the gateway — a type-check cannot notice a changed integer. |
 | `js/src/browser-compat.test.ts` | The compatibility claim, driven against **real** Playwright and Puppeteer, so a library renaming a method we call is caught rather than agreed with by a fake. |
 | `js/src/a-capture-never-clips-the-page.test.ts` | Every capture is one unclipped viewport screenshot cropped locally, at the page's device pixel ratio, scrolled into view once rather than per shot. |
-| `js/src/a-checkbox-is-clicked-not-watched.test.ts` | A checkbox is ticked from the DOM, or found on one capture by the element detector when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `js/src/a-checkbox-is-clicked-not-watched.test.ts` | A checkbox is ticked from the DOM, or found on one capture by `find_checkbox` when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `js/src/a-grid-is-read-from-the-vendors-tiles.test.ts` | A reCAPTCHA grid's cells come from the challenge frame's tiles, scaled onto the screenshot; fewer than four, or no frame, is no grid. |
 | `js/src/a-board-with-no-answer-is-skipped.test.ts` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `js/src/our-own-gesture-is-not-animation.test.ts` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `js/src/puppeteer-adapter.test.ts` | The adapter's translation layer, pinned difference by difference. |
@@ -299,19 +300,18 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/updater.py` | `captchakraken fetch`: pull newer weights, upgrade the serving stack, and restart a running local server so the change takes effect. |
 | `python/src/captchakraken/errors.py` | `CaptchaKrakenAPIError` and its stable codes: the endpoint may be a local vLLM or the hosted API, and a refusal from the latter has to arrive as something a caller can branch on. |
 | `python/src/captchakraken/timing.py` | Lightweight timing helpers used to account for a solve by phase. |
-| `python/src/captchakraken/tool_calls/find_grid.py` | The board's grid as cell boxes in reading order, read off the element detector's `grid` and `cell` detections, plus the cell-state checks (selected, empty, loading, fading) on numpy and scipy. Every grid solve rests on it. |
-| `python/src/captchakraken/tool_calls/find_checkbox.py` | Finds the "I'm not a robot" tick box with the element detector's `checkbox` class, before any model is involved. |
+| `python/src/captchakraken/tool_calls/find_grid.py` | The cell-state checks for a grid whose cells the vendor's DOM gave (selected, empty, loading, fading) on numpy and scipy, and the numbered overlay a chat model reads. It finds no grid itself. |
+| `python/src/captchakraken/tool_calls/find_checkbox.py` | Finds the "I'm not a robot" tick box with plain pixel arithmetic, before any model is involved: a flat-colour square region closed by an outline. |
 | `python/src/captchakraken/tool_calls/board_painted.py` | Answers whether the widget has PAINTED its puzzle or is showing the blank panel it rebuilds behind, so a hole is never sent to the model. |
 | `python/src/captchakraken/tool_calls/slide_tracker.py` | The selector-free slide loop: segments what the handle moves (flow, then the pixels its own motion carries), tells a slide from a turn, tracks it to a tenth of a pixel, and says where to put the handle next so the model's point lands on its goal. |
 | `python/src/captchakraken/tool_calls/fill_tracker.py` | The press-and-hold release: reads how far a held widget's fill has come along the model's `from`->`to` line by what changed since the press, and says when to let go — at the mark, or a look early when the next one would overshoot further. |
-| `python/src/captchakraken/pointer/__init__.py` | The pointer (prompt generation 4): a model that reads its whole answer from one prefill, numbering the elements the detector found instead of using find_grid. |
+| `python/src/captchakraken/pointer/__init__.py` | The pointer (prompt generation 4): a model that reads its whole answer from one prefill of the bare board, with no grid finding and nothing drawn on it. |
 | `python/src/captchakraken/pointer/layout.py` | The pointer's one source of truth shared by training and serving: the prompt (board, element list, 46 question markers), the packed decision vector, and how it becomes a generation-3 answer with element ids. |
-| `python/src/captchakraken/pointer/detector.py` | The element detector (Mask R-CNN, ResNet-18): a board in, classed elements with boxes and masks out. Runs the ONNX export on the CPU in the client (weights fetched once and hash-checked) or the torch checkpoint beside a GPU. |
-| `python/src/captchakraken/pointer/elements.py` | Numbers detected elements in reading order and says which element's mask a point lands on. |
-| `python/src/captchakraken/pointer/marks.py` | Draws the numbered overlay the model sees: a 1 px trace of each element's mask, not its box, and a tag drawn in a built-in pixel font at 3x, big enough for the vision encoder to read. |
+| `python/src/captchakraken/pointer/elements.py` | Numbers elements in reading order and says which element's mask a point lands on. Training reads them; the client sends every board bare. |
+| `python/src/captchakraken/pointer/marks.py` | Draws the numbered overlay of a marked training board: a 1 px trace of each element's mask, not its box, and a tag drawn in a built-in pixel font at 3x, big enough for the vision encoder to read. The client never draws it. |
 | `python/src/captchakraken/pointer/heads.py` | The heads that read the answer off the prefill's hidden states: action, count, a point per slot, the element under it, the video moment, and typed text. |
 | `python/src/captchakraken/pointer/vllm_plugin.py` | The vLLM plugin that serves the pointer as a pooling model: one prefill per board, and the heads' packed decision is the output. |
-| `python/src/captchakraken/pointer/service.py` | Board in, answers out: detector, marks, one vLLM prefill, decode, the three likeliest distinct plans. |
+| `python/src/captchakraken/pointer/service.py` | Board in, answers out: one vLLM prefill of the bare board, decode, the three likeliest distinct plans. |
 | `python/src/captchakraken/pointer/server.py` | The `/v1/pointer` HTTP endpoint in front of `PointerService`; returns the three likeliest actions and the first as `answer`. |
 
 ### `python/tests/`
@@ -324,7 +324,8 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | File | Purpose |
 |---|---|
 | `python/tests/test_a_pointer_answer_always_carries_points.py` | Every pointer answer is its points: the click, drag, slide, type, hold and moment shapes the heads decode to. |
-| `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer` and never runs find_grid; its answer is performed like generation 3's. |
+| `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer`, with no prompt and no numbered overlay; its answer is performed like generation 3's. |
+| `python/tests/test_a_grid_is_read_from_the_vendors_tiles.py` | A reCAPTCHA grid's cells come from the challenge frame's tiles, scaled onto the screenshot; fewer than four, or no frame, is no grid. |
 | `python/tests/test_a_slider_is_shown_with_its_handle.py` | The Python twin: the shot widens to a vendor handle's track found beside the widget, skips a handle inside it (Yidun's piece), stays one size while the handle moves, caps the growth, and survives a scope that cannot be searched. |
 | `python/tests/test_an_element_is_outlined_by_its_mask.py` | The overlay traces each element's mask, keeps its tags readable and off one another, and its look is frozen by a hash. |
 | `python/tests/test_old_config_names_still_work.py` | A config written for an older release still loads: a renamed option is read under its new name, retired ones are accepted. |
@@ -338,7 +339,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_video_generation_sends_the_clip.py` | A model on a video prompt generation is sent the clip as one video and answers with a time; an older model still gets numbered keyframes. |
 | `python/tests/test_a_board_that_never_repeats_is_animated.py` | A continuous animation never repeats and never settles; the burst calls it animated rather than a still. |
 | `python/tests/test_a_capture_never_clips_the_page.py` | Every capture is one unclipped viewport screenshot cropped locally, at the page's device pixel ratio, scrolled into view once rather than per shot. |
-| `python/tests/test_a_checkbox_is_clicked_not_watched.py` | A checkbox is ticked from the DOM, or found on one capture by the element detector when the DOM cannot reach it — never polled, filmed or sent to the model. |
+| `python/tests/test_a_checkbox_is_clicked_not_watched.py` | A checkbox is ticked from the DOM, or found on one capture by `find_checkbox` when the DOM cannot reach it — never polled, filmed or sent to the model. |
 | `python/tests/test_our_own_gesture_is_not_animation.py` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `python/tests/test_geetest_accept_is_a_signal.py` | GeeTest's accept banner is a solve; its refuse banner, and its closed popup wrapper, are not. |
 | `python/tests/test_a_missing_prompt_is_not_a_reason_to_wait.py` | A readiness gate must not block on an element that is not there — a board with no `.prompt-text` paid the whole timeout, silently, per board. |
@@ -376,8 +377,6 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_watcher.py` | The watcher's contract, driven against a fake solver. |
 | `python/tests/test_browser_compat.py` | The Python driver's compatibility claim, checked against a real browser. |
 | `python/tests/test_humanizer.py` | Humanisation is an input device, not a realism dial: the mobile device never emits a mouse event. |
-| `python/tests/test_grid_detection_ci.py` | The hermetic grid-detection smoke tests: the checks that need no corpus of real captures. |
-| `python/tests/test_find_grid_reads_the_detectors_cells.py` | With the detector stubbed: cells come back in reading order, inside the grid, in whole rows, or not at all. |
 | `python/tests/test_the_film_outlives_the_answer.py` | The film of an animated board accumulates across rounds and dies with the board, not with the answer. |
 | `python/tests/test_a_new_board_ends_the_film.py` | `_fresh_board()` drops the recorded answer, the animated verdict and the slice, so none of them cross onto the next board. |
 | `python/tests/test_a_replaced_board_has_not_failed_yet.py` | A failed round arms the second look only while its board is still up, and a replaced board drops an arm the previous one set. |
@@ -389,12 +388,8 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_board_is_routed_and_watched_once_it_has_painted.py` | A widget that has not drawn yet picks the wrong expert and reads as a still; both questions wait for the paint. |
 | `python/tests/test_a_board_with_no_answer_is_skipped.py` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `python/tests/test_the_notice_travels_with_the_package.py` | The LGPL notice for Cursory has to reach both published packages, and three copies are three chances to drift. |
-| `python/tests/test_grid_dims_must_be_possible.py` | Only the shapes the grid expert was trained on reach it, per named vendor; a count no puzzle has is never a grid. |
-| `python/tests/test_grid_never_pairs_tiles.py` | A board of tall tiles is never read as a lattice of tile pairs, which sent it to the wrong expert. |
-| `python/tests/test_hcaptcha_boards_reach_the_right_expert.py` | Two captured Tier 3 boards: a 6x3 card board is not read as a 3x3 of tile pairs, and an off-centre 3x3 photo grid is still found. |
 | `python/tests/test_grid_round_pays_once.py` | One grid round costs one detection, not one per cell. |
 | `python/tests/test_hcaptcha_badge_detection.py` | A photo is not a selection badge: the selected-state check must not read tile content as a tick. |
-| `python/tests/test_selected_fields.py` | Selected-tile readback over the same corpus, and skips the same way. |
 | `python/tests/test_freshness_check.py` | The stale-frame guard: an image that changed while the model was thinking must not be acted on. |
 | `python/tests/test_stale_handle_after_submit.py` | A submit the vendor already accepted must not be re-solved, and a closed page must not be retried as a stale handle. |
 | `python/tests/test_empty_answer_still_submits.py` | The submit control is looked up outside the loop over the model's actions, so an empty answer is still sent. |
@@ -413,14 +408,12 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_refused_clip_is_not_re_asked.py` | A recording with no steady screen cannot answer differently, so a refusal must throw the frames away rather than re-ask them. |
 | `python/tests/test_a_repeated_answer_is_not_re_performed.py` | An answer the widget already refused is not pressed again; the round re-asks instead. |
 | `python/tests/test_a_refused_pointer_answer_moves_to_the_next.py` | A pointer retry gets the likeliest answer the board has not already refused, read from the heads' runner-ups; the server returns the three likeliest distinct actions, and the planner uses them in order before refreshing. |
-| `python/tests/test_a_typed_code_is_read_by_the_model_and_the_letter_detector_together.py` | A typed code is the one the pointer and the letter detector read together: boxes settle the count, evidence each letter. |
 | `python/tests/test_a_typed_captcha_is_shown_with_its_box.py` | A typed captcha is photographed with its text box, as every training board shows it. |
 | `python/tests/test_a_hold_is_held_until_the_widget_completes.py` | A `hold` answer survives parsing as a hold with its press and fill line, the fill tracker finds a drawn bar's leading edge, and the press lasts until the fill reaches the model's mark or the widget finishes, never longer than the cap. |
 | `python/tests/test_one_prompt_answers_every_puzzle.py` | Prompt generation 3: one prompt sent to one unrouted model, one parser for its answer, a grid read by ids or by where the points land, refresh performed and never counted as a repeat, an animated board asked the one prompt over a video, and both ports' refresh and press-and-hold selectors equal. |
 | `python/tests/test_a_burst_cannot_trip_its_own_deadline.py` | The burst plans its frames from the ceiling, so it must not be able to exceed the deadline it was given. |
 | `python/tests/test_cycling_board_waits_for_its_screen.py` | The Python twin of the frame-gate regression: hold until the page shows the keyframe the model chose. |
 | `python/tests/test_every_keyframe_write_names_its_stem.py` | Both entries into the animated path write keyframes the same way; only one of them used to be exercised. |
-| `python/tests/test_detector_weights_are_fetched_once_and_checked.py` | The detector's weights are downloaded once at the pinned commit, checked against the pinned hash and refused (and not kept) when they differ. |
 | `python/tests/test_keyframes_compare_each_pair_once.py` | Keyframe extraction diffs each pair of frames once, and remembering the diffs changes no keyframe. |
 | `python/tests/test_the_client_runs_without_opencv.py` | No module of the package imports OpenCV, and the client loads where it cannot. |
 | `python/tests/test_a_frame_keeps_its_colours_and_its_pixels.py` | Frames stay BGR from disk to model, grey and movement use OpenCV's weights and threshold, and resizes reproduce OpenCV's pixels. |
@@ -428,22 +421,22 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_repeat_on_a_silent_board.py` | A repeated answer counts as a refusal only if the widget contacted its server, and one board reads as one board however its picture was captured. |
 | `python/tests/test_fetch_command.py` | The `fetch` command's plan: what it would pull, upgrade and restart, without doing any of it. |
 | `python/tests/test_overlay_is_what_the_model_reads.py` | `add_overlays_to_image` is exported API and the model reads what it draws. Pins where marks land for each of the two accepted bbox forms, that the source is not overwritten when an output path is given, that the result is RGB, and that an unusable box raises instead of writing a wrong overlay. |
-| `python/tests/test_find_checkbox_rejects_what_is_not_a_checkbox.py` | The tick box of every vendor's widget is found on real captures in a language the detector never trained on; a ticked widget, a blank page, a grid tile and an unreadable file give none. |
+| `python/tests/test_find_checkbox_rejects_what_is_not_a_checkbox.py` | The tick box of every vendor's widget is found by pixel arithmetic on real captures in a language none of its thresholds were tuned against; a ticked widget, a blank page, a grid tile and an unreadable file give none. |
 | `python/tests/test_the_two_ports_share_one_mouse.py` | The mouse is a port, not a rewrite, so the two drivers agree on a seed exactly rather than statistically. |
 | `python/tests/fixtures/cursory_cross_port.json` | The recorded JS-port trajectories `test_the_two_ports_share_one_mouse.py` checks the Python port against: four seeds, points and timings. |
-| `python/tests/fixtures/grid/groceries_6x3_mac.png` | A 6x3 grocery board as the engine received it on macOS, where scrollbars shift the layout; the tile-pairs regression image. |
-| `python/tests/fixtures/grid/photos_3x3_offcentre.png` | An hCaptcha 3x3 photo grid sitting off-centre in its panel, as the engine received it; find_grid once returned nothing on it. |
-| `python/tests/fixtures/checkbox/captchafox.png` | CaptchaFox's widget, captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/geetest_v4_bar.png` | GeeTest v4's click-to-verify bar (the whole bar is the target), captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/hcaptcha_dark.png` | hCaptcha's dark widget at 1x, captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/hcaptcha_light_compact_hover_1.5x.png` | hCaptcha's compact light widget under the cursor at 1.5x, captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/hcaptcha_ticked.png` | hCaptcha's widget once ticked (no box to click), captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/recaptcha_dark_compact_2x.png` | reCAPTCHA's compact dark widget at 2x, captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/recaptcha_light.png` | reCAPTCHA's light widget at 1x, captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/recaptcha_ticked_1.5x.png` | reCAPTCHA's widget once ticked at 1.5x (no box to click), captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/turnstile_dark_flexible_2x.png` | Turnstile's flexible-width dark widget at 2x, captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/turnstile_light.png` | Turnstile's light widget at 1x, captured in a language the detector never trained on; a find_checkbox fixture. |
-| `python/tests/fixtures/checkbox/turnstile_passed.png` | Turnstile's widget once passed (no box to click), captured in a language the detector never trained on; a find_checkbox fixture. |
+| `python/tests/fixtures/grid/groceries_6x3_mac.png` | A 6x3 grocery board as the engine received it on macOS, where scrollbars shift the layout; a grid tile find_checkbox must not take for a tick box. |
+| `python/tests/fixtures/grid/photos_3x3_offcentre.png` | An hCaptcha 3x3 photo grid sitting off-centre in its panel, as the engine received it; a grid tile find_checkbox must not take for a tick box. |
+| `python/tests/fixtures/checkbox/captchafox.png` | CaptchaFox's widget, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/geetest_v4_bar.png` | GeeTest v4's click-to-verify bar (the whole bar is the target), captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/hcaptcha_dark.png` | hCaptcha's dark widget at 1x, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/hcaptcha_light_compact_hover_1.5x.png` | hCaptcha's compact light widget under the cursor at 1.5x, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/hcaptcha_ticked.png` | hCaptcha's widget once ticked (no box to click), captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/recaptcha_dark_compact_2x.png` | reCAPTCHA's compact dark widget at 2x, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/recaptcha_light.png` | reCAPTCHA's light widget at 1x, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/recaptcha_ticked_1.5x.png` | reCAPTCHA's widget once ticked at 1.5x (no box to click), captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/turnstile_dark_flexible_2x.png` | Turnstile's flexible-width dark widget at 2x, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/turnstile_light.png` | Turnstile's light widget at 1x, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
+| `python/tests/fixtures/checkbox/turnstile_passed.png` | Turnstile's widget once passed (no box to click), captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |
 | `python/tests/fixtures/hcaptcha_enclave/challenge.html` | A recorded challenge frame (3x3 image grid), reduced to the markup the driver reads, with flat pictures and a stand-in script that toggles tiles and hands the enclave a token. |
 | `python/tests/fixtures/hcaptcha_enclave/enclave.html` | A recorded enclave frame with its challenge open: the challenge frame, the invisible-checkbox frame and the response fields the token is written to. |
 | `python/tests/fixtures/hcaptcha_enclave/host.html` | A recorded host page after the challenge was raised: two full-viewport enclaves and no vendor frame of its own, one enclave hidden. Both ports' enclave tests serve it. |

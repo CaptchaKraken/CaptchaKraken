@@ -191,7 +191,7 @@ BUILTIN_PROMPTS = {
         ),
     },
     # Generation 4 is the pointer (`captchakraken.pointer`): the board goes to the server's /pointer endpoint,
-    # which numbers its elements with the element detector, builds the prompt itself and reads the answer from one
+    # which builds the prompt itself and reads the answer from one
     # prefill. The client sends no prompt text, so there is none to drift.
     "4": {
         "pointer": True,

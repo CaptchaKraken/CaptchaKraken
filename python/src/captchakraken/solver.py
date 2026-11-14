@@ -1,4 +1,4 @@
-"""Image in, actions out: the element detector plus the model, for one still or one recorded animation."""
+"""Image in, actions out: the model, for one still or one recorded animation."""
 
 import os
 import sys
@@ -26,18 +26,11 @@ from .keyframes import KeyframeSet, extract_keyframes, number_for_source_index, 
 from .kinds import ActionKind, PixelAnswerKind, PromptFamily, RetryMode, Vendor
 from .planner import ActionPlanner
 from .tool_calls.find_checkbox import find_checkbox
-from .tool_calls.find_grid import detect_selected_cells, find_grid, get_numbered_grid_overlay
+from .tool_calls.find_grid import detect_selected_cells, get_numbered_grid_overlay
 
 DEBUG = os.getenv("CAPTCHA_DEBUG", "0") == "1"
 # ~1.2% ≈ ±6px on a 512px challenge.
 _PIXEL_BOX_HALF = float(os.getenv("CAPTCHA_PIXEL_BOX_HALF", "0.012"))
-
-# The grid expert was trained on reCAPTCHA's 3x3 and 4x4 and hCaptcha's 3x3 and nothing else, so only those
-# boards are asked as grids; every other vendor's grid goes to the pixel expert, which was trained on them. A
-# caller that names no vendor (the CLI, a script) gets the expert for any 3x3 or 4x4, which is what those boards
-# most often are.
-GRID_CELL_SHAPES = {9: (3, 3), 16: (4, 4)}
-VENDOR_GRID_CELLS: dict[Vendor, frozenset[int]] = {Vendor.HCAPTCHA: frozenset({9}), Vendor.RECAPTCHA: frozenset({9, 16})}
 
 
 def _debug(message: str) -> None:
@@ -85,12 +78,6 @@ def _first_frame(path: str) -> Image.Image:
         raise ValueError(f"Could not read video frame from {path}") from exc
 
 
-def _grid_dims(n_cells: int, puzzle_source: Vendor = Vendor.UNKNOWN):
-    vendor = Vendor(puzzle_source)
-    allowed = frozenset(GRID_CELL_SHAPES) if vendor == Vendor.UNKNOWN else VENDOR_GRID_CELLS.get(vendor, frozenset())
-    return GRID_CELL_SHAPES[n_cells] if n_cells in allowed else None
-
-
 class CaptchaSolver:
     def __init__(self, model: Optional[str] = None, provider: str = "captchaKrakenApi",
                  api_key: Optional[str] = None, expert: Optional[PromptFamily] = None):
@@ -116,7 +103,6 @@ class CaptchaSolver:
         img_w, img_h = self._image_size
 
         if text_mode:
-            # A typed captcha's boxed glyphs are exactly the lattice find_grid looks for, so skip it.
             try:
                 actions = self._solve_pixel(image_path, text_mode=True)
             except ValueError as exc:
@@ -125,15 +111,8 @@ class CaptchaSolver:
                 return actions
             raise UnsupportedCaptchaError("Could not read the text captcha")
 
-        # Generation 4 never runs find_grid: the pointer server's element detector numbers a grid's cells along with
-        # everything else on the board, and its answer is points (and element numbers) like any other board's.
-        grid_boxes = [] if self.planner.prompts.pointer else find_grid(image_path)
-        dims = _grid_dims(len(grid_boxes), puzzle_source) if grid_boxes else None
-        if dims:
-            return self._solve_grid(image_path, grid_boxes, dims[0], dims[1], retry_mode=retry_mode)
-        if grid_boxes:
-            _debug(f"find_grid returned {len(grid_boxes)} cells; not solving as a grid")
-
+        # A board alone carries no grid: its cells are read from the vendor's DOM (`PageSolver`, which asks the grid
+        # expert itself), so here a grid is a board like any other and its answer is points.
         if not self.planner.prompts.pointer:
             checkbox = find_checkbox(image_path)
             if checkbox:

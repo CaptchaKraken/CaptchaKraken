@@ -781,8 +781,6 @@ export class CaptchaKrakenSolver {
       ...(this.solveWidgetHost ? { CAPTCHA_KRAKEN_WIDGET_HOST: this.solveWidgetHost } : {}),
       // This driver warns about a legacy model name itself, once; the engine it starts per round stays quiet.
       CAPTCHA_KRAKEN_MODEL_WARNING: '0',
-      // The config's detector choice; the caller's own environment variable still wins, as it does in Python.
-      ...(process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL ? {} : { CAPTCHA_KRAKEN_DETECTOR_MODEL: this.sel.config.detector }),
     };
   }
 
@@ -884,7 +882,7 @@ export class CaptchaKrakenSolver {
     }
 
     let establishedGridSize: number | null = null;
-    // The challenge frame only: on the anchor this wasted an 8s grid-load timeout plus a find-grid subprocess.
+    // The challenge frame only: on the anchor this wasted an 8s grid-load timeout.
     if (puzzleSource === Vendor.RECAPTCHA && frameRole === FrameRole.CHALLENGE) {
       await this.ph(Phase.GRID_LOAD, () => this.waitForGridCellsLoaded(captchaElement));
       const grid = await this.getGridBoxes(captchaElement);
@@ -1211,7 +1209,7 @@ export class CaptchaKrakenSolver {
     }
   }
 
-  /** One capture and the element detector, no model: a point inside the tick box, or null when none is drawn. */
+  /** One capture and plain pixel arithmetic, no model: a point inside the tick box, or null when none is drawn. */
   private async checkboxOnScreen(el: ElementHandle): Promise<[number, number] | null> {
     const box = await el.boundingBox();
     if (!box) throw new Error('Could not get bounding box of captcha element');
@@ -1618,8 +1616,11 @@ export class CaptchaKrakenSolver {
     const verdict = await this.pollFrames(captchaElement, timeout * GRID_LOAD_CAP_FACTOR, interval, async (frames) => {
       if (frames.length < 2) return undefined;
       const late = Date.now() - start >= timeout;
-      const res = await this.runCvTool('grid-cell-states', { a: frames[0], b: frames[1] }, ['grid-cell-states', frames[0], frames[1]]);
-      if (!res || res.grid === null) return late ? false : undefined;
+      const boxes = await this.domGrid(captchaElement, frames[1]);
+      if (!boxes) return late ? false : undefined;
+      const res = await this.runCvTool('grid-cell-states-fixed', { a: frames[0], b: frames[1], grid_boxes: boxes },
+        ['grid-cell-states-fixed', frames[0], frames[1], JSON.stringify(boxes)]);
+      if (!res) return late ? false : undefined;
       if (!Array.isArray(res.loaded) || !res.loaded.length || !Array.isArray(res.changing) || res.changing.length) return undefined;
       return !Array.isArray(res.empty) || !res.empty.length || late ? true : undefined;
     });
@@ -1627,11 +1628,42 @@ export class CaptchaKrakenSolver {
     return verdict === true;
   }
 
+  /**
+   * The board's tiles as [x0, y0, x1, y1] pixels of `shotPath`, a screenshot of `captchaElement`, in reading order.
+   *
+   * Read from the vendor's own markup, not the picture: a tile is where the challenge frame placed it. Tile and
+   * iframe boxes are both in page pixels, so a tile less the iframe's corner, scaled, lands on the screenshot.
+   * Null when the vendor names no tiles or the frame shows fewer than four.
+   */
+  private async domGrid(captchaElement: ElementHandle, shotPath: string): Promise<number[][] | null> {
+    const tiles = this.sel.selectors[Vendor.RECAPTCHA].tiles ?? [];
+    const dims = readPngDimensions(shotPath);
+    if (!tiles.length || !dims) return null;
+    try {
+      const frame = await captchaElement.contentFrame();
+      const box = await captchaElement.boundingBox();
+      if (!frame || !box || box.width <= 0 || box.height <= 0) return null;
+      const sx = dims.width / box.width;
+      const sy = dims.height / box.height;
+      const boxes: number[][] = [];
+      for (const tile of await frame.locator(tiles.join(',')).all()) {
+        const r = await (await tile.elementHandle({ timeout: 1000 }))?.boundingBox();
+        if (!r || r.width <= 0 || r.height <= 0) continue;
+        const x0 = r.x - box.x;
+        const y0 = r.y - box.y;
+        boxes.push([Math.round(x0 * sx), Math.round(y0 * sy), Math.round((x0 + r.width) * sx), Math.round((y0 + r.height) * sy)]);
+      }
+      return boxes.length >= 4 ? boxes : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async getGridBoxes(captchaElement: ElementHandle): Promise<{ boxes: number[][]; size: 3 | 4; screenshotW: number; screenshotH: number } | null> {
     const f = tmp('findgrid');
     try {
       await this.shot(captchaElement, f);
-      const res = await this.runCvTool('find-grid', { image: f }, ['find-grid', f]);
+      const res = await this.domGrid(captchaElement, f);
       const dims = readPngDimensions(f);
       if (!Array.isArray(res) || (res.length !== 9 && res.length !== 16) || !dims) return null;
       return { boxes: res as number[][], size: res.length === 16 ? 4 : 3, screenshotW: dims.width, screenshotH: dims.height };
