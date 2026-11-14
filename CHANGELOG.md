@@ -3,7 +3,7 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [5.0.0] - Unreleased
+## [5.0.0] - 2026-11-13
 
 ### Removed (breaking)
 
@@ -28,7 +28,29 @@ semantic versioning; v2 is a major, **breaking** release.
   `tiles` field names them (`td.rc-imageselect-tile`); both ports read each
   tile's rectangle in the challenge frame and scale it onto the screenshot.
 - **The tick box is found with pixel arithmetic:** the largest flat, square
-  region closed in by an outline, with no model.
+  region closed in by an outline, with no model. It must also be empty, flat and
+  neutral inside, sit near the widget's leading edge, and sit on the widget's
+  flat panel on two sides, so a square on a puzzle board is never taken for one:
+  0 hits on 4,329 real boards, against 777 for the first version, and every
+  tick box found on 1,128 labelled reCAPTCHA, hCaptcha, Turnstile and CaptchaFox
+  widgets, in every theme, size and scale. A label or warning crowding one side
+  of the box no longer hides it (German and Russian widgets).
+- **`captchakraken fetch` downloads licensed weights** with the caller's own
+  Hugging Face credentials (`hf auth login` or `HF_TOKEN`) instead of refusing
+  them. A refusal by the Hub names the licence and points at the hosted API.
+
+### Added
+
+- **A `board` selector field** names the board inside a vendor's frame, and
+  `capture(page)` (both ports) returns the box a solve would photograph,
+  without asking the model.
+
+### Fixed
+
+- **Proton is shot as its board,** two frames down, not the whole padded
+  682x600 frame around it.
+- **Yidun's click modes are shot with their prompt bar** (`.yidun_control`),
+  which names the marks to click and their order.
 
 ## [4.2.0] - 2026-11-12
 
