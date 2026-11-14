@@ -319,6 +319,23 @@ is then the handle AND what is tracked), and the tracker follows whatever moved
 most that is not the handle. It is the same loop. Only the source of the press
 point differs.
 
+**A restore slider is steered by the DOM, because its pixels cannot be.**
+DingXiang's restore cuts one picture into two strips, and the handle rolls one
+of them by its background. Measured live on 2026-11-14: which strip rolls is
+dealt per board (the lower one on some, the upper one on others), and so is the
+roll per handle pixel (0.52 to 1.77 seen). The strips wrap at the picture width.
+The answer's point sits on one strip and its target on the other, so when the
+target's strip rolls the point never moves ("nothing moved within 20px"), and a
+wrapping strip has no single part for the tracker to follow ("lost the
+object"). Baseline was 2 of 6 solved, with 19 tracker messages across those six.
+So the vendor's `band` selectors name the strips. The slide reads each strip's
+background offset at the press and after the probe, takes the one that moved as
+the one that rolls, works out how far it must roll for the two points to meet
+(the point's own strip carries the point to the target; the other strip carries
+the target back to the point, within one turn of the picture), and steers on a
+roll-per-pixel line fitted through every reading. A probe that moved no strip,
+read twice, falls back to the pixel tracker.
+
 **Nothing may be written to stdout by the MCP server.** On the stdio transport
 stdout *is* the protocol channel, so one stray `console.log` — a banner, a
 deprecation notice — corrupts the stream and the client reports the server as

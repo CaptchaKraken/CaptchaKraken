@@ -185,6 +185,37 @@ const SLIDE_PROBE_PX = 8;
 // pushing on only carries the pointer away from the handle. Mirrors page_solver.py SLIDE_STALL_PX.
 const SLIDE_STALL_PX = 1;
 const slideOffset = (s: number | [number, number]): [number, number] => (Array.isArray(s) ? [s[0], s[1]] : [s, 0]);
+// A band whose background moved less than this (CSS px) did not roll. The first drag after a reload can leave every
+// band where it was, so a zero is read twice before it is believed.
+const BAND_STILL_PX = 0.5;
+
+/** One read of a `band` strip: how far its picture sits right of where it started (background offset plus box), its rows, and the width its picture repeats at. */
+export interface BandRead { x: number; top: number; bottom: number; period: number }
+
+/**
+ * How far the band that rolled must roll in all, in CSS px, for the answer's two points to meet; null when no band
+ * rolled. The answer names a point on one band and where it belongs on the other. When the point's own band rolls it
+ * travels to the target; when the target's band rolls the target travels to the point. A band repeats, so the roll
+ * is taken the way the probe showed it going, within one turn of its picture.
+ */
+export function bandRoll(rest: readonly BandRead[], now: readonly BandRead[], seed: readonly [number, number],
+  goal: readonly [number, number]): { band: number; roll: number } | null {
+  let band = -1;
+  let moved = 0;
+  now.forEach((b, i) => {
+    const d = b.x - (rest[i]?.x ?? b.x);
+    if (Math.abs(d) > Math.abs(moved)) { band = i; moved = d; }
+  });
+  if (band < 0 || Math.abs(moved) < BAND_STILL_PX) return null;
+  const b = now[band];
+  const on = (y: number) => y >= b.top && y < b.bottom;
+  let roll = on(goal[1]) && !on(seed[1]) ? seed[0] - goal[0] : goal[0] - seed[0];
+  if (b.period > 0) {
+    roll = ((roll % b.period) + b.period) % b.period;
+    if (moved < 0 && roll > 0) roll -= b.period;
+  }
+  return { band, roll };
+}
 /** Did the handle travel while the part stayed put? Each side is the travel and the part's point of one look. */
 const slideStalled = (before: [number | [number, number], [number, number]], now: [number | [number, number], [number, number]], k: number): boolean => {
   const [ax, ay] = slideOffset(before[0]);
@@ -1095,7 +1126,7 @@ export class CaptchaKrakenSolver {
           performedAction = answered = true;
           await this.emitStep(captchaElement, SolveStage.CLICK, `clicked ${bboxes.length || 1} target(s)`, puzzleSource, frameRole, attempt, { bboxes });
         } else if (action.action === ActionKind.SLIDE || (action.action === ActionKind.DRAG && !(action as DragAction).source_bounding_box)) {
-          if (await this.executeSlide(page, captchaElement, scope, action as DragAction | SlideAction, requireBox())) {
+          if (await this.executeSlide(page, captchaElement, scope, action as DragAction | SlideAction, requireBox(), puzzleSource)) {
             performedAction = slid = true;
             await this.emitStep(captchaElement, SolveStage.DRAG, 'slid the piece into the slot', puzzleSource, frameRole, attempt, { action });
           }
@@ -3022,6 +3053,56 @@ export class CaptchaKrakenSolver {
     return res as SlideStepReply;
   }
 
+  /** The vendor's `band` strips inside the widget, in table order; none for a vendor that names none. */
+  private async bandsOf(scope: Scope, vendor: Vendor): Promise<ElementHandle[]> {
+    const own = this.sel.selectors[vendor]?.band;
+    return own?.length ? handles(await visible(scope, own)).catch(() => []) : [];
+  }
+
+  /** Where each band's picture sits now (`BandRead`), in page CSS px. */
+  private async readBands(bands: readonly ElementHandle[]): Promise<BandRead[]> {
+    return Promise.all(bands.map(async (band) => {
+      const box = await band.boundingBox().catch(() => null);
+      const [x, period] = await band.evaluate((el: Element) => {
+        const cs = getComputedStyle(el);
+        const px = (v: string) => (/^-?[\d.]+px/.test(v.trim()) ? parseFloat(v) : 0);
+        return [px(cs.backgroundPositionX), px(cs.backgroundSize.split(/[\s,]/)[0] ?? '')];
+      }).catch(() => [0, 0]);
+      return { x: x + (box?.x ?? 0), top: box?.y ?? 0, bottom: (box?.y ?? 0) + (box?.height ?? 0), period: period || (box?.width ?? 0) };
+    }));
+  }
+
+  /** Which band the probe rolled and how far it must roll in all (`bandRoll`); a zero is read again before it is believed. */
+  private async bandRolling(bands: readonly ElementHandle[], rest: readonly BandRead[], seed: [number, number],
+    goal: [number, number]): Promise<{ band: number; roll: number } | null> {
+    let rolling = bandRoll(rest, await this.readBands(bands), seed, goal);
+    if (!rolling) {
+      await this.human.pause(PauseKind.PROBE);
+      rolling = bandRoll(rest, await this.readBands(bands), seed, goal);
+    }
+    if (rolling) console.log(`[slide] band ${rolling.band + 1} of ${bands.length} rolls; it must roll ${rolling.roll.toFixed(1)}px`);
+    else console.warn('[slide] no band rolled with the handle; steering by pixels');
+    return rolling;
+  }
+
+  /**
+   * One look of the slide loop for a band, in the tracker's terms (shot pixels): how far the rolling band has gone
+   * against how far it must, and the travel that closes the gap at the roll per handle pixel seen so far.
+   */
+  private async bandStep(bands: readonly ElementHandle[], rest: readonly BandRead[], rolling: { band: number; roll: number },
+    s: number, rolled: [number, number][], k: number, ask: { seed: number[]; bounds: number[]; tol: number }): Promise<SlideStepReply> {
+    const d = ((await this.readBands(bands))[rolling.band].x - rest[rolling.band].x) * k;
+    rolled.push([s, d]);
+    const ss = rolled.reduce((a, [t]) => a + t * t, 0);
+    const slope = ss > 0 ? rolled.reduce((a, [t, m]) => a + t * m, 0) / ss : 0;
+    const gap = rolling.roll * k - d;
+    const next = slope ? Math.min(Math.max(s + gap / slope, ask.bounds[0]), ask.bounds[1]) : s;
+    return {
+      pos: [ask.seed[0] + d, ask.seed[1]], params: [0, d, 0], error: Math.abs(gap), grabbed: false, kind: 'slide', next,
+      done: Math.abs(gap) <= ask.tol, correlation: 1, observation: { s, params: [0, d, 0] },
+    };
+  }
+
   private shotScale(shot: string, cssWidth: number): number {
     const dims = readPngDimensions(shot);
     return dims && cssWidth > 0 ? dims.width / cssWidth : 1;
@@ -3032,8 +3113,14 @@ export class CaptchaKrakenSolver {
    * A generation-3 answer names all three points, so nothing is read from the page but pixels. A generation-2 answer
    * names only the target: its handle comes from the selector table and the part it moves is whatever moved most.
    * That path goes when the last generation-2 model does.
+   *
+   * A vendor that names `band`s (DingXiang's restore) is steered by the DOM instead: the handle rolls one of two
+   * picture strips, which one and how far per handle pixel are dealt per board, and the answer's point sits on one
+   * strip and its target on the other, so there is no single moving part for pixels to follow. The strips'
+   * background offsets say exactly how far the one that rolls has gone.
    */
-  private async executeSlide(page: Page, element: ElementHandle, scope: Scope, action: DragAction | SlideAction, elementBox: Box): Promise<boolean> {
+  private async executeSlide(page: Page, element: ElementHandle, scope: Scope, action: DragAction | SlideAction, elementBox: Box,
+    vendor?: Vendor): Promise<boolean> {
     this.actedOnBoard = true;
     const { width: w, height: h } = elementBox;
     const at = (b: [number, number, number, number]): [number, number] => [((b[0] + b[2]) / 2) * w, ((b[1] + b[3]) / 2) * h];
@@ -3060,10 +3147,12 @@ export class CaptchaKrakenSolver {
     const probe = goal[0] >= (seed ?? handle)[0] ? SLIDE_PROBE_PX : -SLIDE_PROBE_PX;
     const timeout = this.config.elementScreenshotTimeoutMs ?? 8000;
     const [first, probed, current] = [tmp('slide_0'), tmp('slide_1'), tmp('slide_2')];
+    const bands = seed && vendor ? await this.bandsOf(scope, vendor) : [];
     try {
       await this.performSmoothMove(page, ...press);
       await this.human.press(page);
       await this.human.pause(PauseKind.GRAB);
+      const rest = bands.length ? await this.readBands(bands) : null;
       await this.shot(element, first, timeout);
       const k = this.shotScale(first, w);
       await this.performSmoothMove(page, press[0] + probe, press[1]);
@@ -3073,12 +3162,17 @@ export class CaptchaKrakenSolver {
         first, probe: probed, probe_s: probe * k, goal: [goal[0] * k, goal[1] * k], seed: seed && [seed[0] * k, seed[1] * k],
         handle: [handle[0] * k, handle[1] * k], bounds: [-handle[0] * k, (w - handle[0]) * k], tol: SLIDE_TOLERANCE_PX * k,
       };
+      const page_ = (p: [number, number]): [number, number] => [elementBox.x + p[0], elementBox.y + p[1]];
+      const rolling = rest && seed ? await this.bandRolling(bands, rest, page_(seed), page_(goal)) : null;
       let look = probed;
       let s: number | [number, number] = probe * k;
       const history: SlideStepReply['observation'][] = [];
+      const rolled: [number, number][] = [];
       let last: [number | [number, number], [number, number]] | null = null;
       for (let moves = 0; ; moves++) {
-        const reply = await this.slideStep({ ...ask, current: look, s, history });
+        const reply: SlideStepReply | null = rolling
+          ? await this.bandStep(bands, rest!, rolling, s as number, rolled, k, { ...ask, seed: ask.seed! })
+          : await this.slideStep({ ...ask, current: look, s, history });
         if (!reply) break;
         if (look !== probed) history.push(reply.observation);
         const pos: [number, number] = [reply.pos[0], reply.pos[1]];
@@ -3097,6 +3191,7 @@ export class CaptchaKrakenSolver {
         const [dx, dy] = slideOffset(s);
         await this.performSmoothMove(page, press[0] + dx / k, press[1] + dy / k);
         await this.human.pause(PauseKind.PROBE);
+        if (rolling) continue;
         await this.shot(element, current, timeout);
         look = current;
       }

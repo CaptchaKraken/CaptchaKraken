@@ -66,6 +66,11 @@ class VendorSelectors:
     board: Sequence[str] = ()
     # Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.
     piece: Sequence[str] = ()
+    # Inside the widget: picture strips a slide rolls by their background (DingXiang's restore bands). Which strip
+    # rolls, and how far per handle pixel, are dealt per board and cannot be seen in the picture, so each strip's
+    # background offset is read while the handle moves and the slide stops when the one that rolls has rolled as far
+    # as the answer's two points are apart.
+    band: Sequence[str] = ()
     # Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.
     refresh: Sequence[str] = ()
     # A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching
