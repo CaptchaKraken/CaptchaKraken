@@ -132,6 +132,20 @@ hostnames only, never a path or query. A failed report never changes the
 solve's result; it is logged as a warning. Set `CAPTCHA_REPORT_OUTCOME=0` to
 send none.
 
+### Checking the balance
+
+The key you solve with can also read what it has left:
+
+```bash
+curl -H "Authorization: Bearer $CAPTCHA_KRAKEN_API_KEY" https://api.captchakraken.com/v1/balance
+# {"object":"balance","balance_credits":74250,"balance_usd":"9.90","credits_per_usd":7500,"unlimited":false,"top_up_url":"..."}
+```
+
+It costs nothing. Every solve response also carries `X-CK-Balance-Credits` and
+`X-CK-Balance-USD`, the balance after that round was charged, so a long run can
+watch it without a second request. Card auto-recharge on the dashboard tops the
+balance up before it runs out.
+
 ### Model names
 
 Leave the model unset against the hosted API: the client names the right model
