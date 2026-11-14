@@ -501,6 +501,46 @@ def _offset(s: Any) -> Tuple[float, float]:
     return (float(s[0]), float(s[1])) if isinstance(s, (list, tuple)) else (float(s), 0.0)
 
 
+# A band whose background moved less than this (CSS px) did not roll. The first drag after a reload can leave every
+# band where it was, so a zero is read twice before it is believed.
+BAND_STILL_PX = 0.5
+
+_BAND_READ_JS = """(el) => {
+    const cs = getComputedStyle(el);
+    const px = (v) => (/^-?[\\d.]+px/.test((v || '').trim()) ? parseFloat(v) : 0);
+    return [px(cs.backgroundPositionX), px((cs.backgroundSize || '').split(/[\\s,]/)[0])];
+}"""
+
+
+def band_roll(rest: Sequence[Dict[str, float]], now: Sequence[Dict[str, float]], seed: Sequence[float],
+              goal: Sequence[float]) -> Optional[Tuple[int, float]]:
+    """(which band rolled, how far it must roll in all) in CSS px for the answer's two points to meet; None when none did.
+
+    Each read is a band's `x` (how far its picture sits right of where it started), its rows `top`..`bottom` and the
+    `period` its picture repeats at. The answer names a point on one band and where it belongs on the other. When the
+    point's own band rolls it travels to the target; when the target's band rolls the target travels to the point. A
+    band repeats, so the roll is taken the way the probe showed it going, within one turn of its picture.
+    """
+    band, moved = -1, 0.0
+    for i, b in enumerate(now):
+        d = b["x"] - (rest[i]["x"] if i < len(rest) else b["x"])
+        if abs(d) > abs(moved):
+            band, moved = i, d
+    if band < 0 or abs(moved) < BAND_STILL_PX:
+        return None
+    b = now[band]
+
+    def on(y: float) -> bool:
+        return b["top"] <= y < b["bottom"]
+
+    roll = seed[0] - goal[0] if on(goal[1]) and not on(seed[1]) else goal[0] - seed[0]
+    if b["period"] > 0:
+        roll %= b["period"]
+        if moved < 0 and roll > 0:
+            roll -= b["period"]
+    return band, roll
+
+
 def _stalled(before: Tuple[Any, Sequence[float]], now: Tuple[Any, Sequence[float]], k: float) -> bool:
     """Did the handle travel while the part stayed put? Each side is (travel, the part's point) of one look."""
     (ax, ay), (bx, by) = _offset(before[0]), _offset(now[0])
@@ -1220,13 +1260,71 @@ class PageSolver:
         dims = _read_png_dimensions(shot)
         return dims[0] / css_width if dims and css_width > 0 else 1.0
 
+    def _bands_of(self, scope: Any, vendor: Optional[Vendor]) -> List[Any]:
+        """The vendor's `band` strips inside the widget, in table order; none for a vendor that names none."""
+        own = getattr(self._sel.selectors.get(vendor), "band", ()) if vendor is not None else ()
+        return _handles(_visible(scope, own)) if own else []
+
+    @staticmethod
+    def _read_bands(bands: Sequence[Any]) -> List[Dict[str, float]]:
+        """Where each band's picture sits now (see `band_roll`), in page CSS px."""
+        out = []
+        for band in bands:
+            try:
+                box = band.bounding_box() or {}
+            except Exception:
+                box = {}
+            try:
+                x, period = band.evaluate(_BAND_READ_JS)
+            except Exception:
+                x, period = 0.0, 0.0
+            top = float(box.get("y", 0.0))
+            out.append({"x": float(x) + float(box.get("x", 0.0)), "top": top,
+                        "bottom": top + float(box.get("height", 0.0)),
+                        "period": float(period) or float(box.get("width", 0.0))})
+        return out
+
+    def _band_rolling(self, bands: Sequence[Any], rest: Sequence[Dict[str, float]], seed: Sequence[float],
+                      goal: Sequence[float]) -> Optional[Tuple[int, float]]:
+        """Which band the probe rolled and how far it must roll in all (`band_roll`); a zero is read again first."""
+        rolling = band_roll(rest, self._read_bands(bands), seed, goal)
+        if rolling is None:
+            self._human.pause(PauseKind.PROBE)
+            rolling = band_roll(rest, self._read_bands(bands), seed, goal)
+        if rolling is not None:
+            _log(f"slider: band {rolling[0] + 1} of {len(bands)} rolls; it must roll {rolling[1]:.1f}px")
+        else:
+            _log("slider: no band rolled with the handle; steering by pixels")
+        return rolling
+
+    def _band_step(self, bands: Sequence[Any], rest: Sequence[Dict[str, float]], rolling: Tuple[int, float],
+                   s: float, rolled: List[Tuple[float, float]], k: float, seed: Sequence[float],
+                   bounds: Sequence[float], tol: float) -> Dict[str, Any]:
+        """One look of the slide loop for a band, in the tracker's terms (shot pixels): how far the rolling band has
+        gone against how far it must, and the travel that closes the gap at the roll per handle pixel seen so far."""
+        i, roll = rolling
+        d = (self._read_bands(bands)[i]["x"] - rest[i]["x"]) * k
+        rolled.append((s, d))
+        ss = sum(t * t for t, _ in rolled)
+        slope = sum(t * m for t, m in rolled) / ss if ss > 0 else 0.0
+        gap = roll * k - d
+        nxt = min(max(s + gap / slope, bounds[0]), bounds[1]) if slope else s
+        return {"pos": (seed[0] + d, seed[1]), "params": (0.0, d, 0.0), "error": abs(gap), "grabbed": False,
+                "kind": "slide", "next": nxt, "done": abs(gap) <= tol, "correlation": 1.0,
+                "observation": {"s": s, "params": [0.0, d, 0.0]}}
+
     def _execute_slide(self, page: Any, element: Any, scope: Any, action: Dict[str, Any],
-                       element_box: Dict[str, float]) -> bool:
+                       element_box: Dict[str, float], vendor: Optional[Vendor] = None) -> bool:
         """Press the handle, nudge it to see what it moves, then steer that part's point onto its target.
 
         A generation-3 answer names all three points, so nothing is read from the page but pixels. A generation-2
         answer names only the target: its handle comes from the selector table and the part it moves is whatever
         moved most. That path goes when the last generation-2 model does.
+
+        A vendor that names `band`s (DingXiang's restore) is steered by the DOM instead: the handle rolls one of two
+        picture strips, which one and how far per handle pixel are dealt per board, and the answer's point sits on one
+        strip and its target on the other, so there is no single moving part for pixels to follow. The strips'
+        background offsets say exactly how far the one that rolls has gone.
         """
         from .tool_calls.slide_tracker import TrackingError, slide_step
 
@@ -1254,10 +1352,12 @@ class PageSolver:
         probe = SLIDE_PROBE_PX if goal[0] >= (seed or handle)[0] else -SLIDE_PROBE_PX
         timeout = self.config.element_screenshot_timeout_ms
         first, probed, current = (_tmp_png("slide") for _ in range(3))
+        bands = self._bands_of(scope, vendor) if seed is not None else []
         try:
             self._smooth_move(page, *press)
             self._human.press(page)
             self._human.pause(PauseKind.GRAB)
+            rest = self._read_bands(bands) if bands else None
             self._screenshot(element, first, timeout_ms=timeout)
             k = self._shot_scale(first, w)
             self._smooth_move(page, press[0] + probe, press[1])
@@ -1266,11 +1366,18 @@ class PageSolver:
             ask = dict(probe_s=probe * k, goal=(goal[0] * k, goal[1] * k), seed=seed and (seed[0] * k, seed[1] * k),
                        handle=(handle[0] * k, handle[1] * k), bounds=(-handle[0] * k, (w - handle[0]) * k),
                        tol=self.config.slide_tolerance_px * k)
+            rolling = None
+            if rest is not None:
+                origin = (element_box["x"], element_box["y"])
+                rolling = self._band_rolling(bands, rest, (origin[0] + seed[0], origin[1] + seed[1]),
+                                             (origin[0] + goal[0], origin[1] + goal[1]))
             look, s, history, moves = probed, probe * k, [], 0
+            rolled: List[Tuple[float, float]] = []
             last: Optional[Tuple[Any, Sequence[float]]] = None
             while True:
                 try:
-                    reply = slide_step(first, probed, look, s=s, history=history, **ask)
+                    reply = (self._band_step(bands, rest, rolling, s, rolled, k, ask["seed"], ask["bounds"], ask["tol"])
+                             if rolling is not None else slide_step(first, probed, look, s=s, history=history, **ask))
                 except TrackingError as exc:
                     _log(f"slider: {exc}; released where the handle is")
                     break
@@ -1292,8 +1399,10 @@ class PageSolver:
                 dx, dy = _offset(s)
                 self._smooth_move(page, press[0] + dx / k, press[1] + dy / k)
                 self._human.pause(PauseKind.PROBE)
-                self._screenshot(element, current, timeout_ms=timeout)
-                look, moves = current, moves + 1
+                moves += 1
+                if rolling is None:
+                    self._screenshot(element, current, timeout_ms=timeout)
+                    look = current
             self._human.pause(PauseKind.SETTLE)
         finally:
             try:
@@ -2488,7 +2597,7 @@ class PageSolver:
                             self._human.pause(PauseKind.BETWEEN)
                     performed = answered = True
                 elif kind == ActionKind.SLIDE or (kind == ActionKind.DRAG and not action.get("source_bounding_box")):
-                    if self._execute_slide(page, element, scope, action, element_box):
+                    if self._execute_slide(page, element, scope, action, element_box, puzzle_source):
                         performed = slid = True
                 elif kind == ActionKind.DRAG:
                     if await_kf:

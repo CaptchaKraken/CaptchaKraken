@@ -48,6 +48,7 @@
     "board": "Inside the widget's frame or a frame nested in it: the element that is the board itself, when the widget frame pads it. The shot is this element, so the model sees the crop it was trained on.",
     "bar": "Beside the widget (a sibling of it, or of its parent): a strip the vendor draws outside the widget element that every board carries, such as Yidun's prompt and slider bar. The shot takes it in, so the model sees what it was trained on.",
     "piece": "Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.",
+    "band": "Inside the widget: picture strips a slide rolls by their background, such as DingXiang's restore bands. Which strip rolls, and how far per handle pixel, are dealt per board and cannot be seen in the picture (see TRIBAL_KNOWLEDGE.md), so each strip's background offset is read while the handle moves, and the slide stops when the strip that rolls has rolled as far as the answer's two points are apart.",
     "refresh": "Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.",
     "hold_completes": "A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching the answer's `to` is not a release, and the hold lasts until the widget says it is done."
   },
@@ -361,6 +362,10 @@
       "slider_handle": [
         ".dx_captcha_basic_slider",
         ".dx_captcha_rotate_slider"
+      ],
+      "band": [
+        ".dx_captcha_basic_pic .upper",
+        ".dx_captcha_basic_pic .lower"
       ]
     },
     "funcaptcha": {

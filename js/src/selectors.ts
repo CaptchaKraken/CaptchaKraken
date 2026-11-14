@@ -64,6 +64,13 @@ export interface VendorSelectors {
   readonly board?: readonly string[];
   /** Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track. */
   readonly piece?: readonly string[];
+  /**
+   * Inside the widget: picture strips a slide rolls by their background (DingXiang's restore bands). Which strip rolls,
+   * and how far per handle pixel, are dealt per board and cannot be seen in the picture, so each strip's background
+   * offset is read while the handle moves and the slide stops when the one that rolls has rolled as far as the
+   * answer's two points are apart.
+   */
+  readonly band?: readonly string[];
   /** Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`. */
   readonly refresh?: readonly string[];
   /**
@@ -103,7 +110,7 @@ type GenericKey = (typeof GENERIC)[number];
 // The file is spelled as the Python port's fields; these three are camelCase here.
 const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
 const FIELDS = ['hosts', 'challenge', 'checkbox', 'enclave', 'widget', 'response', 'checked', 'box', 'accepted', 'fresh',
-  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'bar', 'board', 'piece', 'refresh', 'hold_completes'];
+  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'bar', 'board', 'piece', 'band', 'refresh', 'hold_completes'];
 const ONE = new Set(['response', 'checked', 'accepted', 'fresh']);
 const BANNERS = new Set<string>(Object.values(RecaptchaBanner));
 const VENDOR_VALUES = new Set<string>(Object.values(Vendor));
