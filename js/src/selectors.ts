@@ -98,7 +98,7 @@ export interface SelectorConfig {
   readonly generic: Readonly<Record<GenericKey, readonly string[]>>;
 }
 
-const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece'] as const;
+const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece', 'feedback'] as const;
 type GenericKey = (typeof GENERIC)[number];
 // The file is spelled as the Python port's fields; these three are camelCase here.
 const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
@@ -280,6 +280,8 @@ export class SelectorTable {
   readonly sliderHandle: readonly string[];
   readonly refresh: readonly string[];
   readonly piece: readonly string[];
+  /** The verdict messages a widget shows over its board: every vendor's banners, then the generic ones. */
+  readonly feedback: readonly string[];
 
   constructor(custom?: CustomSelectors, config?: string | SelectorConfigFile | SelectorConfig) {
     const loaded = isLoaded(config) ? config : loadConfig(config);
@@ -305,6 +307,7 @@ export class SelectorTable {
     this.sliderHandle = [...every('sliderHandle'), ...loaded.generic.slider_handle];
     this.refresh = every('refresh');
     this.piece = [...every('piece'), ...loaded.generic.piece];
+    this.feedback = [...this.vendors.flatMap(([, s]) => (s.banners ?? []).map(([sel]) => sel)), ...loaded.generic.feedback];
   }
 }
 

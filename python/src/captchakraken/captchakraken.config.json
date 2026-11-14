@@ -22,7 +22,9 @@
     "`hold_completes` (true or false). `note` is for people, not the solver.",
     "",
     "generic: the fallbacks tried after every vendor's own. `submit_text` is the",
-    "button text probed for a submit control, in order.",
+    "button text probed for a submit control, in order. `feedback` (CSS only) names the",
+    "verdict messages, such as a \"Please try again\" toast, that the photograph telling",
+    "one board from the next leaves out; every vendor's `banners` are left out too.",
     "",
     "Keys starting with `_` are comments. Field reference: `_fields`."
   ],
@@ -456,6 +458,11 @@
     "piece": [
       "[class*=\"puzzle\"][class*=\"piece\"]",
       "[class*=\"jigsaw\"]"
+    ],
+    "feedback": [
+      "[role=\"alert\"]",
+      "[class*=\"toast\" i]",
+      "[id*=\"toast\" i]"
     ]
   }
 }

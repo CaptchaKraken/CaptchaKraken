@@ -9,7 +9,7 @@ const SOLVER = readFileSync(path.join(__dirname, '..', 'src', 'solver.ts'), 'utf
 test('every capture goes through shot(), which always bounds the timeout', () => {
   // Playwright's 30s default hangs on a challenge that is being torn down.
   const calls = [...SOLVER.matchAll(/\.screenshot\(([^)]*)\)/g)].map((m) => m[1]);
-  assert.deepEqual(calls, ['{ path: p, timeout, animations }', '{ timeout, animations }'],
+  assert.deepEqual(calls, ['{ path: p, timeout, animations, style }', '{ timeout, animations, style }'],
     'a screenshot call bypasses shot(), or shot() stopped passing its timeout');
   assert.match(SOLVER, /private async shot\(el: ElementHandle, p: string, timeout = 2500/);
 });

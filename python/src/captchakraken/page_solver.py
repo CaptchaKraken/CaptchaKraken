@@ -521,6 +521,8 @@ class PageSolver:
         self._solver = solver or CaptchaSolver(**solver_kwargs)
         self._human: Humanizer = resolve_humanizer(self.config)
         self._sel = SelectorTable(self.config.custom_selectors, config=self.config.selectors)
+        # A stylesheet that takes every verdict message out of a photograph, laid out as if it had never been shown.
+        self._feedback_hidden = "\n".join(f"{s} {{ display: none !important; }}" for s in self._sel.feedback)
         self._last_submit_frame_hash: Optional[str] = None
         self._deadline_ms: Optional[float] = None
         self._budget: Optional[PhaseBudget] = None
@@ -713,13 +715,17 @@ class PageSolver:
         if planner is not None and hasattr(planner, "pointer_history"):
             planner.pointer_history = self._pointer_history
 
-    def _board_hash(self, element: Any, shot: str, filmed: bool) -> str:
-        """The board's identity, always from a plain photograph: a filmed frame of an unchanged board differs in bytes."""
-        if not filmed:
-            return _sha1(shot)
+    def _board_hash(self, element: Any) -> str:
+        """The board's identity, from a photograph of its own.
+
+        A filmed frame of an unchanged board differs in bytes, and so does one wearing the vendor's verdict message,
+        a toast that comes and goes over the same board (see TRIBAL_KNOWLEDGE.md). The message is left out of the
+        picture, not waited out.
+        """
         plain = _tmp_png("board")
         try:
-            self._screenshot(element, plain, timeout_ms=self.config.element_screenshot_timeout_ms)
+            self._screenshot(element, plain, timeout_ms=self.config.element_screenshot_timeout_ms,
+                             style=self._feedback_hidden)
             return _sha1(plain)
         finally:
             _unlink(plain)
@@ -1575,13 +1581,13 @@ class PageSolver:
     # ── frames and polling ───────────────────────────────────────────────
 
     def _screenshot(self, element: Any, path: str, timeout_ms: Optional[int] = None,
-                    animations: str = "disabled") -> None:
+                    animations: str = "disabled", style: Optional[str] = None) -> None:
         """Every capture the driver takes: the whole viewport, cropped here to the element.
 
         Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at
         the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
         capture repaints nothing, and measured twice as fast. Short timeout; `disabled` freezes CSS animation,
-        so bursts and the keyframe gate pass `allow`.
+        so bursts and the keyframe gate pass `allow`. `style` is CSS applied for this capture only.
         """
         timeout = 2_500 if timeout_ms is None else timeout_ms
         page = self._page
@@ -1590,9 +1596,9 @@ class PageSolver:
         if rect is None:
             # Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
             # coordinates, so the element photographs itself.
-            element.screenshot(path=path, timeout=timeout, animations=animations)
+            element.screenshot(path=path, timeout=timeout, animations=animations, style=style)
             return
-        png = crop_png(page.screenshot(timeout=timeout, animations=animations), rect, view["width"])
+        png = crop_png(page.screenshot(timeout=timeout, animations=animations, style=style), rect, view["width"])
         with open(path, "wb") as fh:
             fh.write(png)
 
@@ -2439,7 +2445,7 @@ class PageSolver:
                 if not have_shot:
                     with self._phase(Phase.SCREENSHOT):
                         self._screenshot(element, shot, timeout_ms=self.config.element_screenshot_timeout_ms)
-                self._guard_fallbacks_to_board(self._board_hash(element, shot, filmed=have_shot))
+                self._guard_fallbacks_to_board(self._board_hash(element))
                 if self._should_speculate(puzzle_source, text_mode):
                     actions, all_usage, keyframe_dir = self._speculate(element, shot, puzzle_source, retry_mode, text_mode)
                     is_animated = keyframe_dir is not None

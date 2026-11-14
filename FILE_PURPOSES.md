@@ -166,6 +166,7 @@ a behaviour is a regression: the bug it describes actually happened.
 | `js/src/a-grid-is-read-from-the-vendors-tiles.test.ts` | A reCAPTCHA grid's cells come from the challenge frame's tiles, scaled onto the screenshot; fewer than four, or no frame, is no grid. |
 | `js/src/a-board-with-no-answer-is-skipped.test.ts` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `js/src/a-typed-answer-is-sent.test.ts` | A typed answer is sent: BotDetect's Validate beside the widget is pressed after typing, a host form's own Submit never is, and CyberSiara's self-checking modal is found and typed into with nothing pressed. |
+| `js/src/an-unchanged-board-keeps-its-hash.test.ts` | An unchanged board keeps its hash while a verdict toast comes and goes: the identity's photograph leaves every feedback selector out, and the model's photograph does not. |
 | `js/src/our-own-gesture-is-not-animation.test.ts` | The pointer leaves the board before it is judged, and a board that changed only under our hover is a still board. |
 | `js/src/puppeteer-adapter.test.ts` | The adapter's translation layer, pinned difference by difference. |
 | `js/src/fake-dom.test.ts` | The one locator-shaped fake DOM the driver tests share: nodes name the selectors they answer to, so no test carries its own CSS matcher. |
@@ -389,6 +390,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_board_is_routed_and_watched_once_it_has_painted.py` | A widget that has not drawn yet picks the wrong expert and reads as a still; both questions wait for the paint. |
 | `python/tests/test_a_board_with_no_answer_is_skipped.py` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `python/tests/test_a_typed_answer_is_sent.py` | A typed answer is sent: BotDetect's Validate beside the widget is pressed after typing, a host form's own Submit never is, and CyberSiara's self-checking modal is found and typed into with nothing pressed. |
+| `python/tests/test_an_unchanged_board_keeps_its_hash.py` | An unchanged board keeps its hash while a verdict toast comes and goes: the identity's photograph leaves every feedback selector out, and the model's photograph does not. |
 | `python/tests/test_the_notice_travels_with_the_package.py` | The LGPL notice for Cursory has to reach both published packages, and three copies are three chances to drift. |
 | `python/tests/test_grid_round_pays_once.py` | One grid round costs one detection, not one per cell. |
 | `python/tests/test_hcaptcha_badge_detection.py` | A photo is not a selection badge: the selected-state check must not read tile content as a tick. |

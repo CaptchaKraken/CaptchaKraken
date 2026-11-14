@@ -544,6 +544,26 @@ dependency. The one element screenshot left is a widget larger than the
 viewport, which no viewport capture can hold; an element merely off screen is
 scrolled in once, not per shot.
 
+**A board's identity leaves out the vendor's verdict.** The board hash decides two
+things: whether an answer is a repeat (it is part of the answer's signature), and
+whether armed fallback plans still belong to the board up. It was the sha1 of the
+whole widget photograph, so a "Please try again" toast drawn over the same board
+was a different board. Measured on an hCaptcha-style line fixture (unhumanized JS,
+round timing varied): one unchanged board read `5fe699bd`, `80c5b1fd`, `80c5b1fd`,
+`5fe699bd` over four rounds. The toast is up for about two seconds after a miss, so
+whether a round's shot caught it was down to timing. Round 2's new hash let the
+same wrong answer be pressed again; round 4's return to the first hash threw away
+three armed plans. The cursor was ruled out: round 4 matched round 1 pixel for pixel
+with the pointer elsewhere. The identity now takes its own photograph with every
+`feedback` selector (each vendor's `banners`, then the generic `[role="alert"]` and
+toast names) set to `display: none` through the capture's `style`, so the layout is
+the no-message layout. Waiting the toast out was rejected: its length is the
+vendor's, and a fade caught midway is a third hash. The model's photograph keeps the
+message. It costs one extra capture per round on a board that was not filmed.
+Puppeteer has no `style` option, so its adapter puts a `<style>` into each frame
+for the capture and removes it after. Python needs Playwright 1.41 or later for
+`style`.
+
 **A checkbox is never a board.** It used to take the board round: the paint
 poll, the classifier's film and — when the detector missed the box on a half-drawn
 frame — an inference on the checkbox picture, which the model answered with a
