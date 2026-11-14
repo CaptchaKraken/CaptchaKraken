@@ -38,12 +38,30 @@ semantic versioning; v2 is a major, **breaking** release.
 - **`captchakraken fetch` downloads licensed weights** with the caller's own
   Hugging Face credentials (`hf auth login` or `HF_TOKEN`) instead of refusing
   them. A refusal by the Hub names the licence and points at the hosted API.
+- **The board's identity ignores verdict toasts.** The hash that tells one board
+  from the next is taken from its own screenshot, with every feedback selector
+  (each vendor's banners, plus generic `[role="alert"]` and toast names) hidden.
+  A "try again" toast over an unchanged board no longer makes it a new board.
+  The model's screenshot is unchanged. The Puppeteer adapter injects the style
+  itself, and Playwright before 1.41, which has no screenshot `style`, retakes
+  the shot without it.
+- **DingXiang's restore slide is steered by its bands.** A new `band` selector
+  field names the two picture strips; the slide reads their background offsets
+  and stops when the strip has rolled as far as the answer's two points are
+  apart. A probe that rolls neither strip falls back to the pixel tracker.
+- **Betas publish from `dev`:** a push to `dev` publishes a pre-release
+  (`X.Y.Zb<run>` on PyPI, `X.Y.Z-beta.<run>` under npm's `beta` tag) unless
+  that version is already final. Plain installs get the last final.
 
 ### Added
 
 - **A `board` selector field** names the board inside a vendor's frame, and
   `capture(page)` (both ports) returns the box a solve would photograph,
   without asking the model.
+- **CyberSiara is a vendor:** the `#myModal .pluginPopups` modal, its
+  `#Input_Captcha` box and its refresh are found and typed into. It has no
+  submit button; it checks itself on the fourth letter. The models are not
+  trained on it yet, so it is detected but not yet solved.
 
 ### Fixed
 
@@ -51,6 +69,11 @@ semantic versioning; v2 is a major, **breaking** release.
   682x600 frame around it.
 - **Yidun's click modes are shot with their prompt bar** (`.yidun_control`),
   which names the marks to click and their order.
+- **A typed BotDetect answer is sent.** Its Validate button sits beside the
+  widget, outside the scope where a submit was looked for, so the code was typed
+  and never sent. After a typed answer the lookup also searches the widget's own
+  fieldset or form, and only for the vendor's named submit selectors, so a host
+  page's Submit is never pressed.
 
 ## [4.2.0] - 2026-11-12
 
