@@ -1558,8 +1558,19 @@ class PageSolver:
                     return
                 _delay(self.config.post_solve_outcome_poll_ms)
 
-    def _get_verify_button(self, scope: Any) -> Optional[Any]:
-        return self._find_control(scope, self._sel.submit)
+    def _get_verify_button(self, scope: Any, typed_at: Any = None) -> Optional[Any]:
+        """The widget's Verify, else, after a typed answer, the vendor-named submit beside its text box.
+
+        BotDetect's Validate sits in the widget's fieldset, outside the 280x50 `.BDC_CaptchaDiv`, like `#captchaCode`
+        (see `_answer_box`). Without it the code was typed and never sent: live 0/9 on 2026-11-13. Only vendor-named
+        selectors widen, so a login form's own Submit is never pressed.
+        """
+        inside = self._find_control(scope, self._sel.submit)
+        if inside is not None or typed_at is None:
+            return inside
+        around = (self._find_control(typed_at.locator(f"xpath={axis}"), self._sel.submit_vendor)
+                  for axis in ("ancestor::fieldset[1]", "ancestor::form[1]"))
+        return next((found for found in around if found is not None), None)
 
     # ── frames and polling ───────────────────────────────────────────────
 
@@ -2385,7 +2396,7 @@ class PageSolver:
 
         shot = _tmp_png("captcha")
         self._round_board = None
-        performed = slid = answered = have_shot = False
+        performed = slid = answered = typed = have_shot = False
         all_usage: List[Dict[str, Any]] = []
         keyframe_dir: Optional[str] = None
         try:
@@ -2486,7 +2497,7 @@ class PageSolver:
                     performed = answered = True
                 elif kind == ActionKind.TYPE:
                     if self._execute_type(page, scope, action, widget.at):
-                        performed = answered = True
+                        performed = answered = typed = True
                 elif kind == ActionKind.HOLD:
                     # The widget submits itself when the hold completes, like a slide on release.
                     self._execute_hold(page, action, element_box, element, self._sel.selectors[widget.vendor].hold_completes)
@@ -2506,7 +2517,8 @@ class PageSolver:
             # `done` plan still presses Verify/Skip. FunCaptcha's answer is the click itself: an arrow pages and
             # Submit submits. The generic Verify fallback would submit the page an arrow just turned to.
             submits = self._submitted_on_board if slid else answered or not performed
-            verify_button = self._get_verify_button(scope) if submits and puzzle_source != Vendor.FUNCAPTCHA else None
+            verify_button = (self._get_verify_button(scope, widget.at if typed else None)
+                             if submits and puzzle_source != Vendor.FUNCAPTCHA else None)
             if verify_button:
                 _log(f"clicking Verify to submit ({puzzle_source}).")
                 self._move_and_click(page, verify_button)

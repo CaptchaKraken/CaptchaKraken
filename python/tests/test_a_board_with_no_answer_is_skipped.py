@@ -42,7 +42,7 @@ def _round(*, text_mode=False, vendor=Vendor.HCAPTCHA):
     solver.is_captcha_solved = lambda page: False
     solver._screenshot = lambda *a, **k: None
     solver._step_off_the_board = lambda page, element: None
-    solver._get_verify_button = lambda scope: "skip"
+    solver._get_verify_button = lambda scope, *_: "skip"
     solver._move_and_click = lambda page, button: pressed.append(button)
     solver._element_frame_hash = lambda element: None
 

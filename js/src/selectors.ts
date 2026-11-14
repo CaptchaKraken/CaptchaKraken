@@ -269,6 +269,8 @@ export class SelectorTable {
   /** A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks. */
   readonly submit: readonly string[];
   readonly textInputVendor: readonly string[];
+  /** The vendor-named submit controls alone: the only ones looked for outside the widget, after a typed answer. */
+  readonly submitVendor: readonly string[];
   /**
    * Vendor-named first, generic last: the driver takes the first visible match, and a generic selector reached before
    * the vendor's own is how a captcha's answer ends up in a login form's username box.
@@ -296,7 +298,8 @@ export class SelectorTable {
     this.enclave = every('enclave');
     this.response = this.vendors.flatMap(([, s]) => s.response ?? []);
     this.accepted = this.vendors.flatMap(([, s]) => s.accepted ?? []);
-    this.submit = [...loaded.generic.submit_text.map(submitByText), ...every('submit')];
+    this.submitVendor = every('submit');
+    this.submit = [...loaded.generic.submit_text.map(submitByText), ...this.submitVendor];
     this.textInputVendor = every('textInput');
     this.textInput = [...this.textInputVendor, ...loaded.generic.text_input];
     this.sliderHandle = [...every('sliderHandle'), ...loaded.generic.slider_handle];

@@ -306,6 +306,11 @@
         "input[id*=validateCaptcha]",
         ".BDC_CaptchaDiv input[type=text]"
       ],
+      "submit": [
+        "input#validateCaptchaButton",
+        "input[type=submit][id*=\"validateCaptcha\" i]",
+        "button[id*=\"validateCaptcha\" i]"
+      ],
       "refresh": [
         "a[id*=\"ReloadLink\"]",
         ".BDC_ReloadIcon"
@@ -397,6 +402,24 @@
       ],
       "refresh": [
         "#captcha__reload__button"
+      ]
+    },
+    "cybersiara": {
+      "note": "SiaraShield draws its challenge inline on the host page: a modal (`#myModal .pluginPopups`) holding a looping GIF of four letters read out of noise, `#Input_Captcha` and a refresh. It checks the answer itself once the fourth letter is typed (measured live 2026-11-14: a wrong answer clears the box and deals a new GIF), so it has no submit control. The host's own `.CaptchaSubmit` opens the modal, so it is never pressed for an answer.",
+      "hosts": [
+        "mycybersiara.com"
+      ],
+      "widget": [
+        "#myModal .pluginPopups:has(#Img_Original)",
+        ".pluginPopups:has(img.cy-sa-si-main-img)"
+      ],
+      "text_input": [
+        "#Input_Captcha",
+        ".cy-sa-page-2 input.Uinput"
+      ],
+      "refresh": [
+        "#a_Refresh",
+        ".pluginPopups a.ref_icon"
       ]
     },
     "unknown": {
