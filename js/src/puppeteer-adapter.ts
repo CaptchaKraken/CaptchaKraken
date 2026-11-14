@@ -71,11 +71,14 @@ const inDoc = (d: StyleTarget, fn: (at: Node | null, css: string) => void, css =
 /**
  * Playwright's screenshot `style`, which Puppeteer lacks: the sheet goes into each document for the length of the
  * capture. A frame that has gone away in the meantime has nothing left to restore.
+ *
+ * A frame that cannot take the sheet (detached, or navigating, mid-capture) is shot as it is rather than failing the
+ * whole screenshot; and the sheets the other frames did take still come out, or their feedback would stay hidden.
  */
 async function styled<T>(into: () => Promise<StyleTarget[]>, css: string | undefined, capture: () => Promise<T>): Promise<T> {
   if (!css) return capture();
   const docs = await into();
-  await Promise.all(docs.map((d) => inDoc(d, addStyle, css)));
+  await Promise.all(docs.map((d) => inDoc(d, addStyle, css).catch(() => undefined)));
   try {
     return await capture();
   } finally {

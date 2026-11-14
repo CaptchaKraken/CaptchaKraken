@@ -212,3 +212,15 @@ test('a screenshot style is put into every frame for the capture and taken out a
   assert.deepEqual(calls[0].args, [null, '#t { display: none !important; }']);
   assert.deepEqual(calls[2].args, [{ type: 'png' }], 'the style reached Puppeteer, which would ignore it');
 });
+
+test('a frame that cannot take the screenshot style is shot as it is, and the others still get theirs back', async () => {
+  // A frame detaching mid-capture used to reject the whole screenshot and leave the sheet in every other frame,
+  // hiding its verdict toast for the rest of the solve.
+  const calls: Call[] = [];
+  const gone = { ...fakeFrame(calls), evaluate: async () => { throw new Error('Attempted to use detached Frame'); } };
+  const png = await fromPuppeteer(fakePage(calls, { frames: () => [gone, fakeFrame(calls)] }))
+    .screenshot({ style: '#t { display: none !important; }' });
+  assert.deepEqual([...png], [137, 80], 'one detached frame failed the whole capture');
+  assert.deepEqual(calls.map((c) => c.method), ['frame.evaluate:addStyle', 'screenshot', 'frame.evaluate:dropStyle'],
+    'the frame that did take the sheet kept it');
+});
