@@ -4,6 +4,7 @@ A board that takes presses without telling its server anything has refused nothi
 more press a vendor scores. The same board also has to read as the same board however the round's picture was
 taken, or the repeat is never seen and the same answer is pressed again.
 """
+import hashlib
 import os
 import sys
 
@@ -76,13 +77,9 @@ def test_a_page_that_cannot_be_listened_to_keeps_the_repeat_as_its_only_evidence
     assert s._refused_rounds == 1
 
 
-def test_a_filmed_picture_and_a_plain_one_of_the_same_board_are_one_board(tmp_path):
+def test_a_filmed_picture_and_a_plain_one_of_the_same_board_are_one_board():
+    # The identity takes its own plain photograph, so whatever frame the model was handed never decides it.
     plain = b"the board, as the element paints it"
-    filmed = tmp_path / "filmed.png"
-    filmed.write_bytes(b"the same board, out of a recording")
-    shot = tmp_path / "shot.png"
-    shot.write_bytes(plain)
-
     s = _solver(object())
     s._screenshot = lambda _element, path, **_kw: open(path, "wb").write(plain)
-    assert s._board_hash(None, str(filmed), filmed=True) == s._board_hash(None, str(shot), filmed=False)
+    assert s._board_hash(None) == hashlib.sha1(plain).hexdigest()

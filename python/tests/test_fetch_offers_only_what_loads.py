@@ -14,7 +14,7 @@ from captchakraken import config, prompts, selfhost, server_manager
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("CAPTCHA_KRAKEN_STATE_DIR", str(tmp_path))
     for name in ("VLLM_BASE_URL", "CAPTCHA_KRAKEN_API_KEY", "VLLM_API_KEY", "CAPTCHA_BASE_MODEL", "CAPTCHA_LORA_ADAPTER",
-                 "CAPTCHA_LORA_NAME", "CAPTCHA_POINTER_DETECTOR", "VLLM_PORT", "VLLM_GPU_MEMORY_UTILIZATION",
+                 "CAPTCHA_LORA_NAME", "VLLM_PORT", "VLLM_GPU_MEMORY_UTILIZATION",
                  "VLLM_MAX_CUDAGRAPH_CAPTURE_SIZE", "CUDA_VISIBLE_DEVICES"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(server_manager, "STOPPED_FILE", tmp_path / "server.stopped")
@@ -28,7 +28,7 @@ LARGE = selfhost.Gpu(0, "RTX 5090", 32607, 2400)
 
 def _write(**over):
     choice = selfhost.Choice(selfhost.MODELS[0], SMALL, selfhost.FIRST_SOLVE)
-    values = selfhost.settings(choice, "/weights/m", "/weights/d.pt", {"port": 8123})
+    values = selfhost.settings(choice, "/weights/m", {"port": 8123})
     values.update(over)
     selfhost.write_settings(values)
     return values
@@ -74,19 +74,19 @@ def test_a_card_too_full_to_start_says_so():
 
 def test_a_small_card_gets_the_settings_that_let_it_start(home):
     choice = selfhost.Choice(selfhost.MODELS[0], SMALL, selfhost.ALWAYS_ON)
-    small = selfhost.settings(choice, "m", "d", {"port": 1})
+    small = selfhost.settings(choice, "m", {"port": 1})
     assert (small["gpu_memory_utilization"], small["max_cudagraph_capture_size"]) == (0.72, 16)
-    large = selfhost.settings(choice._replace(gpu=LARGE), "m", "d", {"port": 1})
+    large = selfhost.settings(choice._replace(gpu=LARGE), "m", {"port": 1})
     assert (large["gpu_memory_utilization"], large["max_cudagraph_capture_size"]) == (0.80, None)
     twilight = next(m for m in selfhost.MODELS if m.repo.endswith("TwilightV2-2B"))
     # Measured on a 5060: at 0.72 its weights and activations left 0.01 GiB of the 0.11 GiB KV cache one request needs.
-    assert selfhost.settings(choice._replace(model=twilight), "m", "d", {"port": 1})["gpu_memory_utilization"] == 0.80
+    assert selfhost.settings(choice._replace(model=twilight), "m", {"port": 1})["gpu_memory_utilization"] == 0.80
 
 
 def test_a_rerun_keeps_the_key_and_the_port(home):
     first = _write()
     choice = selfhost.Choice(selfhost.MODELS[1], SMALL, selfhost.ALWAYS_ON)
-    second = selfhost.settings(choice, "m", "d", first)
+    second = selfhost.settings(choice, "m", first)
     assert (second["key"], second["port"]) == (first["key"], first["port"])
 
 
@@ -118,7 +118,6 @@ def test_an_endpoint_named_in_the_environment_owns_every_setting(home, monkeypat
     monkeypatch.setenv("CAPTCHA_KRAKEN_API_KEY", "ck_live_x")
     assert config.api_key() == "ck_live_x"
     assert config.selfhost_active() == {}
-    assert config.pointer_detector() is None
 
 
 def test_the_server_runs_from_the_runtime_on_the_chosen_gpu(home, monkeypatch):
@@ -126,7 +125,7 @@ def test_the_server_runs_from_the_runtime_on_the_chosen_gpu(home, monkeypatch):
     cmd = server_manager.build_serve_command()
     assert cmd[0] == str(home / "runtime" / "bin" / "python")
     assert cmd[cmd.index("--model") + 1] == "/weights/m"
-    assert cmd[cmd.index("--detector") + 1] == "/weights/d.pt"
+    assert "--detector" not in cmd
     assert cmd[cmd.index("--gpu-memory-utilization") + 1] == "0.72"
     assert cmd[cmd.index("--max-cudagraph-capture-size") + 1] == "16"
     env = server_manager._serve_env()

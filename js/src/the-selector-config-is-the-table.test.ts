@@ -89,7 +89,6 @@ const BAD: Array<[unknown, RegExp]> = [
   [{ custom: { widget: '.one-string' } }, /custom\.widget: must be a list of strings/],
   [{ custom: { text_input: ['#code'] } }, /nothing to detect/],
   [{ generic: { buttons: [] } }, /generic\.buttons: not a generic list/],
-  [{ detector: 'heavy' }, /detector: "heavy" is not one of auto, standard, lite/],
 ];
 
 test('a bad key is named', () => {
@@ -99,25 +98,19 @@ test('a bad key is named', () => {
   }
 });
 
-test('the detector is auto unless the config names one', () => {
-  assert.equal(DEFAULT_TABLE.config.detector, 'auto');
-  assert.equal(new SelectorTable(undefined, { custom: SIGNUP }).config.detector, 'auto');
-  assert.equal(new SelectorTable(undefined, { detector: 'lite' }).config.detector, 'lite');
+test('a config that still names a detector loads', () => {
+  // `detector` chose an element detector the client no longer has; a config written for one is not refused.
+  const withKey = new SelectorTable(undefined, { detector: 'lite', custom: SIGNUP } as SelectorConfigFile).config;
+  assert.deepEqual(withKey, new SelectorTable(undefined, { custom: SIGNUP }).config);
 });
 
-test("the config's detector reaches the engine, and the environment still wins", () => {
-  const saved = process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL;
-  try {
-    delete process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL;
-    const env = (s: CaptchaKrakenSolver) => (s as any).routingEnv().CAPTCHA_KRAKEN_DETECTOR_MODEL;
-    assert.equal(env(new CaptchaKrakenSolver()), 'auto');
-    assert.equal(env(new CaptchaKrakenSolver({ selectors: { detector: 'standard' } })), 'standard');
-    process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL = 'lite';
-    assert.equal(env(new CaptchaKrakenSolver({ selectors: { detector: 'standard' } })), undefined);
-  } finally {
-    if (saved === undefined) delete process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL;
-    else process.env.CAPTCHA_KRAKEN_DETECTOR_MODEL = saved;
-  }
+test('the engine is not told about a detector', () => {
+  assert.equal((new CaptchaKrakenSolver() as any).routingEnv().CAPTCHA_KRAKEN_DETECTOR_MODEL, undefined);
+});
+
+test('recaptcha names its tiles', () => {
+  // The driver reads a reCAPTCHA grid's cells from these, not from the picture.
+  assert.ok(DEFAULT_TABLE.selectors[Vendor.RECAPTCHA].tiles?.length);
 });
 
 test('a file that is not JSON names the file', () => {

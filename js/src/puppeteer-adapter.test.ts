@@ -30,6 +30,7 @@ function fakeFrame(calls: Call[]) {
     $$: async (sel: string) => { calls.push({ method: 'frame.$$', args: [sel] }); return [fakeHandle(calls)]; },
     waitForSelector: async (sel: string, o: any) => { calls.push({ method: 'frame.waitForSelector', args: [sel, o] }); return fakeHandle(calls); },
     waitForFunction: async (fn: any, ...rest: any[]) => { calls.push({ method: 'frame.waitForFunction', args: [fn, ...rest] }); return true; },
+    evaluate: async (fn: Function, ...args: any[]) => { calls.push({ method: `frame.evaluate:${fn.name}`, args }); },
   };
 }
 
@@ -52,6 +53,7 @@ function fakePage(calls: Call[], over: Record<string, any> = {}) {
     $$: async (sel: string) => { calls.push({ method: '$$', args: [sel] }); return [fakeHandle(calls), fakeHandle(calls)]; },
     evaluate: async (fn: any) => { calls.push({ method: 'evaluate', args: [fn] }); return fn(); },
     isClosed: () => false,
+    frames: () => [fakeFrame(calls), fakeFrame(calls)],
     ...over,
   } as any;
 }
@@ -198,4 +200,15 @@ test('screenshot() takes the whole viewport as a PNG Buffer, dropping the Playwr
   assert.ok(Buffer.isBuffer(png), 'the driver crops a Buffer; Puppeteer 22+ returns a Uint8Array');
   assert.deepEqual([...png], [137, 80]);
   assert.deepEqual(last(calls), { method: 'screenshot', args: [{ type: 'png' }] });
+});
+
+test('a screenshot style is put into every frame for the capture and taken out after', async () => {
+  // Puppeteer has no `style` option; the board's identity depends on it to leave a verdict toast out.
+  const calls: Call[] = [];
+  await fromPuppeteer(fakePage(calls)).screenshot({ style: '#t { display: none !important; }' });
+  assert.deepEqual(calls.map((c) => c.method), [
+    'frame.evaluate:addStyle', 'frame.evaluate:addStyle', 'screenshot', 'frame.evaluate:dropStyle', 'frame.evaluate:dropStyle',
+  ]);
+  assert.deepEqual(calls[0].args, [null, '#t { display: none !important; }']);
+  assert.deepEqual(calls[2].args, [{ type: 'png' }], 'the style reached Puppeteer, which would ignore it');
 });

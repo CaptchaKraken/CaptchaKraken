@@ -3,6 +3,55 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [5.0.0] - 2026-11-13
+
+### Removed (breaking)
+
+- **The element detector.** The client runs no CNN. `onnxruntime` is no longer
+  a dependency and no detector weights are downloaded; `captchakraken fetch`
+  downloads the model alone. The pointer models score higher on the bare board
+  than with the detector's numbered marks (TwilightV2-2B 72.6% against 68.2%,
+  MidnightV2-4B q4 75.1% against 70.8%, on 1,067 real boards), so every board is
+  now sent bare.
+- `find_grid`, `config.pointer_detector()`, the CLI commands `find-grid`,
+  `detect-selected`, `get-numbered-grid` and `grid-cell-states`, and the
+  `CAPTCHA_POINTER_DETECTOR`, `CAPTCHA_KRAKEN_DETECTOR` and
+  `CAPTCHA_KRAKEN_DETECTOR_MODEL` variables. A `detector` key in
+  `captchakraken.config.json` is ignored rather than refused.
+- The letter detector beside the pointer model: a typed code is read by the
+  model alone. The pointer server ignores `marked`, returns `"elements": []`, and
+  still accepts `--detector` and `--letters` so an existing unit file starts it.
+
+### Changed
+
+- **A reCAPTCHA grid's cells come from its markup.** The selector config's new
+  `tiles` field names them (`td.rc-imageselect-tile`); both ports read each
+  tile's rectangle in the challenge frame and scale it onto the screenshot.
+- **The tick box is found with pixel arithmetic:** the largest flat, square
+  region closed in by an outline, with no model. It must also be empty, flat and
+  neutral inside, sit near the widget's leading edge, and sit on the widget's
+  flat panel on two sides, so a square on a puzzle board is never taken for one:
+  0 hits on 4,329 real boards, against 777 for the first version, and every
+  tick box found on 1,128 labelled reCAPTCHA, hCaptcha, Turnstile and CaptchaFox
+  widgets, in every theme, size and scale. A label or warning crowding one side
+  of the box no longer hides it (German and Russian widgets).
+- **`captchakraken fetch` downloads licensed weights** with the caller's own
+  Hugging Face credentials (`hf auth login` or `HF_TOKEN`) instead of refusing
+  them. A refusal by the Hub names the licence and points at the hosted API.
+
+### Added
+
+- **A `board` selector field** names the board inside a vendor's frame, and
+  `capture(page)` (both ports) returns the box a solve would photograph,
+  without asking the model.
+
+### Fixed
+
+- **Proton is shot as its board,** two frames down, not the whole padded
+  682x600 frame around it.
+- **Yidun's click modes are shot with their prompt bar** (`.yidun_control`),
+  which names the marks to click and their order.
+
 ## [4.2.0] - 2026-11-12
 
 ### Added

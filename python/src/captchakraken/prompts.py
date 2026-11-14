@@ -191,7 +191,7 @@ BUILTIN_PROMPTS = {
         ),
     },
     # Generation 4 is the pointer (`captchakraken.pointer`): the board goes to the server's /pointer endpoint,
-    # which numbers its elements with the element detector, builds the prompt itself and reads the answer from one
+    # which builds the prompt itself and reads the answer from one
     # prefill. The client sends no prompt text, so there is none to drift.
     "4": {
         "pointer": True,
@@ -263,13 +263,12 @@ def availability(model: Optional[str]) -> Availability:
 
 
 def is_licensed(model: Optional[str]) -> bool:
-    # PRIVATE is not a softer LICENSED: refusing a licensed model early replaces a RepositoryNotFoundError that
-    # reads as "not logged in" with the truth, but refusing a private one would stop our own token pulling weights.
+    # A licensed model's Hub refusal means "buy a licence", not "log in": fetch words it differently from a private one.
     return availability(model) == Availability.LICENSED
 
 
 def requires_auth(model: Optional[str]) -> bool:
-    return availability(model) == Availability.PRIVATE
+    return availability(model) in (Availability.PRIVATE, Availability.LICENSED)
 
 
 @dataclass

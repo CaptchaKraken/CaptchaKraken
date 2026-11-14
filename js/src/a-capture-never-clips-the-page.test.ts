@@ -104,7 +104,7 @@ for (const animations of ['disabled', 'allow'] as const) {
   test(`every capture is one viewport shot with no clip (animations ${animations})`, async () => {
     const { solver, el, shots, out } = rig({ viewport: { width: 160, height: 120 }, dpr: 2, box: { x: 10, y: 20, width: 50, height: 25 } });
     await solver.shot(el, out, 1234, animations);
-    assert.deepEqual(shots, [{ timeout: 1234, animations }], 'the capture was not one unclipped viewport screenshot');
+    assert.deepEqual(shots, [{ timeout: 1234, animations, style: undefined }], 'the capture was not one unclipped viewport screenshot');
     assert.equal(el.elementShots, 0, 'the element photographed itself, which repaints the page');
     const crop = readCrop(fs.readFileSync(out));
     assert.deepEqual([crop.width, crop.height], [100, 50], 'the crop lost the device pixel ratio');

@@ -11,7 +11,7 @@ export interface ViewportSize {
 }
 
 export interface PlaywrightElementHandle {
-  screenshot(options?: { path?: string; timeout?: number; animations?: 'disabled' | 'allow' }): Promise<Buffer>;
+  screenshot(options?: { path?: string; timeout?: number; animations?: 'disabled' | 'allow'; style?: string }): Promise<Buffer>;
 
   contentFrame(): Promise<PlaywrightFrame | null>;
 
@@ -51,6 +51,9 @@ export interface PlaywrightScope {
 export interface PlaywrightFrame extends PlaywrightScope {
   /** Optional: its HOSTNAME alone is sent as X-CK-Widget-Host, the host the widget was served from. */
   url?(): string;
+
+  /** Optional: the frames nested in this one (Playwright and Puppeteer both have it), searched for a vendor's `board`. */
+  childFrames?(): PlaywrightFrame[];
 
   waitForSelector(
     selector: string,
@@ -99,7 +102,7 @@ export interface PlaywrightPage extends PlaywrightScope {
   viewportSize(): ViewportSize | null;
 
   /** The whole viewport as a PNG: the driver's only capture, cropped locally, because a clipped one repaints the page. */
-  screenshot(options?: { timeout?: number; animations?: 'disabled' | 'allow' }): Promise<Buffer>;
+  screenshot(options?: { timeout?: number; animations?: 'disabled' | 'allow'; style?: string }): Promise<Buffer>;
 
   /** Optional: the mouse humanizer asks the window for its size when `viewportSize()` is null (camoufox). */
   evaluate?<R>(pageFunction: () => R): Promise<R>;

@@ -1,8 +1,12 @@
-"""A licensed model is refused in plan(), before any download, so --dry-run shows it; the alternative is a RepositoryNotFoundError that reads as "you are not logged in". --engine-only is unguarded on purpose."""
+"""A licensed model downloads from its gated Hub repo with the holder's own token; a refusal from the Hub says where the licence is sold, not "you are not logged in"."""
 
+import sys
+
+import httpx
 import pytest
+from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, LocalEntryNotFoundError, RepositoryNotFoundError
 
-from captchakraken import prompts, updater
+from captchakraken import cli, prompts, updater
 
 LICENSED_REPO = "CaptchaKraken/Abyss"
 LICENSED_SERVED = "abyss"
@@ -42,32 +46,92 @@ def test_the_served_name_is_licensed_too():
     assert prompts.is_licensed(LICENSED_SERVED)
 
 
-def test_fetch_refuses_a_licensed_adapter():
+def _refusal(error_class, status):
+    response = httpx.Response(status, request=httpx.Request("GET", f"https://huggingface.co/api/models/{LICENSED_REPO}"))
+    return error_class(f"{status} refused", response=response)
+
+
+def _fetch_licensed(monkeypatch, download):
+    monkeypatch.setattr("huggingface_hub.snapshot_download", download)
+    monkeypatch.setattr(updater, "_run", lambda cmd: None)
+    return updater.fetch(weights=True, engine=False, restart=False, base=PUBLIC_REPO, lora=LICENSED_REPO)
+
+
+def test_the_dry_run_lists_a_licensed_model_as_needing_a_token():
+    plan = updater.fetch(dry_run=True, engine=False, restart=False, base=PUBLIC_REPO, lora=LICENSED_REPO)
+    assert plan["needs_auth"] == [LICENSED_REPO]
+    assert any(cmd[-1] == LICENSED_REPO for cmd in plan["downloads"])
+
+
+def test_the_served_name_plans_the_repo_it_names():
+    plan = updater.plan(engine=False, base=PUBLIC_REPO, lora=LICENSED_SERVED)
+    assert plan["lora_adapter"] == LICENSED_REPO
+    assert plan["needs_auth"] == [LICENSED_REPO]
+
+
+def test_a_licence_holder_downloads_the_weights(monkeypatch):
+    pulled = []
+    out = _fetch_licensed(monkeypatch, lambda repo_id, **kw: pulled.append(repo_id) or "/cache")
+    assert pulled == [LICENSED_REPO]
+    assert out["fetched_weights"] is True
+
+
+@pytest.mark.parametrize("refusal", [
+    _refusal(GatedRepoError, 401),
+    _refusal(GatedRepoError, 403),
+    _refusal(RepositoryNotFoundError, 401),
+    _refusal(HfHubHTTPError, 403),
+], ids=["gated-no-token", "gated-not-approved", "not-found", "forbidden"])
+def test_a_hub_refusal_points_at_the_licence(monkeypatch, refusal):
+    def refuse(repo_id, **kw):
+        raise refusal
+
     with pytest.raises(updater.LicensedModelError) as exc:
-        updater.plan(lora=LICENSED_REPO)
+        _fetch_licensed(monkeypatch, refuse)
     message = str(exc.value)
+    assert "https://captchakraken.com/plans" in message
+    assert "Abyss Licence" in message
     assert "api.captchakraken.com" in message
-    assert "licence" in message
+    assert exc.value.__cause__ is refusal
 
 
-def test_fetch_refuses_the_served_name_as_well():
+def test_a_refusal_wrapped_by_snapshot_download_still_points_at_the_licence(monkeypatch):
+    def refuse(repo_id, **kw):
+        raise LocalEntryNotFoundError("no cached snapshot") from _refusal(HfHubHTTPError, 403)
+
     with pytest.raises(updater.LicensedModelError):
-        updater.plan(lora=LICENSED_SERVED)
+        _fetch_licensed(monkeypatch, refuse)
 
 
-def test_fetch_refuses_a_licensed_base_model():
-    with pytest.raises(updater.LicensedModelError):
-        updater.plan(base=LICENSED_REPO)
+def test_a_hub_outage_is_not_blamed_on_the_licence(monkeypatch):
+    outage = _refusal(HfHubHTTPError, 503)
+
+    def fail(repo_id, **kw):
+        raise outage
+
+    with pytest.raises(HfHubHTTPError) as exc:
+        _fetch_licensed(monkeypatch, fail)
+    assert exc.value is outage
 
 
-def test_the_refusal_happens_in_plan_so_dry_run_shows_it():
-    with pytest.raises(updater.LicensedModelError):
-        updater.plan(lora=LICENSED_REPO, engine=False)
+def test_a_public_model_still_downloads_through_the_cli(monkeypatch):
+    ran = []
+    monkeypatch.setattr(updater, "_run", ran.append)
+    updater.fetch(weights=True, engine=False, restart=False, base=PUBLIC_REPO, lora=PUBLIC_REPO)
+    assert [cmd[-1] for cmd in ran] == [PUBLIC_REPO, PUBLIC_REPO]
 
 
-def test_skipping_the_weights_skips_the_refusal():
+def test_skipping_the_weights_downloads_nothing():
     assert updater.plan(weights=False, lora=LICENSED_REPO)["downloads"] == []
 
 
-def test_a_public_model_still_fetches():
-    assert updater.plan(lora=PUBLIC_REPO)["lora_adapter"] == PUBLIC_REPO
+def test_the_documented_command_fetches_the_licensed_repo_and_its_base(monkeypatch, capsys):
+    pulled, ran = [], []
+    monkeypatch.setenv("CAPTCHA_LORA_ADAPTER", LICENSED_REPO)
+    monkeypatch.delenv("CAPTCHA_BASE_MODEL", raising=False)
+    monkeypatch.setattr("huggingface_hub.snapshot_download", lambda repo_id, **kw: pulled.append(repo_id))
+    monkeypatch.setattr(updater, "_run", ran.append)
+    monkeypatch.setattr(sys, "argv", ["captchakraken", "fetch", "--weights-only", "--no-restart"])
+    cli.main()
+    assert pulled == [LICENSED_REPO]
+    assert [cmd[-1] for cmd in ran] == [prompts.registered_models()[LICENSED_REPO]["base_model"]]

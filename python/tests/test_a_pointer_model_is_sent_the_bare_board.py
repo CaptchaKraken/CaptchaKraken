@@ -1,7 +1,6 @@
 """A generation-4 model is the pointer: the client sends the bare board to /pointer and nothing else.
 
-No prompt (the server owns it), no numbered grid overlay (the server's element detector numbers every element,
-grid cells included), and no find_grid: a board is a board. The answer comes back in generation 3's shape and
+No prompt (the server owns it) and no numbered grid overlay: a board is a board. The answer comes back in generation 3's shape and
 is performed by the same code.
 """
 
@@ -14,7 +13,6 @@ from PIL import Image
 
 from captchakraken import prompts
 from captchakraken import planner as P
-from captchakraken import solver as S
 from captchakraken.keyframes import write_frame
 from captchakraken.solver import CaptchaSolver, cut_recording
 
@@ -81,17 +79,6 @@ def test_a_still_goes_to_the_pointer_endpoint_as_it_was_captured(registry, wire,
     body = wire["sent"][-1]
     assert set(body) == {"model", "image"}
     assert base64.b64decode(body["image"]) == open(path, "rb").read()
-
-
-def test_a_grid_is_never_found_by_find_grid_under_the_pointer(registry, wire, tmp_path, monkeypatch):
-    def refuse(*a, **k):
-        raise AssertionError("find_grid ran under generation 4")
-    monkeypatch.setattr(S, "find_grid", refuse)
-    path = grid_board(tmp_path / "board.png")
-    wire["answer"] = {"action": "click", "points": [[188, 188]], "ids": [1]}
-    actions = CaptchaSolver(model="Acme/Pointer").solve(path)
-    acts = actions if isinstance(actions, list) else [actions]
-    assert acts[0].action == "click"
 
 
 def test_the_pointer_answer_is_performed_like_generation_3s(registry, wire, tmp_path):

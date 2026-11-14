@@ -21,9 +21,19 @@ name: Publish
 # pending-publisher entry created on npmjs.com); every release after that is
 # tokenless like the rest. This is a one-time cost and it is why publish-mcp can
 # legitimately fail on the very first run while the other two jobs succeed.
+#
+# BETAS FROM DEV. A push to dev publishes the manifests' version as a pre-release
+# built from that commit: `X.Y.Zb<run>` on PyPI, `X.Y.Z-beta.<run>` on npm under
+# the `beta` dist-tag. Neither registry hands a pre-release to a plain install
+# (`pip install captchakraken` and `npm i captchakraken` keep the last final), so
+# a beta reaches only those who ask for it: `pip install --pre captchakraken`,
+# `npm i captchakraken@beta`. Once X.Y.Z itself is on npm, dev pushes still at
+# X.Y.Z publish nothing until the manifests move on. The MCP server is not
+# pre-released. Betas must run from THIS file: both registries trust
+# publish.yml by name, so a separate beta workflow would be refused.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
 
 concurrency:
   group: publish
@@ -34,9 +44,39 @@ jobs:
     name: Verify (CI gate)
     uses: ./.github/workflows/ci.yml
 
+  # What this push publishes: main publishes the manifests as they are; dev
+  # publishes a pre-release of them, unless that version is already final.
+  version:
+    name: Version to publish
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.v.outputs.publish }}
+      npm: ${{ steps.v.outputs.npm }}
+      pypi: ${{ steps.v.outputs.pypi }}
+      dist_tag: ${{ steps.v.outputs.dist_tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - id: v
+        run: |
+          set -euo pipefail
+          BASE=$(node -p "require('./js/package.json').version")
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            printf 'publish=true\nnpm=%s\npypi=%s\ndist_tag=latest\n' "$BASE" "$BASE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if npm view "captchakraken@$BASE" version >/dev/null 2>&1; then
+            echo "captchakraken@$BASE is already final; no beta until the manifests move past it."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          N="$GITHUB_RUN_NUMBER"
+          printf 'publish=true\nnpm=%s\npypi=%s\ndist_tag=beta\n' "$BASE-beta.$N" "${BASE}b$N" >> "$GITHUB_OUTPUT"
+          echo "beta: npm $BASE-beta.$N, PyPI ${BASE}b$N"
+
   publish-npm:
     name: Publish npm (captchakraken)
-    needs: verify
+    needs: [verify, version]
+    if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write        # OIDC trusted publishing + provenance
@@ -59,15 +99,29 @@ jobs:
         run: npm ci --ignore-scripts
         env:
           CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP: '1'
+      - name: Stamp a beta's version
+        if: needs.version.outputs.dist_tag == 'beta'
+        env:
+          NPM_VER: ${{ needs.version.outputs.npm }}
+          PY_VER: ${{ needs.version.outputs.pypi }}
+        # The bundled Python engine is stamped too, so it reports the build it is.
+        run: |
+          npm version "$NPM_VER" --no-git-tag-version --allow-same-version
+          sed -i -E "s/^version *= *\".*\"/version = \"$PY_VER\"/" ../python/pyproject.toml
+          sed -i -E "s/^__version__ = \".*\"/__version__ = \"$PY_VER\"/" ../python/src/captchakraken/__init__.py
       - name: Build (bundles python engine + compiles TS)
         run: npm run build
       - name: Publish (idempotent)
+        env:
+          DIST_TAG: ${{ needs.version.outputs.dist_tag }}
+        # npm refuses a pre-release without an explicit --tag, and a beta must
+        # never take `latest`.
         run: |
           VER=$(node -p "require('./package.json').version")
           if npm view "captchakraken@$VER" version >/dev/null 2>&1; then
             echo "captchakraken@$VER already published — skipping."
           else
-            npm publish --access public --provenance
+            npm publish --access public --provenance --tag "$DIST_TAG"
           fi
 
   # The MCP server is a SEPARATE package on its own version line (0.1.0 while
@@ -82,6 +136,7 @@ jobs:
   publish-mcp:
     name: Publish npm (captchakraken-mcp)
     needs: verify
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       id-token: write        # OIDC trusted publishing + provenance
@@ -140,7 +195,8 @@ jobs:
 
   publish-pypi:
     name: Publish PyPI (captchakraken)
-    needs: verify
+    needs: [verify, version]
+    if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write        # OIDC trusted publishing to PyPI
@@ -149,6 +205,14 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
+      - name: Stamp a beta's version
+        if: needs.version.outputs.dist_tag == 'beta'
+        env:
+          PY_VER: ${{ needs.version.outputs.pypi }}
+        run: |
+          sed -i -E "s/^version *= *\".*\"/version = \"$PY_VER\"/" python/pyproject.toml
+          sed -i -E "s/^__version__ = \".*\"/__version__ = \"$PY_VER\"/" python/src/captchakraken/__init__.py
+          grep -n "^version" python/pyproject.toml
       - name: Build sdist + wheel
         working-directory: python
         run: |
@@ -175,7 +239,7 @@ jobs:
   # succeeds. The client's tag must not be hostage to that.
   tag:
     name: Tag the release
-    needs: [publish-npm, publish-pypi]
+    needs: [version, publish-npm, publish-pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -188,6 +252,10 @@ jobs:
         # than the local refs, because this checkout is shallow and carries no
         # tags — asking locally would answer "no tag" every time and then fail on
         # the push.
+        # A beta is tagged by its npm version (v5.0.0-beta.12), which names the
+        # same build as its PyPI one (5.0.0b12).
+        env:
+          NPM_VER: ${{ needs.version.outputs.npm }}
         run: |
           set -euo pipefail
           VER=$(node -p "require('./js/package.json').version")
@@ -196,6 +264,7 @@ jobs:
             echo "::error::js/package.json says $VER and python/pyproject.toml says $PY. Both ports publish from this commit, so one tag cannot name two versions."
             exit 1
           fi
+          VER="$NPM_VER"
           if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
             echo "v$VER is already tagged — nothing to do."
             exit 0

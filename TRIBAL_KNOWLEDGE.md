@@ -128,15 +128,20 @@ on the training side to compare behaviour (the fixtures in
 `test_keyframes*.py`) rather than bytes. Every threshold in the file was
 measured, not guessed, and the measurement now sits beside each constant.
 
-**Grid screenshots are sent with cell numbers drawn on them.** The client runs
-`find_grid`, has `overlay.py` render the numbered labels, and sends that image,
+**Grid screenshots are sent with cell numbers drawn on them** (chat models). The
+client reads each cell from the reCAPTCHA challenge frame's tiles
+(`td.rc-imageselect-tile`, scaled onto the screenshot), has `overlay.py` render
+the numbered labels, and sends that image,
 because the model reads those labels and was never trained to invent a numbering.
 Skip the overlay and reCAPTCHA 4×4 scores zero without raising anything — it
 looks exactly like a broken model.
 
 **`find_grid` reads the element detector, not the pixels.** Every grid solve
-rests on the CNN's grid and cell boxes (`pointer/detector.py`); a board it
-misreads is fixed by training the detector, not by a geometry rule here.
+rested on the CNN's grid and cell boxes (`pointer/detector.py`); a board it
+misread was fixed by training the detector, not by a geometry rule here.
+*Superseded in 5.0.0:* the client has no detector and no `find_grid()`; a
+reCAPTCHA grid's cells come from the DOM tiles, and the pointer model reads the
+bare board.
 
 **One page carries every published number.** `docs/benchmarks.md` holds the
 end-to-end browser counts and the static-image rates, deliberately as counts
@@ -157,7 +162,7 @@ so the attempt stops bailing at round 3. A repeated answer instead turns on
 `avoid_refused`, and the pointer answers with its likeliest other answer.
 
 **A second click on one element is usually a second answer.** The detector
-outlines a whole line as one `item`, so one click per element turned both ends of
+(removed in 5.0.0) outlined a whole line as one `item`, so one click per element turned both ends of
 a line into one click, on 2 of 3 gauntlet seeds of the board that asks for them.
 Only a cell deselects on a second press, so only a repeat in one cell or one place
 is dropped.
@@ -187,7 +192,9 @@ declares `experts`. The driver still decides how the board is SHOWN — a grid
 that `find_grid` and `_grid_dims` accept is sent with its
 cells numbered, anything else as the plain picture — because the model was
 trained on exactly what those two would number. Its `ids` name cells; when
-they name none, the cells its points land in do.
+they name none, the cells its points land in do. *Since 5.0.0* both are gone:
+only a reCAPTCHA grid, whose cells the DOM tiles give, is numbered; every other
+board goes as the plain picture.
 
 **An animated board on generation 3 is a video, and the answer names WHEN in
 seconds.** `clipvideo.py` sends the recorded frames as one
@@ -225,10 +232,19 @@ broken registry falls through to `pinned_model.json`; it never throws.
 The day the generation-2 `text` family reached ckgate without a marker,
 refusing it cost every distorted-text solve in production for a day. The other
 way round, a benchmark that silently measured the generalist under a bad pin is
-a number nobody can catch. `private` is not a softer `licensed`: refusing early
-on a licensed model replaces a `RepositoryNotFoundError` that reads as "you are
-not logged in" with the truth, but doing the same to a private model would stop
-our own admin token from pulling weights it is entitled to.
+a number nobody can catch.
+
+**`fetch` never refuses a licensed model up front; the Hub decides.** Licensed
+weights sit in a gated repo, and only the Hub knows whether this token's
+account holds a licence today, so a client-side refusal would stop a paying
+holder. A licensed download runs in-process rather than through `hf download`
+so the Hub's refusal arrives as an exception, not an exit code: a 401, a 403 or
+a `RepositoryNotFoundError` (which `GatedRepoError` is) becomes
+`LicensedModelError` naming the plans page, because "repository not found"
+reads as "you are not logged in". `snapshot_download` wraps a 403 on its repo
+lookup in `LocalEntryNotFoundError`, so the check walks `__cause__`. Anything
+else, an outage included, is re-raised untouched rather than blamed on the
+licence.
 
 **`DEFAULT_PIXEL_BUDGET` is a floor on area, not a resize.** On a 277x285 GeeTest board,
 predictions landed 80-105 px from the hand label at native size and 1-4 px once
@@ -302,6 +318,23 @@ generation-2 answer names only the slot, so the handle comes from
 is then the handle AND what is tracked), and the tracker follows whatever moved
 most that is not the handle. It is the same loop. Only the source of the press
 point differs.
+
+**A restore slider is steered by the DOM, because its pixels cannot be.**
+DingXiang's restore cuts one picture into two strips, and the handle rolls one
+of them by its background. Measured live on 2026-11-14: which strip rolls is
+dealt per board (the lower one on some, the upper one on others), and so is the
+roll per handle pixel (0.52 to 1.77 seen). The strips wrap at the picture width.
+The answer's point sits on one strip and its target on the other, so when the
+target's strip rolls the point never moves ("nothing moved within 20px"), and a
+wrapping strip has no single part for the tracker to follow ("lost the
+object"). Baseline was 2 of 6 solved, with 19 tracker messages across those six.
+So the vendor's `band` selectors name the strips. The slide reads each strip's
+background offset at the press and after the probe, takes the one that moved as
+the one that rolls, works out how far it must roll for the two points to meet
+(the point's own strip carries the point to the target; the other strip carries
+the target back to the point, within one turn of the picture), and steers on a
+roll-per-pixel line fitted through every reading. A probe that moved no strip,
+read twice, falls back to the pixel tracker.
 
 **Nothing may be written to stdout by the MCP server.** On the stdio transport
 stdout *is* the protocol channel, so one stray `console.log` — a banner, a
@@ -494,10 +527,11 @@ install` reads, and a test reads the real `npm pack` list.
 
 ## Grid detection
 
-`find_grid` reads the CNN element detector's grid and cell boxes; it has no
-thresholds of its own beyond the lattice fallback for a board the detector
-under-reads (`LATTICE_MIN_FILLED`). The selection marks below are still pixel
-tests on the cells it returns.
+Since 5.0.0 the client finds no grid in the picture: the CNN element detector
+and `find_grid()` are gone, and a reCAPTCHA grid's cells are the challenge frame's
+`td.rc-imageselect-tile` rectangles scaled onto the screenshot (`_dom_grid` /
+`domGrid`; fewer than four tiles, or no frame, is no grid). The selection marks
+below are still pixel tests on those cells (`tool_calls/find_grid.py`).
 
 **The teal selected-badge detector requires white within 2 px of the teal
 hull.** Sky with a white pole in it satisfied the old test: 74 phantom
@@ -526,6 +560,27 @@ small widget. JS decodes the PNG with `node:zlib` rather than take an image
 dependency. The one element screenshot left is a widget larger than the
 viewport, which no viewport capture can hold; an element merely off screen is
 scrolled in once, not per shot.
+
+**A board's identity leaves out the vendor's verdict.** The board hash decides two
+things: whether an answer is a repeat (it is part of the answer's signature), and
+whether armed fallback plans still belong to the board up. It was the sha1 of the
+whole widget photograph, so a "Please try again" toast drawn over the same board
+was a different board. Measured on an hCaptcha-style line fixture (unhumanized JS,
+round timing varied): one unchanged board read `5fe699bd`, `80c5b1fd`, `80c5b1fd`,
+`5fe699bd` over four rounds. The toast is up for about two seconds after a miss, so
+whether a round's shot caught it was down to timing. Round 2's new hash let the
+same wrong answer be pressed again; round 4's return to the first hash threw away
+three armed plans. The cursor was ruled out: round 4 matched round 1 pixel for pixel
+with the pointer elsewhere. The identity now takes its own photograph with every
+`feedback` selector (each vendor's `banners`, then the generic `[role="alert"]` and
+toast names) set to `display: none` through the capture's `style`, so the layout is
+the no-message layout. Waiting the toast out was rejected: its length is the
+vendor's, and a fade caught midway is a third hash. The model's photograph keeps the
+message. It costs one extra capture per round on a board that was not filmed.
+Puppeteer has no `style` option, so its adapter puts a `<style>` into each frame
+for the capture and removes it after. Python passes `style` only on
+Playwright 1.41 or later; an older one raises TypeError, and `_shot` retakes
+the capture without it, so the solve goes on and only the mask is lost.
 
 **A checkbox is never a board.** It used to take the board round: the paint
 poll, the classifier's film and — when the detector missed the box on a half-drawn
@@ -839,6 +894,8 @@ longer exists here.
 that measure detection rates over it skip when the directory is absent, which is
 the case in every clean checkout, so the hermetic gate covers the geometry rules
 rather than the rates. It is also part of why the Python floor is where it is.
+*Superseded in 5.0.0:* those tests went with the detector; grids come from the
+DOM tiles.
 
 **Dead code was carrying part of the coverage gap.** Removing four unreferenced
 `find_grid` tracer helpers, three unreferenced overlay drawing functions, a

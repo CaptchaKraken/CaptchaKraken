@@ -46,7 +46,8 @@ README are the number that includes the vendor's own waiting.
 This is the single biggest thing to get right in a client, and getting it wrong
 does not look like a bug — it looks like a bad model.
 
-`solver.py` runs `find_grid`, renders `get_numbered_grid_overlay` (red labels,
+This applies to the v1 chat models. `solver.py` reads the cell boxes from the
+reCAPTCHA challenge frame's tiles, renders `get_numbered_grid_overlay` (red labels,
 top-right, all cells 1..N — byte-identical to the overlay the training data was
 built with) and sends *that* image. The model reads the labels. It does not
 infer a numbering from tile positions, because it was never trained to.

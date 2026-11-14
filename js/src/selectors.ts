@@ -35,6 +35,11 @@ export interface VendorSelectors {
   readonly fresh?: string;
   /** Inside the challenge frame: the pictures a board is made of; the driver waits for each to have painted. */
   readonly images?: readonly string[];
+  /**
+   * Inside the challenge frame: the tiles of the board's grid, in reading order. Where each one is placed is read from
+   * the DOM, to click it and to watch it reload.
+   */
+  readonly tiles?: readonly string[];
   /** Inside the widget: the vendor's own submit control, tried after the generic text probes. */
   readonly submit?: readonly string[];
   /** Inside the challenge frame: verdict banners and what each means. */
@@ -47,8 +52,25 @@ export interface VendorSelectors {
   readonly textInput?: readonly string[];
   /** Inside the widget: the knob a slide must start on; a drag from the piece moves nothing. */
   readonly sliderHandle?: readonly string[];
+  /**
+   * Beside the widget (a sibling of it, or of its parent): a strip the vendor draws outside the widget element that
+   * every board carries, such as Yidun's prompt and slider bar. The shot takes it in.
+   */
+  readonly bar?: readonly string[];
+  /**
+   * Inside the widget's frame or a frame nested in it: the board itself, when the widget frame pads it (Proton's
+   * 682x600 frame around its 370x534 `.protonCaptchaContainer`). The shot is this element.
+   */
+  readonly board?: readonly string[];
   /** Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track. */
   readonly piece?: readonly string[];
+  /**
+   * Inside the widget: picture strips a slide rolls by their background (DingXiang's restore bands). Which strip rolls,
+   * and how far per handle pixel, are dealt per board and cannot be seen in the picture, so each strip's background
+   * offset is read while the handle moves and the slide stops when the one that rolls has rolled as far as the
+   * answer's two points are apart.
+   */
+  readonly band?: readonly string[];
   /** Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`. */
   readonly refresh?: readonly string[];
   /**
@@ -63,7 +85,8 @@ export interface SelectorConfigFile {
   readonly custom?: Record<string, unknown> | null;
   readonly vendors?: Record<string, Record<string, unknown>>;
   readonly generic?: Record<string, readonly string[]>;
-  readonly detector?: DetectorModel;
+  /** Left from the element detector the client no longer has: still accepted, and ignored. */
+  readonly detector?: string;
   readonly [comment: `_${string}`]: unknown;
 }
 
@@ -80,24 +103,14 @@ export interface SelectorConfig {
   readonly custom: CustomSelectors | null;
   readonly vendors: ReadonlyArray<readonly [Vendor, VendorSelectors]>;
   readonly generic: Readonly<Record<GenericKey, readonly string[]>>;
-  /** Which element detector the engine runs: see `DETECTOR_MODELS`. */
-  readonly detector: DetectorModel;
 }
 
-/**
- * The element detector's weights: `lite` keeps a board near 100 ms on one vCPU, `standard` is the larger network, and
- * `auto` takes `lite` on a machine of two CPUs or fewer, else times one board and takes `standard` when it fits.
- * `CAPTCHA_KRAKEN_DETECTOR_MODEL` in the environment overrides the config.
- */
-export const DETECTOR_MODELS = ['auto', 'standard', 'lite'] as const;
-export type DetectorModel = (typeof DETECTOR_MODELS)[number];
-
-const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece'] as const;
+const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece', 'feedback'] as const;
 type GenericKey = (typeof GENERIC)[number];
 // The file is spelled as the Python port's fields; these three are camelCase here.
 const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
 const FIELDS = ['hosts', 'challenge', 'checkbox', 'enclave', 'widget', 'response', 'checked', 'box', 'accepted', 'fresh',
-  'images', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'piece', 'refresh', 'hold_completes'];
+  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'bar', 'board', 'piece', 'band', 'refresh', 'hold_completes'];
 const ONE = new Set(['response', 'checked', 'accepted', 'fresh']);
 const BANNERS = new Set<string>(Object.values(RecaptchaBanner));
 const VENDOR_VALUES = new Set<string>(Object.values(Vendor));
@@ -151,16 +164,10 @@ function entry(where: string, raw: unknown, hostsRequired = true): VendorSelecto
 function parse(name: string, doc: unknown, base: SelectorConfig | null): SelectorConfig {
   if (!isObject(doc)) throw new SelectorConfigError(`${name}: the top level must be an object`);
   for (const key of Object.keys(doc)) {
+    // `detector` chose an element detector the client no longer has; a config written for one still loads.
     if (!key.startsWith('_') && !['detector', 'custom', 'vendors', 'generic'].includes(key)) {
-      throw new SelectorConfigError(`${name}: ${key}: not a config key (detector, custom, vendors, generic)`);
+      throw new SelectorConfigError(`${name}: ${key}: not a config key (custom, vendors, generic)`);
     }
-  }
-  let detector: DetectorModel = base?.detector ?? 'auto';
-  if ('detector' in doc) {
-    if (!(DETECTOR_MODELS as readonly unknown[]).includes(doc.detector)) {
-      throw new SelectorConfigError(`${name}: detector: ${JSON.stringify(doc.detector)} is not one of ${DETECTOR_MODELS.join(', ')}`);
-    }
-    detector = doc.detector as DetectorModel;
   }
   let custom = base?.custom ?? null;
   if ('custom' in doc) custom = doc.custom === null ? null : entry(`${name}: custom`, doc.custom, false);
@@ -190,7 +197,7 @@ function parse(name: string, doc: unknown, base: SelectorConfig | null): Selecto
   }
   const absent = GENERIC.filter((k) => !generic[k]);
   if (absent.length) throw new SelectorConfigError(`${name}: generic: missing ${JSON.stringify(absent)}`);
-  return { custom, vendors: [...vendors], generic: generic as Record<GenericKey, readonly string[]>, detector };
+  return { custom, vendors: [...vendors], generic: generic as Record<GenericKey, readonly string[]> };
 }
 
 function read(file: string): unknown {
@@ -269,6 +276,8 @@ export class SelectorTable {
   /** A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks. */
   readonly submit: readonly string[];
   readonly textInputVendor: readonly string[];
+  /** The vendor-named submit controls alone: the only ones looked for outside the widget, after a typed answer. */
+  readonly submitVendor: readonly string[];
   /**
    * Vendor-named first, generic last: the driver takes the first visible match, and a generic selector reached before
    * the vendor's own is how a captcha's answer ends up in a login form's username box.
@@ -278,6 +287,8 @@ export class SelectorTable {
   readonly sliderHandle: readonly string[];
   readonly refresh: readonly string[];
   readonly piece: readonly string[];
+  /** The verdict messages a widget shows over its board: every vendor's banners, then the generic ones. */
+  readonly feedback: readonly string[];
 
   constructor(custom?: CustomSelectors, config?: string | SelectorConfigFile | SelectorConfig) {
     const loaded = isLoaded(config) ? config : loadConfig(config);
@@ -296,12 +307,14 @@ export class SelectorTable {
     this.enclave = every('enclave');
     this.response = this.vendors.flatMap(([, s]) => s.response ?? []);
     this.accepted = this.vendors.flatMap(([, s]) => s.accepted ?? []);
-    this.submit = [...loaded.generic.submit_text.map(submitByText), ...every('submit')];
+    this.submitVendor = every('submit');
+    this.submit = [...loaded.generic.submit_text.map(submitByText), ...this.submitVendor];
     this.textInputVendor = every('textInput');
     this.textInput = [...this.textInputVendor, ...loaded.generic.text_input];
     this.sliderHandle = [...every('sliderHandle'), ...loaded.generic.slider_handle];
     this.refresh = every('refresh');
     this.piece = [...every('piece'), ...loaded.generic.piece];
+    this.feedback = [...this.vendors.flatMap(([, s]) => (s.banners ?? []).map(([sel]) => sel)), ...loaded.generic.feedback];
   }
 }
 

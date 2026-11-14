@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "captchakraken"
-version = "4.2.0"
-description = "Captcha-solving engine and CLI: a v2 pointer model and CNN element detector for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
+version = "5.0.0"
+description = "Captcha-solving engine and CLI: a v2 pointer model for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -53,13 +53,8 @@ dependencies = [
   # 2.3.x rather than 2.2.6 because `cursory` requires `numpy~=2.3.3` and the
   # old pin was ours. Moved deliberately as part of the major bump.
   "numpy==2.3.5",
-  # Runs the element detector (find_grid, find_checkbox) on the CPU. Its
-  # wheels cover CPython 3.11-3.14 on Linux x86_64/aarch64, Windows and Apple
-  # silicon macOS; there is NO Intel-macOS wheel, so the client does not
-  # install there. Weights are fetched at first use, not shipped (detector.py).
-  "onnxruntime==1.31.1",
-  # The slide and hold trackers' image arithmetic: smoothing, morphology,
-  # labelling, distance transforms and FFT correlation. 1.17.1 is the newest
+  # The slide and hold trackers' and the tick-box finder's image arithmetic:
+  # smoothing, morphology, labelling, distance transforms and FFT correlation. 1.17.1 is the newest
   # release whose Requires-Python (>=3.11) covers the floor; 1.18 needs 3.12.
   "scipy==1.17.1",
   # Decodes the first frame of a video passed to `solve` (.mp4, .avi, .webm).
@@ -89,6 +84,8 @@ serve = [
   "huggingface_hub==1.30.0",
 ]
 dev = [
+  # The licensed-model fetch tests raise the Hub's own refusal types.
+  "huggingface_hub==1.30.0",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
   "mypy==2.3.1",

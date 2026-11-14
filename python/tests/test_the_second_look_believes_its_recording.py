@@ -64,7 +64,7 @@ def _round(tmp_path, monkeypatch, moved: bool, verdict: SettleVerdict = SettleVe
     recording = AnimatedRecording(frames=[], fps=10.0, keyframes=None, keyframe_paths=keyframes)
     monkeypatch.setattr(solver, "_record_keyframes", lambda _el: (recording, str(tmp_path), moved))
     monkeypatch.setattr(solver, "_should_speculate", lambda *_a: False)
-    monkeypatch.setattr(solver, "_get_verify_button", lambda _scope: None)
+    monkeypatch.setattr(solver, "_get_verify_button", lambda _scope, *_: None)
     monkeypatch.setattr(solver, "_get_keyframe_solution", lambda _recording: (asked.append("video"), ([], []))[1])
     monkeypatch.setattr(solver, "_get_solution", lambda *_a, **_kw: (asked.append("still"), ([], []))[1])
 
