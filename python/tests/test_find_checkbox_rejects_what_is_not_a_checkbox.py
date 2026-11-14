@@ -31,6 +31,13 @@ TICK_BOXES = {
     "turnstile_light.png": (9, 20.5, 33, 44.5),
     "turnstile_dark_flexible_2x.png": (18, 41, 66, 89),
     "captchafox.png": (16, 18, 40, 42),
+    # Live 2026-11-13, missed by 5.0.0's first finder: text crowds the box, so a
+    # band beside it is flat only for the most part. A test key's warning sits
+    # right under it (Turnstile, German label wrapped to two lines; reCAPTCHA
+    # compact, the warning above it); hCaptcha compact's German label beside it.
+    "turnstile_dark_de_banner_below.png": (10, 22, 32, 44),
+    "recaptcha_light_compact_banner_above.png": (13, 28, 41, 56),
+    "hcaptcha_dark_compact_de_1.5x.png": (20, 24, 65, 69),
 }
 #: A ticked or passed widget has nothing left to click.
 TICKED = ["recaptcha_ticked_1.5x.png", "hcaptcha_ticked.png", "turnstile_passed.png"]

@@ -44,11 +44,14 @@ MAX_SPREAD = 8.0
 #: flush against the edge, is part of a puzzle: a grid tile, a slider handle.
 LEADING_INSET = (0.3, 1.2)
 #: Around the box is the widget's own flat panel: on at least MIN_PANEL_SIDES sides,
-#: a band just outside the outline spans no more grey levels than the inside may.
-#: Every tick box measured has two or more (text or a logo may sit on the others);
-#: a drag card on a puzzle's textured tray has at most one.
+#: PANEL_SHARE of a band just outside the outline sits within MAX_SPREAD grey levels
+#: of the band's median. A share, not a range: a label or a test key's warning may
+#: crowd a side (live 2026-11-13, German and Russian widgets). Every tick box
+#: measured has a second side at least 0.87 flat; a drag card on a puzzle's tray
+#: reaches 0.81, a cartoon-grid tile 0.60.
 PANEL_BAND = (0.25, 0.30)
 MIN_PANEL_SIDES = 2
+PANEL_SHARE = 0.85
 #: A tick box is painted a neutral shade (white, near-black, grey): the median of
 #: max(R,G,B) - min(R,G,B) inside it is 0 on every widget measured. A puzzle's
 #: flat coloured tile (a road piece, a red cube face) is well above this.
@@ -99,7 +102,7 @@ def _sits_on_a_panel(grey: np.ndarray, x0: int, y0: int, x1: int, y1: int, side:
     flat_sides = 0
     for band in (grey[max(0, Y0 - k):Y0, X0:X1], grey[Y1:Y1 + k, X0:X1],
                  grey[Y0:Y1, max(0, X0 - k):X0], grey[Y0:Y1, X1:X1 + k]):
-        if band.size and np.percentile(band, 90) - np.percentile(band, 10) <= MAX_SPREAD:
+        if band.size and np.mean(np.abs(band - np.median(band)) <= MAX_SPREAD) >= PANEL_SHARE:
             flat_sides += 1
     return flat_sides >= MIN_PANEL_SIDES
 
