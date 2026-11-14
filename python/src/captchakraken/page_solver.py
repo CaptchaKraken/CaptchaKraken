@@ -73,6 +73,20 @@ def _unlink(path: Optional[str]) -> None:
             pass
 
 
+def _shot(take: Any, style: Optional[str], **kwargs: Any) -> Any:
+    """`take(**kwargs)` with `style` when there is one. Playwright before 1.41 has no `style` and raises TypeError;
+    that capture is then taken without it, so an older install keeps solving and only the board hash loses the
+    feedback mask."""
+    if style is None:
+        return take(**kwargs)
+    try:
+        return take(style=style, **kwargs)
+    except TypeError as exc:
+        if "style" not in str(exc):
+            raise
+        return take(**kwargs)
+
+
 def _sha1(path: str) -> str:
     with open(path, "rb") as fh:
         return hashlib.sha1(fh.read()).hexdigest()
@@ -1596,9 +1610,9 @@ class PageSolver:
         if rect is None:
             # Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
             # coordinates, so the element photographs itself.
-            element.screenshot(path=path, timeout=timeout, animations=animations, style=style)
+            _shot(element.screenshot, style, path=path, timeout=timeout, animations=animations)
             return
-        png = crop_png(page.screenshot(timeout=timeout, animations=animations, style=style), rect, view["width"])
+        png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations), rect, view["width"])
         with open(path, "wb") as fh:
             fh.write(png)
 

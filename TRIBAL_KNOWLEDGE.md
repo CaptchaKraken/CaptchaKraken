@@ -561,8 +561,9 @@ the no-message layout. Waiting the toast out was rejected: its length is the
 vendor's, and a fade caught midway is a third hash. The model's photograph keeps the
 message. It costs one extra capture per round on a board that was not filmed.
 Puppeteer has no `style` option, so its adapter puts a `<style>` into each frame
-for the capture and removes it after. Python needs Playwright 1.41 or later for
-`style`.
+for the capture and removes it after. Python passes `style` only on
+Playwright 1.41 or later; an older one raises TypeError, and `_shot` retakes
+the capture without it, so the solve goes on and only the mask is lost.
 
 **A checkbox is never a board.** It used to take the board round: the paint
 poll, the classifier's film and — when the detector missed the box on a half-drawn

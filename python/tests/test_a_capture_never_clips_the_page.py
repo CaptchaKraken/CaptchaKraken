@@ -95,7 +95,7 @@ def test_every_capture_is_one_viewport_shot_with_no_clip(tmp_path: Path, animati
     out = tmp_path / "shot.png"
     _solver(page)._screenshot(element, str(out), timeout_ms=1234, animations=animations)
 
-    assert page.shots == [{"timeout": 1234, "animations": animations, "style": None}], (
+    assert page.shots == [{"timeout": 1234, "animations": animations}], (
         f"the capture was not one unclipped viewport screenshot: {page.shots}")
     assert element.element_shots == 0, "the element photographed itself, which repaints the page"
     assert _pixels(out.read_bytes()).shape == (100, 200, 3), "the crop lost the device pixel ratio"

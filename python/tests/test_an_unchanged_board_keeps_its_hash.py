@@ -108,3 +108,17 @@ def test_in_a_browser_an_unchanged_board_keeps_its_hash_while_the_toast_comes_an
             assert solver._board_hash(widget) == before
         finally:
             browser.close()
+
+
+def test_a_playwright_without_style_still_takes_the_shot():
+    # Playwright before 1.41 has no `style`; the capture must still happen, just unmasked.
+    from captchakraken.page_solver import _shot
+
+    calls = []
+
+    def old_screenshot(*, timeout, animations):
+        calls.append((timeout, animations))
+        return b"png"
+
+    assert _shot(old_screenshot, "x{}", timeout=1, animations="disabled") == b"png"
+    assert calls == [(1, "disabled")]
