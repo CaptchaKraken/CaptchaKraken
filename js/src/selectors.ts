@@ -52,6 +52,16 @@ export interface VendorSelectors {
   readonly textInput?: readonly string[];
   /** Inside the widget: the knob a slide must start on; a drag from the piece moves nothing. */
   readonly sliderHandle?: readonly string[];
+  /**
+   * Beside the widget (a sibling of it, or of its parent): a strip the vendor draws outside the widget element that
+   * every board carries, such as Yidun's prompt and slider bar. The shot takes it in.
+   */
+  readonly bar?: readonly string[];
+  /**
+   * Inside the widget's frame or a frame nested in it: the board itself, when the widget frame pads it (Proton's
+   * 682x600 frame around its 370x534 `.protonCaptchaContainer`). The shot is this element.
+   */
+  readonly board?: readonly string[];
   /** Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track. */
   readonly piece?: readonly string[];
   /** Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`. */
@@ -93,7 +103,7 @@ type GenericKey = (typeof GENERIC)[number];
 // The file is spelled as the Python port's fields; these three are camelCase here.
 const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
 const FIELDS = ['hosts', 'challenge', 'checkbox', 'enclave', 'widget', 'response', 'checked', 'box', 'accepted', 'fresh',
-  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'piece', 'refresh', 'hold_completes'];
+  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'bar', 'board', 'piece', 'refresh', 'hold_completes'];
 const ONE = new Set(['response', 'checked', 'accepted', 'fresh']);
 const BANNERS = new Set<string>(Object.values(RecaptchaBanner));
 const VENDOR_VALUES = new Set<string>(Object.values(Vendor));

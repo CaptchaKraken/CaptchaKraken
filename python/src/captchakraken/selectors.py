@@ -58,6 +58,12 @@ class VendorSelectors:
     text_input: Sequence[str] = ()
     # Inside the widget: the knob a slide must start on; a drag from the piece moves nothing.
     slider_handle: Sequence[str] = ()
+    # Beside the widget (a sibling of it, or of its parent): a strip the vendor draws outside the widget element that
+    # every board carries, such as Yidun's prompt and slider bar. The shot takes it in.
+    bar: Sequence[str] = ()
+    # Inside the widget's frame or a frame nested in it: the board itself, when the widget frame pads it (Proton's
+    # 682x600 frame around its 370x534 `.protonCaptchaContainer`). The shot is this element.
+    board: Sequence[str] = ()
     # Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.
     piece: Sequence[str] = ()
     # Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.

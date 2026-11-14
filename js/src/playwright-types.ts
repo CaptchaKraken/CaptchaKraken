@@ -52,6 +52,9 @@ export interface PlaywrightFrame extends PlaywrightScope {
   /** Optional: its HOSTNAME alone is sent as X-CK-Widget-Host, the host the widget was served from. */
   url?(): string;
 
+  /** Optional: the frames nested in this one (Playwright and Puppeteer both have it), searched for a vendor's `board`. */
+  childFrames?(): PlaywrightFrame[];
+
   waitForSelector(
     selector: string,
     options?: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number },

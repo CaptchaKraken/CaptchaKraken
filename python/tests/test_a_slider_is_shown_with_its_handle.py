@@ -105,3 +105,28 @@ def test_a_scope_that_cannot_be_searched_leaves_the_shot_alone(monkeypatch):
 def test_a_track_that_would_more_than_double_the_shot_leaves_it_alone():
     far = {"x": 630.5, "y": 1100, "width": 320, "height": 40}
     assert _WithAnswerBox(_Handle(PANEL), _Handle(far), SLIDER_TRACK_MAX_GROWTH).bounding_box() == PANEL
+
+
+# Yidun's click modes (请依次点击): the same 320x40 bar holds the prompt naming the marks and their order, and no slider
+# handle at all. On the bare panel the pointer saw no prompt and went 0/6 live on 2026-11-13.
+def _bar_solver():
+    yidun = SimpleNamespace(bar=(".yidun_control",), slider_handle=(".yidun_slider", ".yidun_jigsaw"))
+    return SimpleNamespace(_sel=SimpleNamespace(selectors={"yidun": yidun}))
+
+
+def test_a_click_board_is_shown_with_its_prompt_bar(dom):
+    bar = _Handle(BAR)
+    dom.update({"parent": [bar]})
+    assert PageSolver._track_outside(_bar_solver(), "panel", "yidun", _Handle(PANEL), _At()) is bar
+    assert _WithAnswerBox(_Handle(PANEL), bar, SLIDER_TRACK_MAX_GROWTH).bounding_box()["height"] == 215
+
+
+def test_the_bar_is_taken_itself_not_its_parent(dom):
+    bar = _Handle(BAR, parent=_Handle({"x": 630.5, "y": 621, "width": 320, "height": 215}))
+    dom.update({"parent": [bar]})
+    assert PageSolver._track_outside(_bar_solver(), "panel", "yidun", _Handle(PANEL), _At()) is bar
+
+
+def test_the_shipped_config_names_yiduns_bar():
+    from captchakraken.selectors import DEFAULT_TABLE, Vendor
+    assert ".yidun_control" in DEFAULT_TABLE.selectors[Vendor.YIDUN].bar

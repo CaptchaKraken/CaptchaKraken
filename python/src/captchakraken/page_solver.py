@@ -37,6 +37,8 @@ _SITE_ENV = "CAPTCHA_KRAKEN_SITE"
 _WIDGET_HOST_ENV = "CAPTCHA_KRAKEN_WIDGET_HOST"
 # How often a page that has not drawn its widget yet is looked at again.
 _DETECTION_POLL_MS = 250
+#: How long a widget frame is given to draw the board inside it (`board`) before the frame itself is shot.
+_BOARD_INSIDE_WAIT_MS = 3_000
 
 
 def _log(message: str) -> None:
@@ -1076,17 +1078,92 @@ class PageSolver:
         first = next(iter(_visible(scope, selectors)), None)
         return _handle_of(first) if first is not None else None
 
-    def _track_outside(self, scope: Any, vendor: Any, element: Any, at: Any = None) -> Optional[Any]:
-        """The track of the first of the vendor's own slider handles that is visible with its centre outside the widget.
+    def _framed(self, widget: Widget, frame: Any, scope: Any) -> Tuple[Any, Optional[Any]]:
+        """The element whose screenshot the model is shown for `widget`, and the text box when it is typed.
 
-        It is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
+        This is the whole of what the client PHOTOGRAPHS, kept in one place so the capture gate can check it without
+        solving: the widget, else the board its frame pads (Proton), widened by a text box beside it (BotDetect) or
+        by the vendor's bar or slider track outside it (Yidun).
+        """
+        element, puzzle_source = widget.element, widget.vendor
+        # A widget frame that pads its board (Proton) is photographed by the board inside it.
+        board = self._board_inside(frame, puzzle_source)
+        if board is not None:
+            _log("the widget frame pads its board; photographing the board itself")
+            element = board
+
+        # Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
+        answer_box = None if puzzle_source in VENDORS_WITH_BESPOKE_HANDLING else self._answer_box(scope, widget.at)
+        if answer_box is not None:
+            _log("widget has a text box; solving as a distorted-text captcha")
+            element = _WithAnswerBox(element, answer_box)
+        elif puzzle_source not in VENDORS_WITH_BESPOKE_HANDLING:
+            track = self._track_outside(scope, puzzle_source, element, widget.at)
+            if track is not None:
+                _log("the vendor bar or slider track sits outside the widget; photographing the two as one")
+                element = _WithAnswerBox(element, track, SLIDER_TRACK_MAX_GROWTH)
+        return element, answer_box
+
+    def capture(self, page: Any) -> Optional[Tuple[Widget, Any]]:
+        """The widget on `page` and the element the solver would photograph for it, without solving anything.
+
+        For release gates: whether the client finds a vendor's widget, by its selectors and URL markers, and frames
+        the whole board, is checkable on a live page at no inference cost. A checkbox widget is returned with its own
+        element; it is clicked, not photographed.
+        """
+        self._page = page
+        widget = self.detect_captcha(page)
+        if widget is None:
+            return None
+        if widget.role == FrameRole.CHECKBOX:
+            return widget, widget.element
+        frame = widget.element.content_frame()
+        if widget.vendor != Vendor.RECAPTCHA:
+            self._wait_for_board_painted(widget.element)
+        element, _ = self._framed(widget, frame, frame or widget.at)
+        return widget, element
+
+    def _board_inside(self, frame: Any, vendor: Any) -> Optional[Any]:
+        """The vendor's own `board`, found in the widget's frame or a frame nested in it, or None.
+
+        Proton's widget frame is 682x600 with its 370x534 `.protonCaptchaContainer` centred two frames down; the
+        pointer trained on that container, and shown the padded frame it repeated one answer until the solve gave up
+        (live 0/2 on 2026-11-13). The board is drawn a moment after the frame, so it is waited for briefly.
+        """
+        own = getattr(self._sel.selectors.get(vendor), "board", None)
+        if not own or frame is None:
+            return None
+        deadline = _now() + _BOARD_INSIDE_WAIT_MS
+        while True:
+            try:
+                frames = [frame]
+                while frames:
+                    where = frames.pop(0)
+                    for found in _visible(where, own):
+                        handle = _handle_of(found)
+                        if handle is not None and handle.bounding_box():
+                            return handle
+                    frames.extend(where.child_frames)
+            except Exception:
+                return None
+            if _now() >= deadline:
+                return None
+            _delay(_DETECTION_POLL_MS)
+
+    def _track_outside(self, scope: Any, vendor: Any, element: Any, at: Any = None) -> Optional[Any]:
+        """The vendor's own `bar`, else the track of its first slider handle, visible with its centre outside the widget.
+
+        The bar is what Yidun's click modes need: `.yidun_control` holds the 请依次点击 prompt that names the marks and
+        their order, and on the bare `.yidun_panel` the pointer was shown neither (live 0/6 on 2026-11-13). The
+        handle's track covers vendors that name only a handle. Either is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
         `.yidun_control`, a sibling of the `.yidun_panel` the widget resolves to. A match inside the widget is passed
         over, not taken as the answer: Yidun lists its piece (`.yidun_jigsaw`, in the panel) as a handle too. The
         track (the handle's parent) is returned rather than the handle, whose box moves as it slides and would
         resize the frame.
         """
-        own = getattr(self._sel.selectors.get(vendor), "slider_handle", None)
-        if not own:
+        mine = self._sel.selectors.get(vendor)
+        kinds = [(sels, is_bar) for sels, is_bar in ((getattr(mine, "bar", None), True), (getattr(mine, "slider_handle", None), False)) if sels]
+        if not kinds:
             return None
         # Widening the shot is a nicety: a scope that cannot be searched (a detached frame) leaves the shot as it was.
         try:
@@ -1094,16 +1171,17 @@ class PageSolver:
             a = element.bounding_box()
             if not a:
                 return None
-            for where in wheres:
-                for found in _visible(where, own):
-                    handle = _handle_of(found)
-                    b = handle.bounding_box() if handle is not None else None
-                    if not b:
-                        continue
-                    cx, cy = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
-                    if a["x"] <= cx <= a["x"] + a["width"] and a["y"] <= cy <= a["y"] + a["height"]:
-                        continue
-                    return _handle_of(found.locator("xpath=..")) or handle
+            for own, is_bar in kinds:
+                for where in wheres:
+                    for found in _visible(where, own):
+                        handle = _handle_of(found)
+                        b = handle.bounding_box() if handle is not None else None
+                        if not b:
+                            continue
+                        cx, cy = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+                        if a["x"] <= cx <= a["x"] + a["width"] and a["y"] <= cy <= a["y"] + a["height"]:
+                            continue
+                        return handle if is_bar else (_handle_of(found.locator("xpath=..")) or handle)
         except Exception:
             return None
         return None
@@ -2278,17 +2356,8 @@ class PageSolver:
             with self._phase(Phase.BOARD_PAINT):
                 self._wait_for_board_painted(element)
 
-        # Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
-        answer_box = None if puzzle_source in VENDORS_WITH_BESPOKE_HANDLING else self._answer_box(scope, widget.at)
+        element, answer_box = self._framed(widget, frame, scope)
         text_mode = answer_box is not None
-        if text_mode:
-            _log("widget has a text box; solving as a distorted-text captcha")
-            element = _WithAnswerBox(element, answer_box)
-        elif puzzle_source not in VENDORS_WITH_BESPOKE_HANDLING:
-            track = self._track_outside(scope, puzzle_source, element, widget.at)
-            if track is not None:
-                _log("the slider track sits outside the widget; photographing the two as one")
-                element = _WithAnswerBox(element, track, SLIDER_TRACK_MAX_GROWTH)
 
         # A reCAPTCHA board is read by its grid below, not filmed.
         filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode
