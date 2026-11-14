@@ -225,6 +225,8 @@ export function isClosedTargetError(message: string): boolean {
 
 /** How often a page that has not drawn its widget yet is looked at again. */
 const DETECTION_POLL_MS = 250;
+/** How long a widget frame is given to draw the board inside it (`board`) before the frame itself is shot. */
+const BOARD_INSIDE_WAIT_MS = 3_000;
 
 // Frame-diff thresholds; two screens of one board differ by ~0.0056, a different board by ~0.77.
 const NOT_THIS_BOARD_DIFF = 0.5;
@@ -837,19 +839,9 @@ export class CaptchaKrakenSolver {
     const painted = puzzleSource === Vendor.RECAPTCHA ? null
       : await this.ph(Phase.BOARD_PAINT, () => this.waitForBoardPainted(captchaElement));
 
-    // Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
-    const answerBox = VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) ? null : await this.answerBox(scope, widget.at);
-    const textMode = answerBox !== null;
-    if (textMode) {
-      console.log('Widget has a text box; solving as a distorted-text captcha.');
-      captchaElement = withAnswerBox(captchaElement, answerBox);
-    } else if (!VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource)) {
-      const track = await this.trackOutside(scope, puzzleSource, captchaElement, widget.at);
-      if (track) {
-        console.log('The slider track sits outside the widget; photographing the two as one.');
-        captchaElement = withAnswerBox(captchaElement, track as ElementHandle, SLIDER_TRACK_MAX_GROWTH);
-      }
-    }
+    const framed = await this.framed(widget, frame, scope);
+    captchaElement = framed.element;
+    const textMode = framed.answerBox !== null;
 
     // A reCAPTCHA board is read by its grid below, not filmed.
     const filmable = puzzleSource !== Vendor.RECAPTCHA && !textMode;
@@ -2865,26 +2857,106 @@ export class CaptchaKrakenSolver {
   }
 
   /**
-   * The track of the first of the vendor's own slider handles that is visible with its centre outside the widget
-   * element's box. It is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
+   * The vendor's own `bar`, else the track of its first slider handle, visible with its centre outside the widget
+   * element's box. The bar is what Yidun's click modes need: `.yidun_control` holds the 请依次点击 prompt that names the
+   * marks and their order, and on the bare `.yidun_panel` the pointer was shown neither (live 0/6 on 2026-11-13). The
+   * handle's track covers vendors that name only a handle. Either is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
    * `.yidun_control`, a sibling of the `.yidun_panel` the widget resolves to. A match inside the widget is passed over,
    * not taken as the answer: Yidun lists its piece (`.yidun_jigsaw`, in the panel) as a handle too. The track (the
    * handle's parent) is returned rather than the handle, whose box moves as it slides and would resize the frame.
    */
+  /**
+   * The element whose screenshot the model is shown for `widget`, and the text box when it is typed. This is the whole
+   * of what the client PHOTOGRAPHS, kept in one place so the capture gate can check it without solving: the widget,
+   * else the board its frame pads (Proton), widened by a text box beside it (BotDetect) or by the vendor's bar or
+   * slider track outside it (Yidun).
+   */
+  private async framed(widget: Widget, frame: Frame | null, scope: Scope): Promise<{ element: ElementHandle, answerBox: ElementHandle | null }> {
+    const puzzleSource = widget.vendor;
+    let element: ElementHandle = widget.el;
+    // A widget frame that pads its board (Proton) is photographed by the board inside it.
+    const board = await this.boardInside(frame, puzzleSource);
+    if (board) {
+      console.log('The widget frame pads its board; photographing the board itself.');
+      element = board;
+    }
+    // Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
+    const answerBox = VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource) ? null : await this.answerBox(scope, widget.at);
+    if (answerBox) {
+      console.log('Widget has a text box; solving as a distorted-text captcha.');
+      element = withAnswerBox(element, answerBox);
+    } else if (!VENDORS_WITH_BESPOKE_HANDLING.has(puzzleSource)) {
+      const track = await this.trackOutside(scope, puzzleSource, element, widget.at);
+      if (track) {
+        console.log('The vendor bar or slider track sits outside the widget; photographing the two as one.');
+        element = withAnswerBox(element, track as ElementHandle, SLIDER_TRACK_MAX_GROWTH);
+      }
+    }
+    return { element, answerBox };
+  }
+
+  /**
+   * The widget on `page` and the element the solver would photograph for it, without solving anything. For release
+   * gates: whether the client finds a vendor's widget, by its selectors and URL markers, and frames the whole board,
+   * is checkable on a live page at no inference cost. A checkbox widget is returned with its own element.
+   */
+  async capture(page: Page): Promise<{ widget: Widget, element: ElementHandle } | null> {
+    const widget = await this.detectCaptcha(page);
+    if (!widget) return null;
+    if (widget.role === FrameRole.CHECKBOX) return { widget, element: widget.el };
+    const frame = await widget.el.contentFrame();
+    if (widget.vendor !== Vendor.RECAPTCHA) await this.waitForBoardPainted(widget.el);
+    const { element } = await this.framed(widget, frame, frame ?? widget.at);
+    return { widget, element };
+  }
+
+  /**
+   * The vendor's own `board`, found in the widget's frame or a frame nested in it, or null. Proton's widget frame is
+   * 682x600 with its 370x534 `.protonCaptchaContainer` centred two frames down; the pointer trained on that container,
+   * and shown the padded frame it repeated one answer until the solve gave up (live 0/2 on 2026-11-13). The board is
+   * drawn a moment after the frame, so it is waited for briefly.
+   */
+  private async boardInside(frame: Frame | null, vendor: Vendor): Promise<ElementHandle | null> {
+    const own = this.sel.selectors[vendor]?.board;
+    if (!own?.length || !frame) return null;
+    const deadline = Date.now() + BOARD_INSIDE_WAIT_MS;
+    for (;;) {
+      try {
+        const frames: Frame[] = [frame];
+        while (frames.length) {
+          const where = frames.shift()!;
+          for (const found of await visible(where, own)) {
+            const handle = await handleOf(found);
+            if (handle && (await handle.boundingBox())) return handle;
+          }
+          frames.push(...(where.childFrames?.() ?? []));
+        }
+      } catch {
+        return null;
+      }
+      if (Date.now() >= deadline) return null;
+      await delay(DETECTION_POLL_MS);
+    }
+  }
+
   private async trackOutside(scope: Scope, vendor: Vendor, el: ElementHandle, at?: Locator | null): Promise<ElementHandle | null> {
-    const own = this.sel.selectors[vendor]?.sliderHandle;
-    if (!own?.length) return null;
+    const mine = this.sel.selectors[vendor];
+    const kinds = ([[mine?.bar, true], [mine?.sliderHandle, false]] as const).filter(([s]) => s?.length);
+    if (!kinds.length) return null;
     // Widening the shot is a nicety: a scope that cannot be searched (a detached frame) leaves the shot as it was.
     try {
       const a = await el.boundingBox();
       if (!a) return null;
-      for (const where of [scope, ...(at ? [1, 2].map((k) => at.locator(`xpath=ancestor::*[${k}]`)) : [])]) {
-        for (const found of await visible(where, own)) {
-          const b = await (await handleOf(found))?.boundingBox();
-          if (!b) continue;
-          const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
-          if (cx >= a.x && cx <= a.x + a.width && cy >= a.y && cy <= a.y + a.height) continue;
-          return (await handleOf(found.locator('xpath=..'))) ?? handleOf(found);
+      for (const [own, isBar] of kinds) {
+        for (const where of [scope, ...(at ? [1, 2].map((k) => at.locator(`xpath=ancestor::*[${k}]`)) : [])]) {
+          for (const found of await visible(where, own!)) {
+            const b = await (await handleOf(found))?.boundingBox();
+            if (!b) continue;
+            const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+            if (cx >= a.x && cx <= a.x + a.width && cy >= a.y && cy <= a.y + a.height) continue;
+            if (isBar) return handleOf(found);
+            return (await handleOf(found.locator('xpath=..'))) ?? handleOf(found);
+          }
         }
       }
     } catch {

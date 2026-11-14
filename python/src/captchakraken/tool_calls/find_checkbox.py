@@ -26,6 +26,36 @@ FLAT_GRADIENT = 24.0
 #: The flat region must cover this share of its bounding square: a round spinner
 #: or badge covers pi/4 of it.
 MIN_FILL = 0.88
+#: A box whose flat inside bleeds out through one low-contrast edge (hCaptcha's dark
+#: theme: the bottom outline is nearly the panel's shade, so a ragged tail hangs off
+#: the square and fill drops to 0.87) still has a solid core: most rows run nearly
+#: edge to edge and almost every column is mostly filled. A disc does neither (about
+#: 0.31 of its rows and 0.60 of its columns), nor does a spinner arc or a badge (0).
+MIN_FILL_SOLID_CORE = 0.80
+SOLID_ROW_FILL, MIN_SOLID_ROWS = 0.95, 0.65
+SOLID_COL_FILL, MIN_SOLID_COLS = 0.80, 0.90
+#: A tick box is painted one colour: its inside spans at most this many grey levels
+#: (5th to 95th percentile). A smooth patch of photo (sky, asphalt, a pail's side)
+#: is flat by the gradient test yet spans tens of levels; every tick box measured
+#: spans 0.
+MAX_SPREAD = 8.0
+#: The box sits at the widget's leading edge (left, or right in a right-to-left
+#: locale), inset from it by this many box-widths. A flat square further in, or one
+#: flush against the edge, is part of a puzzle: a grid tile, a slider handle.
+LEADING_INSET = (0.3, 1.2)
+#: Around the box is the widget's own flat panel: on at least MIN_PANEL_SIDES sides,
+#: a band just outside the outline spans no more grey levels than the inside may.
+#: Every tick box measured has two or more (text or a logo may sit on the others);
+#: a drag card on a puzzle's textured tray has at most one.
+PANEL_BAND = (0.25, 0.30)
+MIN_PANEL_SIDES = 2
+#: A tick box is painted a neutral shade (white, near-black, grey): the median of
+#: max(R,G,B) - min(R,G,B) inside it is 0 on every widget measured. A puzzle's
+#: flat coloured tile (a road piece, a red cube face) is well above this.
+MAX_CHROMA = 24
+#: An unticked box is empty: whatever its flat inside encloses (a check mark, a
+#: drag card's drawing, a dot on a counting card) may cover at most this share of it.
+MAX_ENCLOSED = 0.01
 #: Width over height, both ways.
 MAX_ASPECT = 1.25
 #: The box's inside, as a share of the widget's height. Every tick box measured is
@@ -33,6 +63,9 @@ MAX_ASPECT = 1.25
 MIN_SIDE_OF_HEIGHT = 0.10
 #: A flat region larger than this share of the height is a panel, not a box.
 MAX_SIDE_OF_HEIGHT = 0.60
+#: Nor more than this share of the width: the widest measured is hCaptcha's compact
+#: card at 0.19, and a tile of a 4x4 puzzle grid is a quarter of its board.
+MAX_SIDE_OF_WIDTH = 0.23
 #: Smaller than this many pixels is a glyph or a speck, whatever the widget's size.
 MIN_SIDE_PX = 12
 
@@ -45,11 +78,38 @@ def _flat(grey: np.ndarray) -> np.ndarray:
     return np.hypot(gx, gy) < FLAT_GRADIENT
 
 
+def _fills_its_square(mask: np.ndarray) -> bool:
+    fill = mask.mean()
+    if fill >= MIN_FILL:
+        return True
+    return (fill >= MIN_FILL_SOLID_CORE
+            and (mask.mean(axis=1) >= SOLID_ROW_FILL).mean() >= MIN_SOLID_ROWS
+            and (mask.mean(axis=0) >= SOLID_COL_FILL).mean() >= MIN_SOLID_COLS)
+
+
+def _at_leading_edge(x0: int, x1: int, side: float, w_img: int) -> bool:
+    lo, hi = LEADING_INSET
+    return any(lo * side <= inset <= hi * side for inset in (x0, w_img - x1))
+
+
+def _sits_on_a_panel(grey: np.ndarray, x0: int, y0: int, x1: int, y1: int, side: float) -> bool:
+    o = max(2, int(round(PANEL_BAND[0] * side)))
+    k = max(3, int(round(PANEL_BAND[1] * side)))
+    X0, Y0, X1, Y1 = max(0, x0 - o), max(0, y0 - o), x1 + o, y1 + o
+    flat_sides = 0
+    for band in (grey[max(0, Y0 - k):Y0, X0:X1], grey[Y1:Y1 + k, X0:X1],
+                 grey[Y0:Y1, max(0, X0 - k):X0], grey[Y0:Y1, X1:X1 + k]):
+        if band.size and np.percentile(band, 90) - np.percentile(band, 10) <= MAX_SPREAD:
+            flat_sides += 1
+    return flat_sides >= MIN_PANEL_SIDES
+
+
 def find_checkbox(image_path: str) -> Optional[Tuple[int, int, int, int]]:
     """(x, y, w, h) of the tick box in pixels, or None."""
     try:
         with Image.open(image_path) as im:
-            grey = np.asarray(im.convert("L"), np.float32)
+            rgb = np.asarray(im.convert("RGB"), np.int16)
+        grey = np.asarray(Image.fromarray(rgb.astype(np.uint8)).convert("L"), np.float32)
     except Exception:
         return None
     h_img, w_img = grey.shape
@@ -69,7 +129,20 @@ def find_checkbox(image_path: str) -> Optional[Tuple[int, int, int, int]]:
             continue
         if not MIN_SIDE_OF_HEIGHT * h_img <= side <= MAX_SIDE_OF_HEIGHT * h_img:
             continue
-        if (labels[sl] == i).sum() < MIN_FILL * w * h:
+        if side > MAX_SIDE_OF_WIDTH * w_img:
+            continue
+        inside = labels[sl] == i
+        if not _fills_its_square(inside):
+            continue
+        if ndimage.binary_fill_holes(inside).sum() - inside.sum() > MAX_ENCLOSED * inside.size:
+            continue
+        shade = grey[sl][inside]
+        if np.percentile(shade, 95) - np.percentile(shade, 5) > MAX_SPREAD:
+            continue
+        paint = rgb[sl][inside]
+        if np.median(paint.max(axis=1) - paint.min(axis=1)) > MAX_CHROMA:
+            continue
+        if not _at_leading_edge(x0, x1, side, w_img) or not _sits_on_a_panel(grey, x0, y0, x1, y1, side):
             continue
         if best is None or side > best[0]:
             best = (side, x0, y0, w, h)

@@ -45,6 +45,8 @@
     "passive": "On the host page: the vendor's frames that are never interactive, so a page showing only these has no widget.",
     "text_input": "Inside the widget, and its enclosing fieldset/form: the answer box of a typed captcha.",
     "slider_handle": "Inside the widget: the knob a slide must start on; a drag from the piece moves nothing.",
+    "board": "Inside the widget's frame or a frame nested in it: the element that is the board itself, when the widget frame pads it. The shot is this element, so the model sees the crop it was trained on.",
+    "bar": "Beside the widget (a sibling of it, or of its parent): a strip the vendor draws outside the widget element that every board carries, such as Yidun's prompt and slider bar. The shot takes it in, so the model sees what it was trained on.",
     "piece": "Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.",
     "refresh": "Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.",
     "hold_completes": "A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching the answer's `to` is not a release, and the hold lasts until the widget says it is done."
@@ -224,6 +226,9 @@
         ".yidun_slider",
         ".yidun_jigsaw"
       ],
+      "bar": [
+        ".yidun_control"
+      ],
       "piece": [
         ".yidun_jigsaw"
       ],
@@ -371,6 +376,9 @@
       ],
       "widget": [
         "iframe[src*=\"/core/v4/captcha\"]"
+      ],
+      "board": [
+        ".protonCaptchaContainer"
       ]
     },
     "datadome": {

@@ -24,6 +24,9 @@ TICK_BOXES = {
     "recaptcha_light.png": (13, 23, 41, 51),
     "recaptcha_dark_compact_2x.png": (26, 57, 82, 113),
     "hcaptcha_dark.png": (16, 23, 46, 53),
+    # hCaptcha's test key, dark theme, live 2026-11-13: the box's bottom outline is
+    # nearly the panel's shade, so its flat inside leaks out in a ragged tail.
+    "hcaptcha_dark_test_key.png": (16, 23, 46, 53),
     "hcaptcha_light_compact_hover_1.5x.png": (19.5, 24, 64.5, 69),
     "turnstile_light.png": (9, 20.5, 33, 44.5),
     "turnstile_dark_flexible_2x.png": (18, 41, 66, 89),
@@ -31,6 +34,9 @@ TICK_BOXES = {
 }
 #: A ticked or passed widget has nothing left to click.
 TICKED = ["recaptcha_ticked_1.5x.png", "hcaptcha_ticked.png", "turnstile_passed.png"]
+# Widgets whose click target is not a tick box in pixels: GeeTest v4's whole
+# "click to verify" bar is clicked through the config's `box` selector.
+NO_PIXEL_BOX = ["geetest_v4_bar.png"]
 
 
 def _iou(a, b):
@@ -77,3 +83,30 @@ def test_a_file_that_is_not_an_image_returns_none_instead_of_raising(tmp_path):
 def test_a_tile_of_a_puzzle_board_is_not_a_tick_box(name):
     """A grid tile is a square in a frame; clicking it as the widget would answer the puzzle at random."""
     assert find_checkbox(os.path.join(GRIDS, name)) is None
+
+
+@pytest.mark.parametrize("theme", [(255, 40), (34, 120)])
+def test_a_disc_is_not_a_tick_box_even_with_a_ragged_edge(tmp_path, theme):
+    """The solid-core rule accepts a square whose inside leaks through one edge; a
+    round spinner or badge, ragged or not, must still fail it."""
+    bg, ink = theme
+    img = np.full((76, 302), bg, np.uint8)
+    yy, xx = np.mgrid[:76, :302]
+    ring = np.abs(np.hypot(yy - 38, xx - 31) - 15) < 1.5
+    img[ring] = ink
+    img[50:53, 22:40] = ink  # a smudge under it, the shape of the leak
+    path = str(tmp_path / "disc.png")
+    Image.fromarray(img).convert("RGB").save(path)
+    assert find_checkbox(path) is None
+
+
+@pytest.mark.parametrize("name", NO_PIXEL_BOX)
+def test_a_widget_clicked_by_selector_has_no_pixel_box(name):
+    assert find_checkbox(os.path.join(FIXTURES, name)) is None
+
+
+def test_every_checkbox_fixture_is_held_to_an_answer():
+    """A fixture no list names is a widget nothing checks."""
+    named = set(TICK_BOXES) | set(TICKED) | set(NO_PIXEL_BOX)
+    on_disk = {f for f in os.listdir(FIXTURES) if f.endswith(".png")}
+    assert on_disk == named, f"unlisted: {sorted(on_disk - named)}, missing: {sorted(named - on_disk)}"
