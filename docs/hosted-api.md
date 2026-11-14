@@ -146,6 +146,15 @@ It costs nothing. Every solve response also carries `X-CK-Balance-Credits` and
 watch it without a second request. Card auto-recharge on the dashboard tops the
 balance up before it runs out.
 
+`GET /v1/usage`, with the same key, returns the last 30 days: totals, a daily
+series, recent rounds (including any served free and why) and top-ups.
+
+### Rate limits
+
+Every response carries `X-RateLimit-Limit` (requests you may send at once),
+`X-RateLimit-Remaining` and `X-RateLimit-Reset` (seconds until the allowance
+is full again). A `429` also carries `Retry-After`.
+
 ### Model names
 
 Leave the model unset against the hosted API: the client names the right model
