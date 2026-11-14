@@ -23,6 +23,7 @@ class Vendor(StrEnum):
     FUNCAPTCHA = "funcaptcha"
     PROTON = "proton"
     DATADOME = "datadome"
+    CYBERSIARA = "cybersiara"
     UNKNOWN = "unknown"
 
 

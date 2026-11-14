@@ -915,6 +915,7 @@ export class CaptchaKrakenSolver {
     let performedAction = false;
     let slid = false;
     let answered = false;
+    let typed = false;
     let allTokenUsage: TokenUsage[] = [];
     let burstDir: string | null = null;
 
@@ -1108,7 +1109,7 @@ export class CaptchaKrakenSolver {
           await this.emitStep(captchaElement, SolveStage.HOLD, completed ? 'held until the widget completed' : 'released the hold at the cap', puzzleSource, frameRole, attempt, { action });
         } else if (action.action === ActionKind.TYPE) {
           if (await this.executeType(page, scope, action as TypeAction, widget.at)) {
-            performedAction = answered = true;
+            performedAction = answered = typed = true;
             await this.emitStep(captchaElement, SolveStage.TYPE, 'typed the code', puzzleSource, frameRole, attempt, { action });
           }
         } else if (action.action === ActionKind.REFRESH) {
@@ -1129,7 +1130,8 @@ export class CaptchaKrakenSolver {
       // Verify/Skip. FunCaptcha is the exception: its answer is the click itself — an arrow pages, Submit (which the
       // model clicks on the match) submits — so the generic fallback submits page one right after an arrow turned it.
       const submits = slid ? this.submittedOnBoard : answered || !performedAction;
-      const verifyButton = submits && puzzleSource !== Vendor.FUNCAPTCHA ? await this.getVerifyButton(scope) : null;
+      const verifyButton = submits && puzzleSource !== Vendor.FUNCAPTCHA
+        ? await this.getVerifyButton(scope, typed ? widget.at : null) : null;
       if (verifyButton) {
         console.log(`Clicking Verify to submit (${puzzleSource}).`);
         await this.moveAndClick(page, verifyButton);
@@ -1235,8 +1237,17 @@ export class CaptchaKrakenSolver {
     });
   }
 
-  private getVerifyButton(scope: Scope): Promise<ElementHandle | null> {
-    return this.findControl(scope, this.sel.submit);
+  /**
+   * The widget's Verify, else, after a typed answer, the vendor-named submit beside its text box. BotDetect's Validate
+   * sits in the widget's fieldset, outside the 280x50 `.BDC_CaptchaDiv`, like `#captchaCode` (see `answerBox`):
+   * without it the code was typed and never sent (live 0/9, 2026-11-13). Only vendor-named selectors widen, so a
+   * login form's own Submit is never pressed.
+   */
+  private async getVerifyButton(scope: Scope, typedAt?: Locator | null): Promise<ElementHandle | null> {
+    const inside = await this.findControl(scope, this.sel.submit);
+    if (inside !== null || !typedAt) return inside;
+    const around = await Promise.all(['ancestor::fieldset[1]', 'ancestor::form[1]'].map((axis) => this.findControl(typedAt.locator(`xpath=${axis}`), this.sel.submitVendor)));
+    return around.find((h) => h !== null) ?? null;
   }
 
   /** Any element at `selector` carrying a non-blank value; response fields are hidden, so no visibility filter. */

@@ -256,8 +256,8 @@ class SelectorTable:
         self.response: Sequence[str] = tuple(s.response for _, s in self.vendors if s.response)
         self.accepted: Sequence[str] = tuple(s.accepted for _, s in self.vendors if s.accepted)
         # A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
-        self.submit: Sequence[str] = (*map(submit_by_text, loaded.generic["submit_text"]),
-                                      *self._of_every_vendor("submit"))
+        self.submit_vendor: Sequence[str] = self._of_every_vendor("submit")
+        self.submit: Sequence[str] = (*map(submit_by_text, loaded.generic["submit_text"]), *self.submit_vendor)
         # Vendor-named first, generic last: the driver takes the first visible match, and a generic selector
         # reached before the vendor's own is how a captcha's answer ends up in a login form's username box.
         self.text_input_vendor: Sequence[str] = self._of_every_vendor("text_input")
