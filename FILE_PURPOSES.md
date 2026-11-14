@@ -258,8 +258,10 @@ something every browser-driver install should pay for.
 | `mcp/tsconfig.json` | Build config for this package. |
 | `mcp/src/index.ts` | The entry point. Stdio transport, and nothing but MCP frames on stdout — every diagnostic goes to stderr, because one stray `console.log` corrupts the protocol channel. |
 | `mcp/src/server.ts` | The tools themselves: `sign_in`, `sign_out`, `get_account`, `get_balance`, `get_usage`, `get_pricing`, `list_api_keys`, `create_api_key`, `revoke_api_key`, `get_topup_link`, `get_models`. |
+| `mcp/src/pricing.ts` | What `get_pricing` prints from `/api/v1/pricing`. Reads the per-captcha ceiling in either shape the control plane has served: credits (`max_credits_per_session`, `max_usd_per_1000_attempts`) or the older count of billable responses. |
 | `mcp/src/api.ts` | The HTTP client for the control plane's `/api/v1`, including how a failure is turned into something an agent can act on. |
 | `mcp/src/credentials.ts` | Where the client's token and the minted solving key live on disk, and the `0600` modes they are written with. The secret half of a key is written straight to that file and never returned through the conversation. |
+| `mcp/test/pricing.test.mjs` | The package's one unit test, run on the built output by `npm test`: `get_pricing` against both rate-card shapes and a card with neither. |
 
 ## `python/` — the engine, page driver and CLI (PyPI `captchakraken`)
 

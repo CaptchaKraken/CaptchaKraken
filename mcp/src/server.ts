@@ -16,6 +16,7 @@ import {
   writeSolverCredential,
 } from './credentials.js';
 import type { PendingDevice } from './credentials.js';
+import { describePricing, type Pricing } from './pricing.js';
 
 // Under the common 60s MCP client timeout: a sign-in that blocks for two minutes gets killed with the device code stranded.
 const SIGN_IN_WAIT_MS = 25_000;
@@ -608,44 +609,8 @@ export function createServer(baseUrl: string, clientName: string): McpServer {
     },
     async () => {
       try {
-        const pricing = await api.request<{
-          credits_per_usd: number;
-          max_billable_responses_per_session: number;
-          max_responses_per_session: number;
-          free_challenges: string[];
-          classes: Array<{
-            puzzle_class: string;
-            label: string;
-            covers: string;
-            credits_per_response: number;
-            usd_per_1000_responses: number;
-            typical_responses_per_captcha: string;
-          }>;
-          credit_packs: Array<{ usd: number; credits: number }>;
-        }>('/api/v1/pricing', { authenticated: false });
-
-        const lines = [
-          `Billed per inference response. $1.00 = ${pricing.credits_per_usd.toLocaleString('en-US')} credits.`,
-          '',
-        ];
-        for (const row of pricing.classes) {
-          lines.push(
-            `${row.label}: $${row.usd_per_1000_responses.toFixed(2)} per 1,000 (${row.credits_per_response} credits each)`,
-            `  ${row.covers}`,
-
-            `  Typically ${row.typical_responses_per_captcha} response(s) per captcha`,
-          );
-        }
-        lines.push(
-          '',
-          `Free (never reach the model): ${pricing.free_challenges.join(', ')}`,
-
-          `One captcha costs at most ${pricing.max_billable_responses_per_session} billable responses ` +
-            `($${((pricing.classes.find((row) => row.puzzle_class === 'image')?.usd_per_1000_responses ?? 0) * pricing.max_billable_responses_per_session).toFixed(2)} per 1,000 for images). ` +
-            `Responses past that are served free, and the attempt is abandoned after ${pricing.max_responses_per_session}.`,
-          `Packs: ${pricing.credit_packs.map((pack) => `$${pack.usd}`).join(', ')}`,
-        );
-        return text(lines.join('\n'));
+        const pricing = await api.request<Pricing>('/api/v1/pricing', { authenticated: false });
+        return text(describePricing(pricing));
       } catch (error) {
         return describe(error);
       }
