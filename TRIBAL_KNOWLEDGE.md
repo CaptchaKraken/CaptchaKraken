@@ -816,8 +816,9 @@ comparing the report's file list against `src/*.ts` leaves exactly one file out,
 `playwright-types.ts`, which is types only and emits no executable line. Re-run
 that comparison when adding a module; do not reach for `--all`.
 
-**`mcp/` has no coverage number because it has no test suite.** Its gates are a
-type-check, a build, and a real MCP handshake against the built binary. A
+**`mcp/` has no coverage number because it has almost no test suite.** Its gates
+are a type-check, a build, a real MCP handshake against the built binary, and one
+unit test of `get_pricing`'s text against both rate-card shapes. A
 percentage measured over a smoke test would describe nothing, and inventing one
 to fill the column is worse than leaving the column empty.
 

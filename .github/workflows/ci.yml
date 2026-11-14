@@ -182,6 +182,8 @@ jobs:
         run: |
           npx tsc --noEmit -p tsconfig.json
           npm run build
+      - name: Unit tests (get_pricing against both rate-card shapes)
+        run: npm test
       # The server is only useful if it SPEAKS MCP, and a package that compiles
       # but cannot complete a handshake would ship green. This starts the built
       # binary over stdio, initializes, and asserts tools/list comes back
@@ -192,8 +194,9 @@ jobs:
       - name: Answers an MCP handshake
         run: node ../.github/scripts/mcp-smoke.mjs node dist/index.js
 
-      # NO COVERAGE GATE HERE, and no coverage number for this package. It has no
-      # test suite: its checks are a type-check, a build, and the handshake above.
+      # NO COVERAGE GATE HERE, and no coverage number for this package. Its one
+      # unit test covers get_pricing's text; the rest is checked only by the
+      # type-check, the build, and the handshake above.
       # A percentage measured over a smoke test would describe nothing, and
       # inventing one to fill the column is worse than the empty column.
       # TRIBAL_KNOWLEDGE.md records it as the gap it is.
