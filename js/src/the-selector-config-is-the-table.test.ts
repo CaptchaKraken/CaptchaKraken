@@ -13,7 +13,7 @@ import { fakeDom } from './fake-dom.test';
 
 const ROOT_CONFIG = resolve(__dirname, '..', '..', 'captchakraken.config.json');
 const RAW = JSON.parse(readFileSync(ROOT_CONFIG, 'utf8'));
-const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
+const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes', stills_only: 'stillsOnly' };
 
 /** One vendor's entry as the file spells it, in this port's names, without the fields the file leaves empty. */
 const expected = (raw: Record<string, unknown>) => Object.fromEntries(Object.entries(raw)

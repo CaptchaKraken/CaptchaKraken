@@ -29,7 +29,7 @@ export interface VendorSelectors {
    * An in-page checkbox that names one is a button with no tick box to find, and is clicked where it is.
    */
   readonly box?: readonly string[];
-  /** On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md). */
+  /** On the host page, or inside the vendor's challenge frame: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md). */
   readonly accepted?: string;
   /** Inside the challenge frame: a new round has painted, with text. */
   readonly fresh?: string;
@@ -78,6 +78,12 @@ export interface VendorSelectors {
    * answer's `to` is not a release, and the hold lasts until the widget says it is done.
    */
   readonly holdCompletes?: boolean;
+  /**
+   * Every board this vendor deals is a still: none has ever been seen to animate, live or in training. The driver asks
+   * such a board at once instead of first filming it for the animation floor (4s a board), and a still answer that
+   * fails still earns the recording on the next round. Unset, a vendor is filmed before it is asked.
+   */
+  readonly stillsOnly?: boolean;
 }
 
 /** A selector config file's shape: the repository's `captchakraken.config.json`, or any part of it. */
@@ -108,9 +114,9 @@ export interface SelectorConfig {
 const GENERIC = ['submit_text', 'text_input', 'slider_handle', 'piece', 'feedback'] as const;
 type GenericKey = (typeof GENERIC)[number];
 // The file is spelled as the Python port's fields; these three are camelCase here.
-const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes' };
+const CAMEL: Record<string, string> = { text_input: 'textInput', slider_handle: 'sliderHandle', hold_completes: 'holdCompletes', stills_only: 'stillsOnly' };
 const FIELDS = ['hosts', 'challenge', 'checkbox', 'enclave', 'widget', 'response', 'checked', 'box', 'accepted', 'fresh',
-  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'bar', 'board', 'piece', 'band', 'refresh', 'hold_completes'];
+  'images', 'tiles', 'submit', 'banners', 'blocked', 'passive', 'text_input', 'slider_handle', 'bar', 'board', 'piece', 'band', 'refresh', 'hold_completes', 'stills_only'];
 const ONE = new Set(['response', 'checked', 'accepted', 'fresh']);
 const BANNERS = new Set<string>(Object.values(RecaptchaBanner));
 const VENDOR_VALUES = new Set<string>(Object.values(Vendor));
@@ -135,7 +141,7 @@ function entry(where: string, raw: unknown, hostsRequired = true): VendorSelecto
     if (ONE.has(key)) {
       if (value !== null && typeof value !== 'string') throw new SelectorConfigError(`${at}: must be one selector string`);
       if (value !== null) out[name] = value;
-    } else if (key === 'hold_completes') {
+    } else if (key === 'hold_completes' || key === 'stills_only') {
       if (typeof value !== 'boolean') throw new SelectorConfigError(`${at}: must be true or false`);
       if (value) out[name] = value;
     } else if (key === 'banners') {

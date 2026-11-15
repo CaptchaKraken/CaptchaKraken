@@ -463,17 +463,21 @@ export class CaptchaKrakenSolver {
    * repaints nothing, and measured twice as fast. `disabled` freezes CSS animation, which once sliced GeeTest svg to
    * a static clip; callers filming motion pass `allow`.
    */
-  private async shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled', style?: string): Promise<void> {
+  /** `scale: 'css'` is one pixel per CSS pixel: the slide loop's, since a phone's device-pixel frame is ~7x the pixels to track. */
+  private async shot(el: ElementHandle, p: string, timeout = 2500, animations: 'disabled' | 'allow' = 'disabled', style?: string,
+    scale: 'css' | 'device' = 'device'): Promise<void> {
     const page = this.page as Page;
     const view = await viewportOf(page);
     const rect = (await layoutIsTheViewport(page, view)) ? await this.rectInView(el, view) : null;
+    // Device scale is Playwright's default, so only the slide loop's css changes the call.
+    const css = scale === 'css' ? { scale } : {};
     if (!rect) {
       // Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
       // coordinates, so the element photographs itself.
-      await el.screenshot({ path: p, timeout, animations, style });
+      await el.screenshot({ path: p, timeout, animations, style, ...css });
       return;
     }
-    fs.writeFileSync(p, cropPng(await page.screenshot({ timeout, animations, style }), rect, view.width));
+    fs.writeFileSync(p, cropPng(await page.screenshot({ timeout, animations, style, ...css }), rect, view.width));
   }
 
   private async rectOf(el: ElementHandle): Promise<CaptureRect> {
@@ -1338,6 +1342,9 @@ export class CaptchaKrakenSolver {
   private async isCaptchaSolved(page: Page): Promise<boolean> {
     try {
       const checkboxes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHECKBOX && this.sel.selectors[p.vendor].checked);
+      // A vendor that draws its whole challenge in one frame (DataDome) paints its pass in there, then reloads the
+      // page about a second later: unread, the next round filmed the closing frame.
+      const challenges = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].accepted);
       const scopes = await hostScopes(page, this.sel.enclave);
       const signals = await Promise.all([
         ...this.sel.response.map((s) => this.hasValue(scopes, s)),
@@ -1345,6 +1352,11 @@ export class CaptchaKrakenSolver {
         ...checkboxes.map(async (p) => {
           const [at] = await visibleIn(scopes, [p.selector]);
           return !!at && this.checkedIn(at, this.sel.selectors[p.vendor].checked as string);
+        }),
+        ...challenges.map(async (p) => {
+          const [at] = await visibleIn(scopes, [p.selector]);
+          const frame = at && await frameOf(at);
+          return !!frame && (await visible(frame, [this.sel.selectors[p.vendor].accepted as string])).length > 0;
         }),
       ]);
       return signals.some(Boolean);
@@ -2525,6 +2537,9 @@ export class CaptchaKrakenSolver {
     // reCAPTCHA's dynamic 3x3 replaces tiles in place: a burst there films a fade and calls it a cycle.
     if (puzzleSource === Vendor.RECAPTCHA) return false;
     if (textMode) return false;
+    // A vendor whose boards are all stills is asked at once: filming it cost every slider and hold 4s of a 15s
+    // budget (measured on the 5.0 Tier 3 run), and a still answer that fails earns the film next round.
+    if (this.sel.selectors[puzzleSource]?.stillsOnly) return false;
     return true;
   }
 
@@ -3201,11 +3216,11 @@ export class CaptchaKrakenSolver {
       await this.human.press(page);
       await this.human.pause(PauseKind.GRAB);
       const rest = bands.length ? await this.readBands(bands) : null;
-      await this.shot(element, first, timeout);
+      await this.shot(element, first, timeout, 'disabled', undefined, 'css');
       const k = this.shotScale(first, w);
       await this.performSmoothMove(page, press[0] + probe, press[1]);
       await this.human.pause(PauseKind.PROBE);
-      await this.shot(element, probed, timeout);
+      await this.shot(element, probed, timeout, 'disabled', undefined, 'css');
       const ask = {
         first, probe: probed, probe_s: probe * k, goal: [goal[0] * k, goal[1] * k], seed: seed && [seed[0] * k, seed[1] * k],
         handle: [handle[0] * k, handle[1] * k], bounds: [-handle[0] * k, (w - handle[0]) * k], tol: SLIDE_TOLERANCE_PX * k,
@@ -3240,7 +3255,7 @@ export class CaptchaKrakenSolver {
         await this.performSmoothMove(page, press[0] + dx / k, press[1] + dy / k);
         await this.human.pause(PauseKind.PROBE);
         if (rolling) continue;
-        await this.shot(element, current, timeout);
+        await this.shot(element, current, timeout, 'disabled', undefined, 'css');
         look = current;
       }
       await this.human.pause(PauseKind.SETTLE);

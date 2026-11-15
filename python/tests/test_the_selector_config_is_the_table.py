@@ -31,7 +31,7 @@ def _expected(raw: dict) -> dict:
         v = raw.get(f.name)
         if f.name == "banners":
             out[f.name] = tuple((a, RecaptchaBanner(b)) for a, b in (v or ()))
-        elif f.name == "hold_completes":
+        elif f.name in ("hold_completes", "stills_only"):
             out[f.name] = bool(v)
         elif f.name in ("response", "checked", "accepted", "fresh"):
             out[f.name] = v

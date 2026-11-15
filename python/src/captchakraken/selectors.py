@@ -37,7 +37,8 @@ class VendorSelectors:
     # Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph.
     # An in-page checkbox that names one is a button with no tick box to find, and is clicked where it is.
     box: Sequence[str] = ()
-    # On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).
+    # On the host page, or inside the vendor's challenge frame: the vendor painted its success state. Visibility is part
+    # of the test (see TRIBAL_KNOWLEDGE.md).
     accepted: Optional[str] = None
     # Inside the challenge frame: a new round has painted, with text.
     fresh: Optional[str] = None
@@ -76,6 +77,10 @@ class VendorSelectors:
     # A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching
     # the answer's `to` is not a release, and the hold lasts until the widget says it is done.
     hold_completes: bool = False
+    # Every board this vendor deals is a still: none has ever been seen to animate, live or in training. The driver
+    # asks such a board at once instead of first filming it for the animation floor (4s a board), and a still
+    # answer that fails still earns the recording on the next round. Unset, a vendor is filmed before it is asked.
+    stills_only: bool = False
 
 
 #: The default config: the repository's own `captchakraken.config.json` when this package runs from a checkout, so an
@@ -128,7 +133,7 @@ def _entry(where: str, raw: Any, hosts_required: bool = True) -> VendorSelectors
             if value is not None and not isinstance(value, str):
                 raise SelectorConfigError(f"{at}: must be one selector string")
             kw[key] = value
-        elif key == "hold_completes":
+        elif key in ("hold_completes", "stills_only"):
             if not isinstance(value, bool):
                 raise SelectorConfigError(f"{at}: must be true or false")
             kw[key] = value
