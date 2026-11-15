@@ -66,6 +66,9 @@ class _Element:
         self.throw_first = throw_first
         self.grabs = 0
 
+    def is_visible(self):
+        return True
+
     def screenshot(self, **kw):
         self.grabs += 1
         if self.throw_first and self.grabs == 1:

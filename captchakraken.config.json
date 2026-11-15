@@ -19,7 +19,8 @@
     "the vendor's code on the wire; every other field is a list of CSS (or",
     "Playwright `xpath=`) selectors, except `response`, `checked`, `accepted` and",
     "`fresh` (one selector each), `banners` ([selector, verdict] pairs) and",
-    "`hold_completes` (true or false). `note` is for people, not the solver.",
+    "`hold_completes` and `stills_only`",
+    "(true or false). `note` is for people, not the solver.",
     "",
     "generic: the fallbacks tried after every vendor's own. `submit_text` is the",
     "button text probed for a submit control, in order. `feedback` (CSS only) names the",
@@ -37,7 +38,7 @@
     "response": "On the host page: the field the vendor fills on success. Read first and unconditionally, because hCaptcha's overlay hides the anchor.",
     "checked": "Inside the checkbox frame: the box shows accepted. Demo pages do not always fill `response`.",
     "box": "Inside the checkbox frame: the box itself, clicked from the DOM. A vendor without one is found on a photograph. An in-page checkbox that names one is a button with no tick box to find, and is clicked where it is.",
-    "accepted": "On the host page: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).",
+    "accepted": "On the host page, or inside the vendor's challenge frame: the vendor painted its success state. Visibility is part of the test (see TRIBAL_KNOWLEDGE.md).",
     "fresh": "Inside the challenge frame: a new round has painted, with text.",
     "images": "Inside the challenge frame: the pictures a board is made of; the driver waits for each to have painted.",
     "tiles": "Inside the challenge frame: the tiles of the board's grid, in reading order. Where each one is placed is read from the DOM, to click it and to watch it reload.",
@@ -52,7 +53,8 @@
     "piece": "Inside the widget: the piece, measured to steer the slide and dragged directly when there is no track.",
     "band": "Inside the widget: picture strips a slide rolls by their background, such as DingXiang's restore bands. Which strip rolls, and how far per handle pixel, are dealt per board and cannot be seen in the picture (see TRIBAL_KNOWLEDGE.md), so each strip's background offset is read while the handle moves, and the slide stops when the strip that rolls has rolled as far as the answer's two points are apart.",
     "refresh": "Inside the widget: the control that deals a new puzzle, pressed when the model answers `refresh`.",
-    "hold_completes": "A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching the answer's `to` is not a release, and the hold lasts until the widget says it is done."
+    "hold_completes": "A press-and-hold that completes on its own once full, and resets when let go before it has: the fill reaching the answer's `to` is not a release, and the hold lasts until the widget says it is done.",
+    "stills_only": "Every board this vendor deals is a still: none has ever been seen to animate, live or in training. The driver asks such a board at once instead of first filming it for the animation floor (4s a board); a still answer that fails still earns the recording on the next round. Unset, a vendor is filmed before it is asked."
   },
   "custom": null,
   "vendors": {
@@ -189,6 +191,7 @@
     },
     "tencent": {
       "note": "Both in-page and iframe shapes stay (Tencent moved in-host on 2026-08-11; see TRIBAL_KNOWLEDGE.md), and the iframe id is prefix-anchored: `[id*=tcaptcha]` also matched MTCaptcha's iframe and hid that `.mtcap` matched nothing.",
+      "stills_only": true,
       "hosts": [
         "captcha.gtimg.com",
         "captcha.qcloud.com"
@@ -216,6 +219,7 @@
       ]
     },
     "yidun": {
+      "stills_only": true,
       "hosts": [
         "dun.163.com",
         "cstaticdun.126.net",
@@ -240,6 +244,7 @@
       ]
     },
     "yandex": {
+      "stills_only": true,
       "hosts": [
         "smartcaptcha.yandexcloud.net"
       ],
@@ -255,6 +260,7 @@
       ]
     },
     "lemin": {
+      "stills_only": true,
       "hosts": [
         "leminnow.com"
       ],
@@ -272,6 +278,7 @@
       ]
     },
     "prosopo": {
+      "stills_only": true,
       "hosts": [
         "prosopo.io"
       ],
@@ -281,6 +288,7 @@
       ]
     },
     "mtcaptcha": {
+      "stills_only": true,
       "hosts": [
         "mtcaptcha.com"
       ],
@@ -299,6 +307,7 @@
       ]
     },
     "botdetect": {
+      "stills_only": true,
       "hosts": [],
       "widget": [
         ".BDC_CaptchaDiv"
@@ -321,6 +330,7 @@
     },
     "human": {
       "note": "The press-and-hold widget. Found by its host-page container whether the button is drawn inline or in the vendor's iframe inside it: the hold is performed on a photograph of the container, so it never needs the frame's DOM.",
+      "stills_only": true,
       "hosts": [],
       "widget": [
         "#px-captcha"
@@ -329,6 +339,7 @@
     },
     "awswaf": {
       "note": "The card is drawn in an open shadow root, which the locator engine pierces; its Confirm is found by the text probe.",
+      "stills_only": true,
       "hosts": [
         "awswaf.com"
       ],
@@ -338,6 +349,7 @@
     },
     "captchafox": {
       "note": "The puzzle opens in a modal over the \"I am human\" box, which stays on screen, so the modal is a challenge: a widget would be outranked by the box and the box clicked again.",
+      "stills_only": true,
       "hosts": [
         "captchafox.com"
       ],
@@ -354,6 +366,7 @@
     },
     "dingxiang": {
       "note": "Every mode opens the same popup card. The trigger bar under it has no box to tick and is not a widget.",
+      "stills_only": true,
       "hosts": [
         "cdn.dingxiang-inc.com/ctu-group/captcha",
         "cap.dingxiang-inc.com"
@@ -372,6 +385,7 @@
     },
     "funcaptcha": {
       "note": "The host page carries the outer frame (iframe.arkoselabs.com/<key>/index.html) and the game is two frames inside it; the game frame's own path is listed so a page that frames the game directly is found too.",
+      "stills_only": true,
       "hosts": [
         "arkoselabs.com"
       ],
@@ -383,6 +397,7 @@
     },
     "proton": {
       "note": "Proton frames its own captcha at /core/v4/captcha, on account-api.proton.me or under the app's own /api/.",
+      "stills_only": true,
       "hosts": [
         "/core/v4/captcha"
       ],
@@ -395,6 +410,7 @@
     },
     "datadome": {
       "note": "The interstitial is one full-viewport iframe served from geo.captcha-delivery.com/captcha/, so it is the challenge itself, with no checkbox. Its visual mode is a slide-to-the-end bar; the handle is `.slider` inside `.sliderContainer`, and a pass reloads the host page. A refused session gets a 'You have been blocked' page in the same frame, under the same URL.",
+      "stills_only": true,
       "hosts": [
         "captcha-delivery.com"
       ],
@@ -409,7 +425,8 @@
       ],
       "refresh": [
         "#captcha__reload__button"
-      ]
+      ],
+      "accepted": ".sliderContainer.slider-success .slider"
     },
     "cybersiara": {
       "note": "SiaraShield draws its challenge inline on the host page: a modal (`#myModal .pluginPopups`) holding a looping GIF of four letters read out of noise, `#Input_Captcha` and a refresh. It checks the answer itself once the fourth letter is typed (measured live 2026-11-14: a wrong answer clears the box and deals a new GIF), so it has no submit control. The host's own `.CaptchaSubmit` opens the modal, so it is never pressed for an answer.",

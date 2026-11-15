@@ -24,6 +24,25 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Changed
 
+- **A vendor whose boards are all stills is asked at once.** A new
+  `stills_only` field in `captchakraken.config.json` marks the fourteen vendors
+  that deal only sliders, holds, clicks and typed codes (Tencent, Yidun, Yandex,
+  Lemin, Prosopo, MTCaptcha, BotDetect, HUMAN, AWS WAF, CaptchaFox, DingXiang,
+  FunCaptcha, Proton, DataDome). Their boards are no longer filmed for 4 seconds
+  to check for animation before the model's answer is used. hCaptcha, GeeTest,
+  CyberSiara and an unlisted widget are still filmed.
+- **The slide loop tracks frames in CSS pixels.** On a phone (device pixel ratio
+  2.6) each frame had seven times the pixels, and tracking them took 4.7 s of an
+  11.6 s Tencent solve. A Tencent slide on a Pixel 7 now takes 5.8 s, down from
+  16.8 s.
+- **DataDome's pass is read inside its frame.** `accepted` is now also looked for
+  inside the vendor's challenge frame, and DataDome's is
+  `.sliderContainer.slider-success .slider`. Before, the pass went unseen, the
+  page reloaded, and the next round spent its 9-second settle window
+  photographing a closing frame. The Python port no longer retries screenshots of
+  a widget that has closed, and no longer arms a second look at one. The JS port
+  already stopped.
+
 - **A Proton board's Verify and Next are read from the board's own frame.** The
   board, its pieces and its Next sit a frame below the widget's frame; both
   ports now read those buttons from the frame that holds the photographed board,

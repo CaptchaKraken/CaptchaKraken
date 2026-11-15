@@ -470,6 +470,14 @@ def _frame_of(at: Any) -> Optional[Any]:
         return None
 
 
+def _still_shown(element: Any) -> bool:
+    """The element is attached and visible; one that cannot be asked is taken as gone."""
+    try:
+        return bool(element.is_visible())
+    except Exception:
+        return False
+
+
 def _host_scopes(page: Any, enclaves: Sequence[str]) -> List[Any]:
     """Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave
     is skipped because Playwright judges an element visible within its own document, whatever its frame's visibility."""
@@ -1428,11 +1436,11 @@ class PageSolver:
             self._human.press(page)
             self._human.pause(PauseKind.GRAB)
             rest = self._read_bands(bands) if bands else None
-            self._screenshot(element, first, timeout_ms=timeout)
+            self._screenshot(element, first, timeout_ms=timeout, scale="css")
             k = self._shot_scale(first, w)
             self._smooth_move(page, press[0] + probe, press[1])
             self._human.pause(PauseKind.PROBE)
-            self._screenshot(element, probed, timeout_ms=timeout)
+            self._screenshot(element, probed, timeout_ms=timeout, scale="css")
             ask = dict(probe_s=probe * k, goal=(goal[0] * k, goal[1] * k), seed=seed and (seed[0] * k, seed[1] * k),
                        handle=(handle[0] * k, handle[1] * k), bounds=(-handle[0] * k, (w - handle[0]) * k),
                        tol=self.config.slide_tolerance_px * k)
@@ -1471,7 +1479,7 @@ class PageSolver:
                 self._human.pause(PauseKind.PROBE)
                 moves += 1
                 if rolling is None:
-                    self._screenshot(element, current, timeout_ms=timeout)
+                    self._screenshot(element, current, timeout_ms=timeout, scale="css")
                     look = current
             self._human.pause(PauseKind.SETTLE)
         finally:
@@ -1603,12 +1611,18 @@ class PageSolver:
             if any(self._has_value(scopes, s) for s in self._sel.response) or _visible_in(scopes, self._sel.accepted):
                 return True
             for probe in self._sel.widget_probes:
-                checked = self._sel.selectors[probe.vendor].checked
-                if probe.role != FrameRole.CHECKBOX or not checked:
-                    continue
-                at = next(iter(_visible_in(scopes, (probe.selector,))), None)
-                if at is not None and self._checked_in(at, checked):
-                    return True
+                vendor = self._sel.selectors[probe.vendor]
+                if probe.role == FrameRole.CHECKBOX and vendor.checked:
+                    at = next(iter(_visible_in(scopes, (probe.selector,))), None)
+                    if at is not None and self._checked_in(at, vendor.checked):
+                        return True
+                elif probe.role == FrameRole.CHALLENGE and vendor.accepted:
+                    # A vendor that draws its whole challenge in one frame (DataDome) paints its pass in there,
+                    # then reloads the page about a second later: unread, the next round filmed the closing frame.
+                    at = next(iter(_visible_in(scopes, (probe.selector,))), None)
+                    frame = _frame_of(at) if at is not None else None
+                    if frame is not None and _visible(frame, (vendor.accepted,)):
+                        return True
         except Exception:
             pass
         return False
@@ -1754,24 +1768,29 @@ class PageSolver:
     # ── frames and polling ───────────────────────────────────────────────
 
     def _screenshot(self, element: Any, path: str, timeout_ms: Optional[int] = None,
-                    animations: str = "disabled", style: Optional[str] = None) -> None:
+                    animations: str = "disabled", style: Optional[str] = None, scale: str = "device") -> None:
         """Every capture the driver takes: the whole viewport, cropped here to the element.
 
         Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at
         the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
         capture repaints nothing, and measured twice as fast. Short timeout; `disabled` freezes CSS animation,
-        so bursts and the keyframe gate pass `allow`. `style` is CSS applied for this capture only.
+        so bursts and the keyframe gate pass `allow`. `style` is CSS applied for this capture only. `scale="css"`
+        takes one pixel per CSS pixel: the slide loop's choice, since on a phone (DPR 2.6) a device-pixel frame is
+        seven times the pixels and its tracking took 4.7 s of an 11.6 s solve.
         """
         timeout = 2_500 if timeout_ms is None else timeout_ms
         page = self._page
         view = _viewport_of(page)
         rect = self._rect_in_view(element, view) if _layout_is_the_viewport(page, view) else None
+        # Device scale is Playwright's default, so only the slide loop's css changes the call.
+        kw: Dict[str, Any] = {"scale": scale} if scale != "device" else {}
         if rect is None:
             # Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
             # coordinates, so the element photographs itself.
-            _shot(element.screenshot, style, path=path, timeout=timeout, animations=animations)
+            _shot(element.screenshot, style, path=path, timeout=timeout, animations=animations, **kw)
             return
-        png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations), rect, view["width"])
+        png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations, **kw), rect,
+                       view["width"])
         with open(path, "wb") as fh:
             fh.write(png)
 
@@ -1838,6 +1857,10 @@ class PageSolver:
                     self._screenshot(element, path)
                 except Exception:
                     _unlink(path)
+                    # A widget that has closed will not come back to be shot. Retrying it spent the whole
+                    # 9s settle window on DataDome's frame closing over an accepted slide; the JS port returns.
+                    if not _still_shown(element):
+                        return None
                     _delay(interval_ms)
                     continue
                 frames.append(path)
@@ -2007,6 +2030,10 @@ class PageSolver:
             # that recording brings back is what decides — `_known_animated` is set from it, not from here.
             if not self._animated_probe_armed or self._animated_probe_done:
                 return False
+            if not _still_shown(element):
+                # Closing, most often over an accepted answer: there is nothing to film, and the loop head asks
+                # whether it was accepted.
+                raise AnimatedChallengeError("the widget closed before its second look could film it")
             self._animated_probe_done, self._animated_probe_armed = True, False
             _log("[animated] a second look at a board that did not solve as a still — recording it")
         self._known_animated = animated
@@ -2023,9 +2050,13 @@ class PageSolver:
     def _should_speculate(self, puzzle_source: Vendor, text_mode: bool) -> bool:
         # reCAPTCHA is excluded: its dynamic 3x3 replaces tiles in place, so a burst would film a fade and call
         # it a cycle. A text round has nothing to film.
+        # A vendor whose boards are all stills is asked at once: filming it cost every slider and hold 4s of a
+        # 15s budget (measured on the 5.0 Tier 3 run), and a still answer that fails earns the film next round.
         cfg = self.config
+        entry = self._sel.selectors.get(puzzle_source)
         return (cfg.video_solve_enabled and cfg.speculative_burst_enabled and not self._acted_on_board
-                and puzzle_source != Vendor.RECAPTCHA and not text_mode)
+                and puzzle_source != Vendor.RECAPTCHA and not text_mode
+                and not (entry is not None and entry.stills_only))
 
     def _burst(self, element: Any, known: AbstractSet[str] = frozenset(),
                max_ms: Optional[float] = None) -> Tuple[List[Any], List[str], bool, float, bool]:
