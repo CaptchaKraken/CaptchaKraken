@@ -151,7 +151,18 @@ _GEETEST_STILL = frozenset({"slide", "icon", "nine", "match", "winlinze"})
 
 
 def _media_moves(content_type: str, _body: str) -> Optional[bool]:
-    return {"video": True, "image": False}.get(content_type.split("/", 1)[0].strip().lower())
+    # A GIF may move, so it says nothing either way; every still hCaptcha board measured was a jpeg or a png.
+    kind = content_type.split(";", 1)[0].strip().lower()
+    if kind == "image/gif":
+        return None
+    return {"video": True, "image": False}.get(kind.split("/", 1)[0])
+
+
+def _cybersiara_board_moves(_content_type: str, body: str) -> Optional[bool]:
+    # GenerateCaptcha names the board's file in HtmlFormate; every one measured (4 deals) was a GIF that moved.
+    data = _json(body)
+    board = data.get("HtmlFormate") if isinstance(data, dict) else None
+    return True if isinstance(board, str) and board.lower().split("?", 1)[0].endswith(".gif") else None
 
 
 def _geetest_type_moves(_content_type: str, body: str) -> Optional[bool]:
@@ -172,7 +183,64 @@ class MotionSignal:
 MOTION_SIGNALS: Mapping[Vendor, Sequence[MotionSignal]] = {
     Vendor.HCAPTCHA: (MotionSignal("hcaptcha.com/tip/", _media_moves, needs_body=False),),
     Vendor.GEETEST: (MotionSignal("geetest.com/load", _geetest_type_moves, needs_body=True),),
+    Vendor.CYBERSIARA: (MotionSignal("mycybersiara.com/api/GenerateCaptcha", _cybersiara_board_moves,
+                                     needs_body=True),),
 }
+
+
+# ── the same, read back from a frame's performance timeline ──────────────────
+# The listener hears only what loads after solve() starts. A widget the caller opened first, or a board the browser
+# served from its cache, was dealt before then, and each frame's resource timeline still lists what it loaded and what
+# loaded it. Only entries after the vendor's latest deal count, and a full buffer (where new entries are dropped and the
+# latest deal may be missing) says nothing. Measured 2026-11-14: GeeTest's board files sit under
+# static.geetest.com/captcha_v4/policy/<id>/<captcha_type>/, hCaptcha's under /tip/ loaded by an img, CyberSiara's as
+# a GIF under embed.mycybersiara.com/CyberSiara/.
+TIMELINE_JS = """() => {
+  const all = performance.getEntriesByType('resource');
+  return {full: all.length >= 250, entries: all.map(e => [e.initiatorType, e.name])};
+}"""
+
+
+def _hcaptcha_tip_moves(initiator: str, _url: str) -> Optional[bool]:
+    return True if initiator in ("video", "audio", "source") else False if initiator == "img" else None
+
+
+def _geetest_path_moves(_initiator: str, url: str) -> Optional[bool]:
+    parts = url.split("captcha_v4/policy/", 1)[-1].split("/")
+    kind = parts[1] if len(parts) > 1 else None
+    return True if kind in _GEETEST_MOVING else False if kind in _GEETEST_STILL else None
+
+
+def _cybersiara_file_moves(_initiator: str, url: str) -> Optional[bool]:
+    return True if url.lower().split("?", 1)[0].endswith(".gif") else None
+
+
+@dataclass(frozen=True)
+class TimelineBoard:
+    deal: str
+    board: str
+    read: Callable[[str, str], Optional[bool]]
+
+
+TIMELINE_BOARDS: Mapping[Vendor, TimelineBoard] = {
+    Vendor.HCAPTCHA: TimelineBoard("hcaptcha.com/getcaptcha/", "hcaptcha.com/tip/", _hcaptcha_tip_moves),
+    Vendor.GEETEST: TimelineBoard("geetest.com/load", "static.geetest.com/captcha_v4/policy/", _geetest_path_moves),
+    Vendor.CYBERSIARA: TimelineBoard("mycybersiara.com/api/GenerateCaptcha", "mycybersiara.com/CyberSiara/",
+                                     _cybersiara_file_moves),
+}
+
+
+def motion_from_timeline(vendor: Vendor, timeline: Any) -> Optional[bool]:
+    """What one frame's resource timeline says about the vendor's latest board, or None."""
+    spec = TIMELINE_BOARDS.get(vendor)
+    if spec is None or not isinstance(timeline, dict) or timeline.get("full"):
+        return None
+    entries = [e for e in timeline.get("entries") or () if isinstance(e, (list, tuple)) and len(e) == 2]
+    last_deal = max((i for i, (_kind, url) in enumerate(entries) if spec.deal in str(url)), default=None)
+    if last_deal is None:
+        return None
+    reads = [spec.read(str(kind), str(url)) for kind, url in entries[last_deal + 1:] if spec.board in str(url)]
+    return True if True in reads else False if False in reads else None
 
 
 def motion_signal_for(url: str) -> Optional[Tuple[Vendor, MotionSignal]]:
@@ -249,8 +317,22 @@ class VerdictLog:
             self._motion[vendor] = moves
 
     def board_motion(self, vendor: Vendor) -> Optional[bool]:
-        """Whether the vendor dealt its current board as a moving one; None when its network has not said."""
-        return self._motion.get(vendor)
+        """Whether the vendor dealt its current board as a moving one; None when neither its network nor a frame's
+        timeline has said."""
+        heard = self._motion.get(vendor)
+        if heard is not None or vendor not in TIMELINE_BOARDS:
+            return heard
+        try:
+            frames = list(self._page.frames)
+        except Exception:
+            return None
+        reads = []
+        for frame in frames:
+            try:
+                reads.append(motion_from_timeline(vendor, frame.evaluate(TIMELINE_JS)))
+            except Exception:
+                continue
+        return True if True in reads else False if False in reads else None
 
     @property
     def listening(self) -> bool:

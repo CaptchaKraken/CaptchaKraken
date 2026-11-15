@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "s
 
 from captchakraken.kinds import Vendor
 from captchakraken.page_solver import PageSolver, PageSolverConfig
-from captchakraken.verdicts import VerdictLog
+from captchakraken.verdicts import TIMELINE_JS, VerdictLog, motion_from_timeline
 
 HC_DEAL = "https://api.hcaptcha.com/getcaptcha/7fcac73c-0096-446a-9c58-c080553a6fa8?s=1"
 HC_BOARD = "https://imgs3.hcaptcha.com/tip/310c65b96dbc0a2f92ed212cc49e88ade109b81f71ca21795dc0ae47f048e367"
@@ -93,6 +93,80 @@ def test_a_type_nobody_measured_keeps_the_film():
     log = VerdictLog(page)
     page.send(_gt_load("svg_icon"), _gt_load("ai"))
     assert log.board_motion(Vendor.GEETEST) is None
+
+
+SIARA_DEAL = "https://embed.mycybersiara.com/api/GenerateCaptcha/Captcha"
+
+
+def _siara(board):
+    body = ('{"HttpStatusCode":0,"Message":"success","HtmlFormate":"%s","RequestId":"46917001"}' % board).encode()
+    return Response(SIARA_DEAL, "application/json; charset=utf-8", body, "xhr")
+
+
+def test_a_png_board_is_still_and_a_gif_says_nothing():
+    for content_type, moves in (("image/png", False), ("image/gif", None)):
+        page = Page()
+        log = VerdictLog(page)
+        page.send(_hc_deal(), Response(HC_BOARD, content_type))
+        assert log.board_motion(Vendor.HCAPTCHA) is moves, content_type
+
+
+def test_cybersiara_names_a_gif_board_and_it_moves():
+    page = Page()
+    log = VerdictLog(page)
+    page.send(_siara("https://embed.mycybersiara.com/CyberSiara/SiaraShield.639303158624783419.gif"))
+    assert log.board_motion(Vendor.CYBERSIARA) is True
+    other = VerdictLog(Page())
+    other._page.send(_siara("https://embed.mycybersiara.com/CyberSiara/board.png"))
+    assert other.board_motion(Vendor.CYBERSIARA) is None
+
+
+GT_POLICY = "https://static.geetest.com/captcha_v4/policy/ccbb7c7507/%s/339970/2026-11-15T12/bg/0bca.png"
+
+
+class Frame:
+    def __init__(self, *entries, full=False):
+        self.timeline = {"full": full, "entries": [list(e) for e in entries]}
+
+    def evaluate(self, script):
+        assert script == TIMELINE_JS
+        return self.timeline
+
+
+@pytest.mark.parametrize("entries, moves", [
+    ((("script", GT_LOAD), ("img", GT_POLICY % "slide")), False),
+    ((("script", GT_LOAD), ("xmlhttprequest", GT_POLICY % "svg_icon")), True),
+    # The board before the latest deal describes nothing.
+    ((("img", GT_POLICY % "svg_icon"), ("script", GT_LOAD)), None),
+    ((("img", GT_POLICY % "svg_icon"),), None),
+])
+def test_a_geetest_board_dealt_before_solve_is_read_off_the_timeline(entries, moves):
+    assert motion_from_timeline(Vendor.GEETEST, {"full": False, "entries": entries}) is moves
+
+
+def test_a_full_timeline_says_nothing():
+    timeline = {"full": True, "entries": [("script", GT_LOAD), ("img", GT_POLICY % "slide")]}
+    assert motion_from_timeline(Vendor.GEETEST, timeline) is None
+
+
+def test_the_listener_falls_back_to_each_frame_s_timeline():
+    page = Page()
+    page.frames = [Frame(("script", "https://example.com/app.js")),
+                   Frame(("xmlhttprequest", HC_DEAL), ("img", HC_BOARD))]
+    assert VerdictLog(page).board_motion(Vendor.HCAPTCHA) is False
+    page.frames = [Frame(("xmlhttprequest", HC_DEAL), ("video", HC_BOARD))]
+    assert VerdictLog(page).board_motion(Vendor.HCAPTCHA) is True
+    page.frames = [Frame(("xmlhttprequest", "https://embed.mycybersiara.com/api/GenerateCaptcha/Captcha"),
+                         ("img", "https://embed.mycybersiara.com/CyberSiara/SiaraShield.6393.gif"))]
+    assert VerdictLog(page).board_motion(Vendor.CYBERSIARA) is True
+
+
+def test_what_the_network_said_wins_over_the_timeline():
+    page = Page()
+    page.frames = [Frame(("xmlhttprequest", HC_DEAL), ("img", HC_BOARD))]
+    log = VerdictLog(page)
+    page.send(_hc_deal(), Response(HC_BOARD, "video/webm", resource_type="media"))
+    assert log.board_motion(Vendor.HCAPTCHA) is True
 
 
 def _solver(page):

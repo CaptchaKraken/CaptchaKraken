@@ -138,8 +138,17 @@ const GEETEST_MOVING = new Set(['svg_icon', 'svg_seed']);
 const GEETEST_STILL = new Set(['slide', 'icon', 'nine', 'match', 'winlinze']);
 
 const mediaMoves = (contentType: string): boolean | null => {
-  const kind = contentType.split('/', 1)[0].trim().toLowerCase();
+  // A GIF may move, so it says nothing either way; every still hCaptcha board measured was a jpeg or a png.
+  const type = contentType.split(';', 1)[0].trim().toLowerCase();
+  if (type === 'image/gif') return null;
+  const kind = type.split('/', 1)[0];
   return kind === 'video' ? true : kind === 'image' ? false : null;
+};
+
+// GenerateCaptcha names the board's file in HtmlFormate; every one measured (4 deals) was a GIF that moved.
+const cybersiaraBoardMoves = (_contentType: string, body: string): boolean | null => {
+  const board = (parse(body) as { HtmlFormate?: unknown } | null)?.HtmlFormate;
+  return typeof board === 'string' && board.toLowerCase().split('?', 1)[0].endsWith('.gif') ? true : null;
 };
 
 const geetestTypeMoves = (_contentType: string, body: string): boolean | null => {
@@ -162,7 +171,58 @@ export interface MotionSignal {
 export const MOTION_SIGNALS: Partial<Record<Vendor, readonly MotionSignal[]>> = {
   [Vendor.HCAPTCHA]: [{ marker: 'hcaptcha.com/tip/', read: mediaMoves, needsBody: false }],
   [Vendor.GEETEST]: [{ marker: 'geetest.com/load', read: geetestTypeMoves, needsBody: true }],
+  [Vendor.CYBERSIARA]: [{ marker: 'mycybersiara.com/api/GenerateCaptcha', read: cybersiaraBoardMoves, needsBody: true }],
 };
+
+// ── the same, read back from a frame's performance timeline ──────────────────
+// The listener hears only what loads after solve() starts. A widget the caller opened first, or a board the browser
+// served from its cache, was dealt before then, and each frame's resource timeline still lists what it loaded and what
+// loaded it. Only entries after the vendor's latest deal count, and a full buffer (where new entries are dropped and the
+// latest deal may be missing) says nothing. Measured 2026-11-14: GeeTest's board files sit under
+// static.geetest.com/captcha_v4/policy/<id>/<captcha_type>/, hCaptcha's under /tip/ loaded by an img, CyberSiara's as
+// a GIF under embed.mycybersiara.com/CyberSiara/.
+export const TIMELINE_JS = `() => {
+  const all = performance.getEntriesByType('resource');
+  return {full: all.length >= 250, entries: all.map(e => [e.initiatorType, e.name])};
+}`;
+
+export interface Timeline { full?: boolean; entries?: [string, string][] }
+
+interface TimelineBoard { deal: string; board: string; read: (initiator: string, url: string) => boolean | null }
+
+const hcaptchaTipMoves = (initiator: string): boolean | null =>
+  ['video', 'audio', 'source'].includes(initiator) ? true : initiator === 'img' ? false : null;
+
+const geetestPathMoves = (_initiator: string, url: string): boolean | null => {
+  const kind = url.split('captcha_v4/policy/').slice(-1)[0].split('/')[1];
+  return kind === undefined ? null : GEETEST_MOVING.has(kind) ? true : GEETEST_STILL.has(kind) ? false : null;
+};
+
+const cybersiaraFileMoves = (_initiator: string, url: string): boolean | null =>
+  url.toLowerCase().split('?', 1)[0].endsWith('.gif') ? true : null;
+
+export const TIMELINE_BOARDS: Partial<Record<Vendor, TimelineBoard>> = {
+  [Vendor.HCAPTCHA]: { deal: 'hcaptcha.com/getcaptcha/', board: 'hcaptcha.com/tip/', read: hcaptchaTipMoves },
+  [Vendor.GEETEST]: { deal: 'geetest.com/load', board: 'static.geetest.com/captcha_v4/policy/', read: geetestPathMoves },
+  [Vendor.CYBERSIARA]: {
+    deal: 'mycybersiara.com/api/GenerateCaptcha', board: 'mycybersiara.com/CyberSiara/', read: cybersiaraFileMoves,
+  },
+};
+
+const combine = (reads: (boolean | null)[]): boolean | null =>
+  reads.includes(true) ? true : reads.includes(false) ? false : null;
+
+/** What one frame's resource timeline says about the vendor's latest board, or null. */
+export function motionFromTimeline(vendor: Vendor, timeline: Timeline | null | undefined): boolean | null {
+  const spec = TIMELINE_BOARDS[vendor];
+  if (!spec || !timeline || timeline.full) return null;
+  const entries = (timeline.entries ?? []).filter((e) => Array.isArray(e) && e.length === 2);
+  let lastDeal = -1;
+  entries.forEach(([, url], i) => { if (String(url).includes(spec.deal)) lastDeal = i; });
+  if (lastDeal < 0) return null;
+  return combine(entries.slice(lastDeal + 1).filter(([, url]) => String(url).includes(spec.board))
+    .map(([kind, url]) => spec.read(String(kind), String(url))));
+}
 
 export function motionSignalFor(url: string): { vendor: Vendor; signal: MotionSignal } | null {
   return (Object.entries(MOTION_SIGNALS) as [Vendor, readonly MotionSignal[]][])
@@ -234,7 +294,23 @@ export class VerdictLog {
   /** Whether the vendor dealt its current board as a moving one; null when its network has not said. */
   async boardMotion(vendor: Vendor): Promise<boolean | null> {
     await Promise.all([...this.pending]);
-    return this.motion.get(vendor) ?? null;
+    const heard = this.motion.get(vendor);
+    if (heard !== undefined || !TIMELINE_BOARDS[vendor]) return heard ?? null;
+    type TimelineFrame = { evaluate?(fn: string): Promise<unknown> };
+    let frames: TimelineFrame[] = [];
+    try {
+      frames = (this.page as unknown as { frames?(): TimelineFrame[] }).frames?.() ?? [];
+    } catch {
+      return null;
+    }
+    const reads = await Promise.all(frames.map(async (frame) => {
+      try {
+        return motionFromTimeline(vendor, (await frame.evaluate?.(TIMELINE_JS)) as Timeline);
+      } catch {
+        return null;
+      }
+    }));
+    return combine(reads);
   }
 
   constructor(private readonly page: PlaywrightPage) {

@@ -31,15 +31,19 @@ semantic versioning; v2 is a major, **breaking** release.
   FunCaptcha, Proton, DataDome). Their boards are no longer filmed for 4 seconds
   to check for animation before the model's answer is used. hCaptcha, GeeTest,
   CyberSiara and an unlisted widget are still filmed.
-- **hCaptcha and GeeTest say whether a board moves, and the burst is only the
-  fallback.** Both ports read it off the vendor's own network. hCaptcha deals
-  each board as a file from `imgs*.hcaptcha.com/tip/`: `image/jpeg` for a still,
-  `video/webm` for an animated one. GeeTest v4's `/load` names its
+- **hCaptcha, GeeTest and CyberSiara say whether a board moves, and the burst
+  is only the fallback.** Both ports read it off the vendor's own network.
+  hCaptcha deals each board as a file from `imgs*.hcaptcha.com/tip/`:
+  `image/jpeg` or `image/png` for a still, `video/webm` for an animated one (a
+  GIF says nothing). CyberSiara's `GenerateCaptcha` names a `.gif` board, and it
+  always moves. GeeTest v4's `/load` names its
   `captcha_type`, and only `svg_icon` and `svg_seed` move. Measured over 46 live
   hCaptcha deals and 22 GeeTest deals, the file type matched the board's motion
   every time. A board dealt as a still is now asked at once, and one dealt as a
-  video is filmed without first waiting for it to settle. A board no network
-  has described, an unknown GeeTest type, and every other vendor keep the 4 s
+  video is filmed without first waiting for it to settle. A board dealt before
+  `solve()` started, which the listener never heard, is read off each frame's
+  resource timeline instead: what loaded after the vendor's latest deal, and
+  what loaded it. A board no network has described, an unknown GeeTest type, and every other vendor keep the 4 s
   burst.
 - **The slide loop tracks frames in CSS pixels.** On a phone (device pixel ratio
   2.6) each frame had seven times the pixels, and tracking them took 4.7 s of an
