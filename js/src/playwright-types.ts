@@ -76,6 +76,7 @@ export interface PlaywrightResponse {
   status(): number;
   text(): Promise<string>;
   request?(): { resourceType?(): string };
+  headers?(): Record<string, string>;
 }
 
 /**

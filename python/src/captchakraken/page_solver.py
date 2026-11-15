@@ -2043,6 +2043,16 @@ class PageSolver:
             _log("[animated] challenge is animated — solving it from keyframes")
         return True
 
+    def _dealt_as_video(self, vendor: Vendor) -> bool:
+        """The vendor dealt this board as a video: waiting for it to settle would only wait out a cycle."""
+        if self._known_animated or self._board_motion(vendor) is not True:
+            return False
+        if not self.config.video_solve_enabled:
+            raise AnimatedChallengeError("the board was dealt as a video and video_solve_enabled is off")
+        _log("[animated] the vendor dealt this board as a video — filming it")
+        self._known_animated = True
+        return True
+
     def _arm_animated_probe(self) -> None:
         if self.config.animated_probe_enabled and not self._animated_probe_done:
             self._animated_probe_armed = True
@@ -2052,11 +2062,17 @@ class PageSolver:
         # it a cycle. A text round has nothing to film.
         # A vendor whose boards are all stills is asked at once: filming it cost every slider and hold 4s of a
         # 15s budget (measured on the 5.0 Tier 3 run), and a still answer that fails earns the film next round.
+        # So is a board its vendor dealt as a still file; the burst stays for every board no network has described.
         cfg = self.config
         entry = self._sel.selectors.get(puzzle_source)
         return (cfg.video_solve_enabled and cfg.speculative_burst_enabled and not self._acted_on_board
                 and puzzle_source != Vendor.RECAPTCHA and not text_mode
-                and not (entry is not None and entry.stills_only))
+                and not (entry is not None and entry.stills_only)
+                and self._board_motion(puzzle_source) is not False)
+
+    def _board_motion(self, vendor: Optional[Vendor]) -> Optional[bool]:
+        """What the vendor's network said about the current board (verdicts.MOTION_SIGNALS), or None."""
+        return self._verdicts.board_motion(vendor) if self._verdicts is not None and vendor is not None else None
 
     def _burst(self, element: Any, known: AbstractSet[str] = frozenset(),
                max_ms: Optional[float] = None) -> Tuple[List[Any], List[str], bool, float, bool]:
@@ -2585,7 +2601,7 @@ class PageSolver:
         filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode
         if filmable and not self._known_animated:
             self._step_off_the_board(page, element)
-        is_animated = filmable and self._settle_or_animated(element)
+        is_animated = filmable and (self._dealt_as_video(puzzle_source) or self._settle_or_animated(element))
         # hCaptcha keeps its challenge iframe visible ~2s after the final submit; read as a fresh puzzle it burned ~18s.
         if role == FrameRole.CHALLENGE and self.is_captcha_solved(page):
             _log("solved while waiting for the next round; skipping inference.")

@@ -904,13 +904,21 @@ export class CaptchaKrakenSolver {
     // A reCAPTCHA board is read by its grid below, not filmed.
     const filmable = puzzleSource !== Vendor.RECAPTCHA && !textMode;
     if (filmable && !this.knownAnimated) await this.stepOffTheBoard(page, captchaElement);
+    // What the vendor's network said about this board (verdicts.ts MOTION_SIGNALS); null films it to find out.
+    const dealtMotion = filmable && this.verdicts ? await this.verdicts.boardMotion(puzzleSource) : null;
     let isAnimated = false;
     if (filmable && cfg.videoSolveEnabled === false) {
-      if (await this.ph(Phase.SETTLE, () => this.waitForElementSettled(captchaElement)) === SettleVerdict.ANIMATED) {
+      if (dealtMotion === true
+        || await this.ph(Phase.SETTLE, () => this.waitForElementSettled(captchaElement)) === SettleVerdict.ANIMATED) {
         const e: any = new Error('ANIMATED_CHALLENGE: the challenge never settles and videoSolveEnabled is off.');
         e.animated = true;
         throw e;
       }
+    } else if (filmable && dealtMotion === true && !this.knownAnimated) {
+      // The vendor dealt this board as a video: waiting for it to settle would only wait out a cycle.
+      console.log('[animated] the vendor dealt this board as a video — filming it');
+      await this.releasePendingBurst();
+      isAnimated = this.knownAnimated = true;
     } else if (filmable) {
       isAnimated = await this.classifyByRecording(captchaElement) === SettleVerdict.ANIMATED;
     }
@@ -1050,7 +1058,7 @@ export class CaptchaKrakenSolver {
           }
         }
       }
-      if (!response && this.shouldSpeculate(puzzleSource, textMode)) {
+      if (!response && this.shouldSpeculate(puzzleSource, textMode, dealtMotion)) {
         // Ask the still and film at once. No idle wander: a moving cursor reads as new screens.
         const rec = this.pendingBurst ?? this.startKeyframeBurst(captchaElement);
         this.pendingBurst = null;
@@ -2530,7 +2538,7 @@ export class CaptchaKrakenSolver {
     if (rec) await rec.abandon();
   }
 
-  private shouldSpeculate(puzzleSource: Vendor, textMode: boolean): boolean {
+  private shouldSpeculate(puzzleSource: Vendor, textMode: boolean, dealtMotion: boolean | null = null): boolean {
     if (this.config.videoSolveEnabled === false) return false;
     if (this.config.speculativeBurstEnabled === false) return false;
     if (this.actedOnBoard) return false;
@@ -2540,6 +2548,8 @@ export class CaptchaKrakenSolver {
     // A vendor whose boards are all stills is asked at once: filming it cost every slider and hold 4s of a 15s
     // budget (measured on the 5.0 Tier 3 run), and a still answer that fails earns the film next round.
     if (this.sel.selectors[puzzleSource]?.stillsOnly) return false;
+    // So is a board its vendor dealt as a still file; the burst stays for every board no network has described.
+    if (dealtMotion === false) return false;
     return true;
   }
 
