@@ -15,6 +15,9 @@ export interface PlaywrightElementHandle {
 
   contentFrame(): Promise<PlaywrightFrame | null>;
 
+  /** The frame the element lives in. Optional: an adapter without it never moves the solve into a nested board frame. */
+  ownerFrame?(): Promise<PlaywrightFrame | null>;
+
   boundingBox(): Promise<BoundingBoxRect | null>;
 
   scrollIntoViewIfNeeded(options?: { timeout?: number }): Promise<void>;
