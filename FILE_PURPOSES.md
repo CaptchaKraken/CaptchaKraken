@@ -107,8 +107,15 @@ answers with a frame number the driver then waits for on screen.
 | `docs/assets/logo-light.svg` | Logo for light backgrounds; the root README's default. |
 | `docs/assets/logo-dark.svg` | Logo for dark backgrounds, picked by `prefers-color-scheme`. |
 | `docs/assets/logo-card.png` | Square raster logo, used by the npm, PyPI and MCP package READMEs, which cannot rely on relative paths. |
-| `docs/assets/demo/recaptcha_4x4.webp` | The same, for a reCAPTCHA 4×4 grid. |
-| `docs/assets/demo/geetest_slide.webp` | The same, for a GeeTest slide jigsaw. |
+| `docs/assets/demo/recaptcha_4x4.webp` | Animated clip of a live reCAPTCHA 4×4 tile grid solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/recaptcha_3x3.webp` | Animated clip of a live reCAPTCHA 3×3 tile grid solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/canvas_drag.webp` | Animated clip of a live Canvas drag puzzle solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/geetest_slide.webp` | Animated clip of a live GeeTest slide jigsaw solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/geetest_icon.webp` | Animated clip of a live GeeTest ordered icon click solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/geetest_nine.webp` | Animated clip of a live GeeTest 3×3 photo grid solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/tencent_slide.webp` | Animated clip of a live Tencent slide jigsaw solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/yidun_pictureclick.webp` | Animated clip of a live NetEase Yidun characters in order solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/dingxiang_icon.webp` | Animated clip of a live DingXiang icon click solve, shown in the npm and PyPI READMEs. |
 
 ## `js/` — the TypeScript browser driver (npm `captchakraken`)
 
