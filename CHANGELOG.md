@@ -24,6 +24,16 @@ semantic versioning; v2 is a major, **breaking** release.
 
 ### Changed
 
+- **A Proton board's Verify and Next are read from the board's own frame.** The
+  board, its pieces and its Next sit a frame below the widget's frame; both
+  ports now read those buttons from the frame that holds the photographed board,
+  if that frame is inside the widget's frame.
+- **A slide whose handle is answered on its target presses the page's handle.**
+  On a slide-to-end bar (DataDome) the handle is also the part that moves. When
+  the answer puts the handle point inside the target box and the source on the
+  handle the page names, the press goes to that handle. Before, it pressed empty
+  track and nothing moved.
+
 - **A reCAPTCHA grid's cells come from its markup.** The selector config's new
   `tiles` field names them (`td.rc-imageselect-tile`); both ports read each
   tile's rectangle in the challenge frame and scale it onto the screenshot.

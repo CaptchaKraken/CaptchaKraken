@@ -167,6 +167,24 @@ const handleOf = (at: Locator): Promise<ElementHandle | null> => at.elementHandl
 const handles = async (ats: Locator[]): Promise<ElementHandle[]> => (await Promise.all(ats.map(handleOf))).filter((h): h is ElementHandle => h !== null);
 const frameOf = async (at: Locator): Promise<Frame | null> => (await (await handleOf(at))?.contentFrame().catch(() => null)) ?? null;
 /**
+ * The frame that holds the photographed board, when it is not the widget's own frame, else null. Proton draws its
+ * board, its Next and its pieces a frame below the padded widget frame. Its Verify was looked for in the widget frame,
+ * never found, and the dragged answer was never submitted (fixture 0/4 on 2026-11-14).
+ */
+export const boardFrame = async (element: ElementHandle, frame: Frame | null): Promise<Frame | null> => {
+  if (!frame) return null;
+  const owner = (await element.ownerFrame?.().catch(() => null)) ?? null;
+  if (!owner || owner === frame) return null;
+  // Only a frame INSIDE the widget's: the widget's own iframe element lives in the host page, which is no board.
+  const below = [...(frame.childFrames?.() ?? [])];
+  while (below.length) {
+    const f = below.shift()!;
+    if (f === owner) return owner;
+    below.push(...(f.childFrames?.() ?? []));
+  }
+  return null;
+};
+/**
  * Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave is
  * skipped because Playwright judges an element visible within its own document, whatever its frame's visibility.
  */
@@ -849,7 +867,7 @@ export class CaptchaKrakenSolver {
     this.solveVendor = puzzleSource;
     const frame = await captchaElement.contentFrame();
     this.solveWidgetHost = frame ? hostname(frame) : null;
-    const scope: Scope = frame ?? widget.at;
+    let scope: Scope = frame ?? widget.at;
 
     if (frameRole === FrameRole.CHECKBOX) {
       await this.clickCheckbox(page, widget, frame);
@@ -876,6 +894,7 @@ export class CaptchaKrakenSolver {
 
     const framed = await this.framed(widget, frame, scope);
     captchaElement = framed.element;
+    scope = (await boardFrame(captchaElement, frame)) ?? scope;
     const textMode = framed.answerBox !== null;
 
     // A reCAPTCHA board is read by its grid below, not filmed.
@@ -2900,6 +2919,33 @@ export class CaptchaKrakenSolver {
     await this.gesture(() => this.human.drag(page, center(action.source_bounding_box), center(action.target_bounding_box)));
   }
 
+  /**
+   * The answer's handle point, unless it sits inside its target box and on no named handle while its source sits on
+   * one. A slide-to-end slider (DataDome) moves its handle and nothing else, so the handle is also the source. A model
+   * never shown DataDome answered with the handle on the target and the source on the handle: the press grabbed empty
+   * track and nothing moved (fixture 0/4 on 2026-11-14, client 2383fbf). The page names the handle that moves, so a
+   * press goes there when the model's own point is its target. A handle away from the target is left alone: Yidun
+   * names its jigsaw piece as a handle too, and pressing the piece is not a slide.
+   */
+  private async pressPoint(scope: Scope, elementBox: Box, handle: [number, number], seed: [number, number],
+    target: [number, number, number, number]): Promise<[number, number]> {
+    if (!(target[0] <= handle[0] && handle[0] <= target[2] && target[1] <= handle[1] && handle[1] <= target[3])) return handle;
+    let boxes: Box[];
+    try {
+      const named = await handles(await visible(scope, this.sel.sliderHandle));
+      boxes = (await Promise.all(named.map((el) => el.boundingBox().catch(() => null)))).filter((b): b is Box => !!b);
+    } catch {
+      return handle;
+    }
+    const on = (p: [number, number]): boolean => {
+      const [x, y] = [elementBox.x + p[0], elementBox.y + p[1]];
+      return boxes.some((b) => b.x <= x && x <= b.x + b.width && b.y <= y && y <= b.y + b.height);
+    };
+    if (on(handle) || !on(seed)) return handle;
+    console.log("Slider: the answer's handle is its target, and its source is on the handle the page names; pressing that.");
+    return seed;
+  }
+
   private async findControl(scope: Scope, selectors: readonly string[]): Promise<ElementHandle | null> {
     const [first] = await visible(scope, selectors);
     return first ? handleOf(first) : null;
@@ -3130,6 +3176,8 @@ export class CaptchaKrakenSolver {
     if (action.action === ActionKind.SLIDE) {
       handle = at(action.handle_bounding_box);
       seed = at(action.source_bounding_box);
+      const t = action.target_bounding_box;
+      handle = await this.pressPoint(scope, elementBox, handle, seed, [t[0] * w, t[1] * h, t[2] * w, t[3] * h]);
     } else {
       const slider = await this.findControl(scope, this.sel.sliderHandle);
       const piece = slider ? null : await this.findControl(scope, this.sel.piece);

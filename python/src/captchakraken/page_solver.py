@@ -431,6 +431,26 @@ def _visible(scope: Any, selectors: Sequence[str]) -> List[Any]:
     return found
 
 
+def _board_frame(element: Any, frame: Any) -> Optional[Any]:
+    """The frame that holds the photographed board, when it is not the widget's own frame, else None.
+
+    Proton draws its board, its Next and its pieces a frame below the padded widget frame. Its Verify was looked for
+    in the widget frame, never found, and the dragged answer was never submitted (fixture 0/4 on 2026-11-14).
+    """
+    owner = getattr(element, "owner_frame", None)
+    if frame is None or owner is None:
+        return None
+    try:
+        board = owner()
+        # Only a frame INSIDE the widget's: the widget's own iframe element lives in the host page, which is no board.
+        up = board.parent_frame if board is not None and board != frame else None
+        while up is not None and up != frame:
+            up = up.parent_frame
+    except Exception:
+        return None
+    return board if up is not None else None
+
+
 def _handle_of(at: Any) -> Optional[Any]:
     try:
         return at.element_handle(timeout=HANDLE_TIMEOUT_MS)
@@ -1134,6 +1154,33 @@ class PageSolver:
         with self._gesture():
             self._human.drag(page, center(action["source_bounding_box"]), center(action["target_bounding_box"]))
 
+    def _press_point(self, scope: Any, element_box: Dict[str, float], handle: Tuple[float, float],
+                     seed: Tuple[float, float], target: Tuple[float, float, float, float]) -> Tuple[float, float]:
+        """The answer's handle point, unless it sits on the target and on no named handle while its source sits on one.
+
+        A slide-to-end slider (DataDome) moves its handle and nothing else, so the handle is also the source. A model
+        never shown DataDome answered with the handle on the target and the source on the handle: the press grabbed
+        empty track and nothing moved (fixture 0/4 on 2026-11-14, client 2383fbf). The page names the handle that
+        moves, so a press goes there when the model's own point is inside its target box. A handle away from the target is left
+        alone: Yidun names its jigsaw piece as a handle too, and pressing the piece is not a slide.
+        """
+        if not (target[0] <= handle[0] <= target[2] and target[1] <= handle[1] <= target[3]):
+            return handle
+        try:
+            boxes = [b for b in (h.bounding_box() for h in (_handle_of(f) for f in _visible(scope, self._sel.slider_handle))
+                                 if h is not None) if b]
+        except Exception:
+            return handle
+
+        def on(p: Tuple[float, float]) -> bool:
+            x, y = element_box["x"] + p[0], element_box["y"] + p[1]
+            return any(b["x"] <= x <= b["x"] + b["width"] and b["y"] <= y <= b["y"] + b["height"] for b in boxes)
+
+        if on(handle) or not on(seed):
+            return handle
+        _log("slider: the answer's handle is its target, and its source is on the handle the page names; pressing that")
+        return seed
+
     def _find_control(self, scope: Any, selectors: Sequence[str]) -> Optional[Any]:
         first = next(iter(_visible(scope, selectors)), None)
         return _handle_of(first) if first is not None else None
@@ -1357,6 +1404,9 @@ class PageSolver:
         goal = at(action["target_bounding_box"])
         if action.get("handle_bounding_box"):
             handle, seed = at(action["handle_bounding_box"]), at(action["source_bounding_box"])
+            t = action["target_bounding_box"]
+            handle = self._press_point(scope, element_box, handle, seed,
+                                       (float(t[0]) * w, float(t[1]) * h, float(t[2]) * w, float(t[3]) * h))
         else:
             slider = self._find_control(scope, self._sel.slider_handle)
             piece = None if slider is not None else self._find_control(scope, self._sel.piece)
@@ -2497,6 +2547,7 @@ class PageSolver:
                 self._wait_for_board_painted(element)
 
         element, answer_box = self._framed(widget, frame, scope)
+        scope = _board_frame(element, frame) or scope
         text_mode = answer_box is not None
 
         # A reCAPTCHA board is read by its grid below, not filmed.
