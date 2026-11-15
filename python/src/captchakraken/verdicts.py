@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .kinds import Verdict, Vendor
 
@@ -141,6 +141,50 @@ def read_verdict(url: str, status: int, body: str) -> Optional[RoundVerdict]:
     return RoundVerdict(vendor, verdict) if verdict is not None else None
 
 
+# ── whether a board moves, read off the file it is dealt as ─────────────────
+# Measured 2026-11-14 on the live demos. hCaptcha (46 deals over three sitekeys) loads each board from
+# imgs*.hcaptcha.com/tip/: image/jpeg for every still deal, video/webm for every animated one. GeeTest v4's /load names
+# its challenge in plain JSONP, and only the two svg types moved (22 deals over seven demo pages). A vendor, file or
+# type not listed here gives no hint, and the driver films the board to find out, as it always has.
+_GEETEST_MOVING = frozenset({"svg_icon", "svg_seed"})
+_GEETEST_STILL = frozenset({"slide", "icon", "nine", "match", "winlinze"})
+
+
+def _media_moves(content_type: str, _body: str) -> Optional[bool]:
+    return {"video": True, "image": False}.get(content_type.split("/", 1)[0].strip().lower())
+
+
+def _geetest_type_moves(_content_type: str, body: str) -> Optional[bool]:
+    start, end = body.find("("), body.rfind(")")
+    data = _json(body[start + 1:end]) if 0 <= start < end else None
+    kind = (data.get("data") or {}).get("captcha_type") if isinstance(data, dict) else None
+    return True if kind in _GEETEST_MOVING else False if kind in _GEETEST_STILL else None
+
+
+@dataclass(frozen=True)
+class MotionSignal:
+    # A URL substring naming the response that carries the board, or names its kind.
+    marker: str
+    read: Callable[[str, str], Optional[bool]]
+    needs_body: bool
+
+
+MOTION_SIGNALS: Mapping[Vendor, Sequence[MotionSignal]] = {
+    Vendor.HCAPTCHA: (MotionSignal("hcaptcha.com/tip/", _media_moves, needs_body=False),),
+    Vendor.GEETEST: (MotionSignal("geetest.com/load", _geetest_type_moves, needs_body=True),),
+}
+
+
+def motion_signal_for(url: str) -> Optional[Tuple[Vendor, MotionSignal]]:
+    return next(((vendor, s) for vendor, signals in MOTION_SIGNALS.items() for s in signals if s.marker in url), None)
+
+
+def _deals_a_board(url: str) -> Optional[Vendor]:
+    """The vendor whose deal endpoint this is: what it said about the last board no longer holds."""
+    found = endpoint_for(url)
+    return found[0] if found is not None and found[1].read is _url_only else None
+
+
 def _is_a_scripted_request(response: Any) -> bool:
     try:
         return response.request.resource_type in _SCRIPTED_REQUESTS
@@ -160,6 +204,9 @@ class VerdictLog:
         #: Requests the page's scripts have made. A board that answers a press with none has refused nothing.
         self.exchanges = 0
         self._read = 0
+        #: What each vendor's network said about its current board: True moves, False is still.
+        self._motion: Dict[Vendor, bool] = {}
+        self._deals: Dict[Vendor, int] = {}
         self._page = page
         self._attached = False
         try:
@@ -173,16 +220,37 @@ class VerdictLog:
             url, status = response.url, response.status
             if _is_a_scripted_request(response):
                 self.exchanges += 1
-            if endpoint_for(url) is None:
+            dealt = _deals_a_board(url)
+            if dealt is not None:
+                # Before the body is read: the new board's own file can arrive while it is.
+                self._motion.pop(dealt, None)
+                self._deals[dealt] = self._deals.get(dealt, 0) + 1
+            signal = motion_signal_for(url)
+            # A body read for an earlier deal must not describe a board that has since been replaced.
+            deal = self._deals.get(signal[0], 0) if signal is not None else 0
+            if endpoint_for(url) is None and signal is None:
                 return
             # Decoded leniently, as a browser's text() is: one deal endpoint answers in ciphertext, and its URL alone
             # is the signal.
-            body = response.body().decode("utf-8", "replace") if status != _TOO_MANY_REQUESTS else ""
+            needs_body = endpoint_for(url) is not None or (signal is not None and signal[1].needs_body)
+            body = response.body().decode("utf-8", "replace") if needs_body and status != _TOO_MANY_REQUESTS else ""
+            content_type = (response.headers or {}).get("content-type", "") if signal is not None else ""
         except Exception:
             return
+        if signal is not None and 200 <= status < 300 and self._deals.get(signal[0], 0) == deal:
+            self._note_motion(signal[0], signal[1].read(content_type, body))
         verdict = read_verdict(url, status, body)
         if verdict is not None:
             self.verdicts.append(verdict)
+
+    def _note_motion(self, vendor: Vendor, moves: Optional[bool]) -> None:
+        # One moving file makes the board a moving one: a board may also load a still example.
+        if moves is not None and not self._motion.get(vendor):
+            self._motion[vendor] = moves
+
+    def board_motion(self, vendor: Vendor) -> Optional[bool]:
+        """Whether the vendor dealt its current board as a moving one; None when its network has not said."""
+        return self._motion.get(vendor)
 
     @property
     def listening(self) -> bool:
