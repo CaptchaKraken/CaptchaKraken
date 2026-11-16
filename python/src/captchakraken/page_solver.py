@@ -668,6 +668,8 @@ class PageSolver:
         self._no_progress_rounds = 0
         self._refused_rounds = 0
         self._fallback_board: Optional[str] = None
+        # The click count this board submitted itself at, once a click plan found no Verify.
+        self._submits_at_clicks: Optional[int] = None
         self._exchanges_at_answer = 0
         self._drop_pointer_history()
         self._apply_refusals()
@@ -839,11 +841,20 @@ class PageSolver:
         plan = [_as_dict(a) for a in actions]
         if not plan or any(a.get("action") != ActionKind.CLICK for a in plan):
             return
-        clicks = sum(len(a.get("target_bounding_boxes") or [1]) for a in plan)
+        self._submits_at_clicks = sum(len(a.get("target_bounding_boxes") or [1]) for a in plan)
+        self._hold_fallbacks_to_submit_count()
+
+    def _hold_fallbacks_to_submit_count(self) -> None:
+        """The count is the board's, not one answer's: every plan queued for the board is held to it, the ones a
+        later answer brings included. Applied once, a re-ask's fresh queue had a one-click plan pressed onto a board
+        that submits at two; its mark stayed, the next plan's first press completed the pair, and its second press
+        was refused (Tier 3, Yidun 点击两下, both ports, 2026-11-15)."""
+        clicks = self._submits_at_clicks
         target = getattr(self._solver, "planner", None)
-        if getattr(target, "pointer_fallbacks", None):
-            target.pointer_fallbacks = [f for f in target.pointer_fallbacks if f.get("action") != ActionKind.CLICK
-                                        or len(f.get("points") or []) == clicks]
+        if clicks is None or not getattr(target, "pointer_fallbacks", None):
+            return
+        target.pointer_fallbacks = [f for f in target.pointer_fallbacks if f.get("action") != ActionKind.CLICK
+                                    or len(f.get("points") or []) == clicks]
 
     def _fresh_board(self) -> None:
         # ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer describes the
@@ -856,6 +867,7 @@ class PageSolver:
         self._animated_probe_armed = False
         self._animated_probe_done = False
         self._refused_rounds = 0
+        self._submits_at_clicks = None
         self._acted_on_board = False
         self._submitted_on_board = False
         self._drop_pointer_history()
@@ -2688,6 +2700,7 @@ class PageSolver:
                 raise CaptchaSolveError("could not get bounding box of captcha element")
 
             _log("[answer] " + json.dumps({"actions": [_as_dict(a) for a in actions]}, default=str))
+            self._hold_fallbacks_to_submit_count()
             # A repeated answer is not re-performed: the widget already refused it, and every extra press is
             # behaviour a vendor scores. Re-asking, or asking a recording, is the round's only move.
             # `_note_answer` drops the refused animated answer on its way through, so the next round re-asks.

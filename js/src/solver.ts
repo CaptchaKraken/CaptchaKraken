@@ -163,6 +163,10 @@ export function withAnswerBox(el: ElementHandle, box: ElementHandle, maxGrowth =
 /** Every visible match of `selectors`, in selector order, queried at once. A selector this adapter can't parse is skipped, not fatal. */
 const visible = async (scope: Scope, selectors: readonly string[]): Promise<Locator[]> =>
   (await Promise.all(selectors.map((s) => scope.locator(s).filter({ visible: true }).all().catch(() => [])))).flat();
+/** The presses in a plan made only of clicks; null for a plan with any other action in it. */
+const clickCount = (actions: any[]): number | null => actions.length && actions.every((a) => a?.action === ActionKind.CLICK)
+  ? actions.reduce((n, a) => n + (a.target_bounding_boxes?.length ?? 1), 0)
+  : null;
 const handleOf = (at: Locator): Promise<ElementHandle | null> => at.elementHandle({ timeout: HANDLE_TIMEOUT_MS }).catch(() => null);
 const handles = async (ats: Locator[]): Promise<ElementHandle[]> => (await Promise.all(ats.map(handleOf))).filter((h): h is ElementHandle => h !== null);
 const frameOf = async (at: Locator): Promise<Frame | null> => (await (await handleOf(at))?.contentFrame().catch(() => null)) ?? null;
@@ -383,6 +387,8 @@ export class CaptchaKrakenSolver {
   private fallbackBoardHash: string | null = null;
   /** True only once THIS board refused the plan at the front. Nothing is pressed speculatively. */
   private fallbackArmed = false;
+  /** The click count this board submitted itself at, once a click plan found no Verify; null until then. */
+  private submitsAtClicks: number | null = null;
   private exchangesAtAnswer = 0;
   /** Earlier screens of the same paged puzzle (FunCaptcha), oldest first; the CLI sends them as `--history`. */
   private pointerHistory: string[] = [];
@@ -731,6 +737,7 @@ export class CaptchaKrakenSolver {
           this.fallbackPlans = [];
           this.fallbackBoardHash = null;
           this.fallbackArmed = false;
+          this.submitsAtClicks = null;
           this.dropPointerHistory();
           // Its own second look, but only once IT fails: what armed it was evidence about the previous board,
           // and left set it filmed every still board after a solve's first miss.
@@ -1096,6 +1103,7 @@ export class CaptchaKrakenSolver {
       }
       if (!fromFallback) {
         this.fallbackPlans = response.fallbacks ?? [];
+        this.holdFallbacksToSubmitCount();
         this.fallbackBoardHash = this.fallbackPlans.length ? boardHash : null;
         this.fallbackArmed = false;
       }
@@ -2372,12 +2380,22 @@ export class CaptchaKrakenSolver {
   /** A click board with no Verify submits itself at a count, so a plan of any other count leaves its tiles ticked
    *  and never submits, and the next plan's clicks untick them. */
   private keepPlansOfThisManyClicks(plan: any[]): void {
-    const clicks = (actions: any[]): number | null => actions.length && actions.every((a) => a?.action === ActionKind.CLICK)
-      ? actions.reduce((n, a) => n + (a.target_bounding_boxes?.length ?? 1), 0)
-      : null;
-    const count = clicks(plan);
+    const count = clickCount(plan);
     if (count === null) return;
-    this.fallbackPlans = this.fallbackPlans.filter((other) => [null, count].includes(clicks(other)));
+    this.submitsAtClicks = count;
+    this.holdFallbacksToSubmitCount();
+  }
+
+  /**
+   * The count is the board's, not one answer's: every plan queued for the board is held to it, the ones a later
+   * answer brings included. Applied once, a re-ask's fresh queue had a one-click plan pressed onto a board that
+   * submits at two; its mark stayed, the next plan's first press completed the pair, and its second press was
+   * refused (Tier 3, Yidun 点击两下, both ports, 2026-11-15).
+   */
+  private holdFallbacksToSubmitCount(): void {
+    const count = this.submitsAtClicks;
+    if (count === null) return;
+    this.fallbackPlans = this.fallbackPlans.filter((other) => [null, count].includes(clickCount(other)));
   }
 
   private resetSolveState(): void {
@@ -2385,6 +2403,7 @@ export class CaptchaKrakenSolver {
     this.fallbackPlans = [];
     this.fallbackBoardHash = null;
     this.fallbackArmed = false;
+    this.submitsAtClicks = null;
     this.dropPointerHistory();
     this.repeatedAnswerSeen = false;
     this.knownAnimated = false;
