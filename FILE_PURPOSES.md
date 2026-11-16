@@ -338,6 +338,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 
 | File | Purpose |
 |---|---|
+| `python/tests/test_a_board_that_submits_itself_keeps_its_count.py` | The Python twin: once a click board submits itself at a count, every fallback plan queued for it, a re-ask's included, is held to that count; a fresh board or a new solve forgets it. |
 | `python/tests/test_a_pointer_answer_always_carries_points.py` | Every pointer answer is its points: the click, drag, slide, type, hold and moment shapes the heads decode to. |
 | `python/tests/test_a_pointer_model_is_sent_the_bare_board.py` | A generation-4 model is sent the bare board at `/pointer`, with no prompt and no numbered overlay; its answer is performed like generation 3's. |
 | `python/tests/test_a_grid_is_read_from_the_vendors_tiles.py` | A reCAPTCHA grid's cells come from the challenge frame's tiles, scaled onto the screenshot; fewer than four, or no frame, is no grid. |
