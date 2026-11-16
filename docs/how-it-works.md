@@ -8,7 +8,7 @@ couple of safeguards that keep the model from acting on a stale frame.
 ```
 browser ─▶ detect captcha ─▶ screenshot frame
                                    │
-                    element detector (CNN on the CPU): grid, cells, checkbox
+                    DOM tiles (reCAPTCHA cells), pixel tick-box finder
                                    │  tile boxes
                                    ▼
                     Qwen3.5-9B captcha LoRA on vLLM  ─▶  tile selection
@@ -16,12 +16,16 @@ browser ─▶ detect captcha ─▶ screenshot frame
                     click plan ─▶ execute (human-like) ─▶ re-detect / verify
 ```
 
-- The **element detector** is a small Mask R-CNN that runs on the client's CPU
-  through onnxruntime, with no GPU and no call to the model server. It finds the
-  board's grid and each of its cells, and the tick box of a checkbox widget.
-  `find_grid` and `find_checkbox` read it; they live in the Python port
-  ([`python/`](../python/), the `captchakraken` package). Its weights are
-  downloaded once on first use and checked against a pinned hash.
+- The client runs **no detector model**. A reCAPTCHA grid's cells are read from
+  the vendor's DOM: each `td.rc-imageselect-tile` rectangle in the challenge
+  frame, scaled onto the screenshot (fewer than four tiles, or no frame, is no
+  grid). The tick box of a checkbox widget, when the DOM cannot reach it, is
+  found by `find_checkbox` with plain pixel arithmetic: a flat-colour square
+  closed by an outline. It lives in the Python port ([`python/`](../python/), the
+  `captchakraken` package).
+- A pointer model is always sent the bare board, with nothing drawn on it.
+  Measured on real boards, it scores higher that way than with numbered marks
+  (TwilightV2-2B 72.6% plain vs 68.2% marked; MidnightV2-4B q4 75.1% vs 70.8%).
 - Only the grids the **grid model** was trained on reach it: reCAPTCHA's 3×3 and
   4×4 and hCaptcha's 3×3. Every other vendor's board goes to the model trained on
   that vendor.

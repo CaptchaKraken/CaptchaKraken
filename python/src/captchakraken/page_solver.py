@@ -37,6 +37,8 @@ _SITE_ENV = "CAPTCHA_KRAKEN_SITE"
 _WIDGET_HOST_ENV = "CAPTCHA_KRAKEN_WIDGET_HOST"
 # How often a page that has not drawn its widget yet is looked at again.
 _DETECTION_POLL_MS = 250
+#: How long a widget frame is given to draw the board inside it (`board`) before the frame itself is shot.
+_BOARD_INSIDE_WAIT_MS = 3_000
 
 
 def _log(message: str) -> None:
@@ -69,6 +71,20 @@ def _unlink(path: Optional[str]) -> None:
             os.unlink(path)
         except OSError:
             pass
+
+
+def _shot(take: Any, style: Optional[str], **kwargs: Any) -> Any:
+    """`take(**kwargs)` with `style` when there is one. Playwright before 1.41 has no `style` and raises TypeError;
+    that capture is then taken without it, so an older install keeps solving and only the board hash loses the
+    feedback mask."""
+    if style is None:
+        return take(**kwargs)
+    try:
+        return take(style=style, **kwargs)
+    except TypeError as exc:
+        if "style" not in str(exc):
+            raise
+        return take(**kwargs)
 
 
 def _sha1(path: str) -> str:
@@ -415,6 +431,26 @@ def _visible(scope: Any, selectors: Sequence[str]) -> List[Any]:
     return found
 
 
+def _board_frame(element: Any, frame: Any) -> Optional[Any]:
+    """The frame that holds the photographed board, when it is not the widget's own frame, else None.
+
+    Proton draws its board, its Next and its pieces a frame below the padded widget frame. Its Verify was looked for
+    in the widget frame, never found, and the dragged answer was never submitted (fixture 0/4 on 2026-11-14).
+    """
+    owner = getattr(element, "owner_frame", None)
+    if frame is None or owner is None:
+        return None
+    try:
+        board = owner()
+        # Only a frame INSIDE the widget's: the widget's own iframe element lives in the host page, which is no board.
+        up = board.parent_frame if board is not None and board != frame else None
+        while up is not None and up != frame:
+            up = up.parent_frame
+    except Exception:
+        return None
+    return board if up is not None else None
+
+
 def _handle_of(at: Any) -> Optional[Any]:
     try:
         return at.element_handle(timeout=HANDLE_TIMEOUT_MS)
@@ -432,6 +468,14 @@ def _frame_of(at: Any) -> Optional[Any]:
         return handle.content_frame() if handle else None
     except Exception:
         return None
+
+
+def _still_shown(element: Any) -> bool:
+    """The element is attached and visible; one that cannot be asked is taken as gone."""
+    try:
+        return bool(element.is_visible())
+    except Exception:
+        return False
 
 
 def _host_scopes(page: Any, enclaves: Sequence[str]) -> List[Any]:
@@ -468,6 +512,11 @@ SLIDE_STALL_PX = 1.0
 
 # No prompt and no pictures both read as ready: waiting for `.prompt-text` to exist once paid the whole timeout
 # before every board of a challenge that draws none (tower_stack: 18s a round, 2/2 -> 0/2).
+_TILE_RECTS_JS = """(sel) => Array.from(document.querySelectorAll(sel))
+  .map((e) => e.getBoundingClientRect())
+  .filter((r) => r.width > 0 && r.height > 0)
+  .map((r) => [r.left, r.top, r.right, r.bottom])"""
+
 _BOARD_IMAGES_READY_JS = """({ prompt, images }) => {
     const vis = (el) => !!el && el.getClientRects().length > 0
         && getComputedStyle(el).visibility !== 'hidden';
@@ -494,6 +543,46 @@ def _offset(s: Any) -> Tuple[float, float]:
     return (float(s[0]), float(s[1])) if isinstance(s, (list, tuple)) else (float(s), 0.0)
 
 
+# A band whose background moved less than this (CSS px) did not roll. The first drag after a reload can leave every
+# band where it was, so a zero is read twice before it is believed.
+BAND_STILL_PX = 0.5
+
+_BAND_READ_JS = """(el) => {
+    const cs = getComputedStyle(el);
+    const px = (v) => (/^-?[\\d.]+px/.test((v || '').trim()) ? parseFloat(v) : 0);
+    return [px(cs.backgroundPositionX), px((cs.backgroundSize || '').split(/[\\s,]/)[0])];
+}"""
+
+
+def band_roll(rest: Sequence[Dict[str, float]], now: Sequence[Dict[str, float]], seed: Sequence[float],
+              goal: Sequence[float]) -> Optional[Tuple[int, float]]:
+    """(which band rolled, how far it must roll in all) in CSS px for the answer's two points to meet; None when none did.
+
+    Each read is a band's `x` (how far its picture sits right of where it started), its rows `top`..`bottom` and the
+    `period` its picture repeats at. The answer names a point on one band and where it belongs on the other. When the
+    point's own band rolls it travels to the target; when the target's band rolls the target travels to the point. A
+    band repeats, so the roll is taken the way the probe showed it going, within one turn of its picture.
+    """
+    band, moved = -1, 0.0
+    for i, b in enumerate(now):
+        d = b["x"] - (rest[i]["x"] if i < len(rest) else b["x"])
+        if abs(d) > abs(moved):
+            band, moved = i, d
+    if band < 0 or abs(moved) < BAND_STILL_PX:
+        return None
+    b = now[band]
+
+    def on(y: float) -> bool:
+        return b["top"] <= y < b["bottom"]
+
+    roll = seed[0] - goal[0] if on(goal[1]) and not on(seed[1]) else goal[0] - seed[0]
+    if b["period"] > 0:
+        roll %= b["period"]
+        if moved < 0 and roll > 0:
+            roll -= b["period"]
+    return band, roll
+
+
 def _stalled(before: Tuple[Any, Sequence[float]], now: Tuple[Any, Sequence[float]], k: float) -> bool:
     """Did the handle travel while the part stayed put? Each side is (travel, the part's point) of one look."""
     (ax, ay), (bx, by) = _offset(before[0]), _offset(now[0])
@@ -514,9 +603,8 @@ class PageSolver:
         self._solver = solver or CaptchaSolver(**solver_kwargs)
         self._human: Humanizer = resolve_humanizer(self.config)
         self._sel = SelectorTable(self.config.custom_selectors, config=self.config.selectors)
-        # The config's `detector`: which element detector finds this solver's grids and tick boxes.
-        from .pointer import detector as _detector
-        _detector.configure(self._sel.config.detector)
+        # A stylesheet that takes every verdict message out of a photograph, laid out as if it had never been shown.
+        self._feedback_hidden = "\n".join(f"{s} {{ display: none !important; }}" for s in self._sel.feedback)
         self._last_submit_frame_hash: Optional[str] = None
         self._deadline_ms: Optional[float] = None
         self._budget: Optional[PhaseBudget] = None
@@ -580,6 +668,8 @@ class PageSolver:
         self._no_progress_rounds = 0
         self._refused_rounds = 0
         self._fallback_board: Optional[str] = None
+        # The click count this board submitted itself at, once a click plan found no Verify.
+        self._submits_at_clicks: Optional[int] = None
         self._exchanges_at_answer = 0
         self._drop_pointer_history()
         self._apply_refusals()
@@ -709,13 +799,17 @@ class PageSolver:
         if planner is not None and hasattr(planner, "pointer_history"):
             planner.pointer_history = self._pointer_history
 
-    def _board_hash(self, element: Any, shot: str, filmed: bool) -> str:
-        """The board's identity, always from a plain photograph: a filmed frame of an unchanged board differs in bytes."""
-        if not filmed:
-            return _sha1(shot)
+    def _board_hash(self, element: Any) -> str:
+        """The board's identity, from a photograph of its own.
+
+        A filmed frame of an unchanged board differs in bytes, and so does one wearing the vendor's verdict message,
+        a toast that comes and goes over the same board (see TRIBAL_KNOWLEDGE.md). The message is left out of the
+        picture, not waited out.
+        """
         plain = _tmp_png("board")
         try:
-            self._screenshot(element, plain, timeout_ms=self.config.element_screenshot_timeout_ms)
+            self._screenshot(element, plain, timeout_ms=self.config.element_screenshot_timeout_ms,
+                             style=self._feedback_hidden)
             return _sha1(plain)
         finally:
             _unlink(plain)
@@ -747,11 +841,20 @@ class PageSolver:
         plan = [_as_dict(a) for a in actions]
         if not plan or any(a.get("action") != ActionKind.CLICK for a in plan):
             return
-        clicks = sum(len(a.get("target_bounding_boxes") or [1]) for a in plan)
+        self._submits_at_clicks = sum(len(a.get("target_bounding_boxes") or [1]) for a in plan)
+        self._hold_fallbacks_to_submit_count()
+
+    def _hold_fallbacks_to_submit_count(self) -> None:
+        """The count is the board's, not one answer's: every plan queued for the board is held to it, the ones a
+        later answer brings included. Applied once, a re-ask's fresh queue had a one-click plan pressed onto a board
+        that submits at two; its mark stayed, the next plan's first press completed the pair, and its second press
+        was refused (Tier 3, Yidun 点击两下, both ports, 2026-11-15)."""
+        clicks = self._submits_at_clicks
         target = getattr(self._solver, "planner", None)
-        if getattr(target, "pointer_fallbacks", None):
-            target.pointer_fallbacks = [f for f in target.pointer_fallbacks if f.get("action") != ActionKind.CLICK
-                                        or len(f.get("points") or []) == clicks]
+        if clicks is None or not getattr(target, "pointer_fallbacks", None):
+            return
+        target.pointer_fallbacks = [f for f in target.pointer_fallbacks if f.get("action") != ActionKind.CLICK
+                                    or len(f.get("points") or []) == clicks]
 
     def _fresh_board(self) -> None:
         # ONE FILM, ONE BOARD — enforced where the board actually changes. The recorded answer describes the
@@ -764,6 +867,7 @@ class PageSolver:
         self._animated_probe_armed = False
         self._animated_probe_done = False
         self._refused_rounds = 0
+        self._submits_at_clicks = None
         self._acted_on_board = False
         self._submitted_on_board = False
         self._drop_pointer_history()
@@ -788,14 +892,30 @@ class PageSolver:
 
     # ── the shared half, in-process ──────────────────────────────────────
 
-    def _find_grid(self, image_path: str) -> Optional[List[Sequence[int]]]:
-        from .tool_calls.find_grid import find_grid
+    def _dom_grid(self, element: Any, image_path: str) -> Optional[List[Sequence[int]]]:
+        """The board's tiles as (x0, y0, x1, y1) pixels of `image_path`, a screenshot of `element`, in reading order.
 
-        try:
-            return find_grid(image_path)
-        except Exception as exc:
-            _debug(f"find_grid failed: {exc}")
+        Read from the vendor's own markup, not the picture: a tile is where the challenge frame placed it. A tile's
+        rectangle is in the frame's CSS pixels, which start at the iframe's corner, so it scales straight onto the
+        screenshot. None when the vendor names no tiles or the frame shows none.
+        """
+        sel = self._sel.selectors.get(Vendor.RECAPTCHA)
+        dims = _read_png_dimensions(image_path)
+        if sel is None or not sel.tiles or not dims:
             return None
+        try:
+            frame = element.content_frame()
+            box = element.bounding_box()
+            if frame is None or not box or box["width"] <= 0 or box["height"] <= 0:
+                return None
+            rects = frame.evaluate(_TILE_RECTS_JS, ",".join(sel.tiles))
+        except Exception as exc:
+            _debug(f"reading the grid's tiles failed: {exc}")
+            return None
+        sx, sy = dims[0] / box["width"], dims[1] / box["height"]
+        boxes = [(int(round(x0 * sx)), int(round(y0 * sy)), int(round(x1 * sx)), int(round(y1 * sy)))
+                 for x0, y0, x1, y1 in rects or ()]
+        return boxes if len(boxes) >= 4 else None
 
     def _has_movement(self, path_a: str, path_b: str, threshold: float) -> bool:
         from .image_processor import ImageProcessor
@@ -1054,21 +1174,123 @@ class PageSolver:
         with self._gesture():
             self._human.drag(page, center(action["source_bounding_box"]), center(action["target_bounding_box"]))
 
+    def _press_point(self, scope: Any, element_box: Dict[str, float], handle: Tuple[float, float],
+                     seed: Tuple[float, float], target: Tuple[float, float, float, float]) -> Tuple[float, float]:
+        """The answer's handle point, unless it sits on the target and on no named handle while its source sits on one.
+
+        A slide-to-end slider (DataDome) moves its handle and nothing else, so the handle is also the source. A model
+        never shown DataDome answered with the handle on the target and the source on the handle: the press grabbed
+        empty track and nothing moved (fixture 0/4 on 2026-11-14, client 2383fbf). The page names the handle that
+        moves, so a press goes there when the model's own point is inside its target box. A handle away from the target is left
+        alone: Yidun names its jigsaw piece as a handle too, and pressing the piece is not a slide.
+        """
+        if not (target[0] <= handle[0] <= target[2] and target[1] <= handle[1] <= target[3]):
+            return handle
+        try:
+            boxes = [b for b in (h.bounding_box() for h in (_handle_of(f) for f in _visible(scope, self._sel.slider_handle))
+                                 if h is not None) if b]
+        except Exception:
+            return handle
+
+        def on(p: Tuple[float, float]) -> bool:
+            x, y = element_box["x"] + p[0], element_box["y"] + p[1]
+            return any(b["x"] <= x <= b["x"] + b["width"] and b["y"] <= y <= b["y"] + b["height"] for b in boxes)
+
+        if on(handle) or not on(seed):
+            return handle
+        _log("slider: the answer's handle is its target, and its source is on the handle the page names; pressing that")
+        return seed
+
     def _find_control(self, scope: Any, selectors: Sequence[str]) -> Optional[Any]:
         first = next(iter(_visible(scope, selectors)), None)
         return _handle_of(first) if first is not None else None
 
-    def _track_outside(self, scope: Any, vendor: Any, element: Any, at: Any = None) -> Optional[Any]:
-        """The track of the first of the vendor's own slider handles that is visible with its centre outside the widget.
+    def _framed(self, widget: Widget, frame: Any, scope: Any) -> Tuple[Any, Optional[Any]]:
+        """The element whose screenshot the model is shown for `widget`, and the text box when it is typed.
 
-        It is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
+        This is the whole of what the client PHOTOGRAPHS, kept in one place so the capture gate can check it without
+        solving: the widget, else the board its frame pads (Proton), widened by a text box beside it (BotDetect) or
+        by the vendor's bar or slider track outside it (Yidun).
+        """
+        element, puzzle_source = widget.element, widget.vendor
+        # A widget frame that pads its board (Proton) is photographed by the board inside it.
+        board = self._board_inside(frame, puzzle_source)
+        if board is not None:
+            _log("the widget frame pads its board; photographing the board itself")
+            element = board
+
+        # Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
+        answer_box = None if puzzle_source in VENDORS_WITH_BESPOKE_HANDLING else self._answer_box(scope, widget.at)
+        if answer_box is not None:
+            _log("widget has a text box; solving as a distorted-text captcha")
+            element = _WithAnswerBox(element, answer_box)
+        elif puzzle_source not in VENDORS_WITH_BESPOKE_HANDLING:
+            track = self._track_outside(scope, puzzle_source, element, widget.at)
+            if track is not None:
+                _log("the vendor bar or slider track sits outside the widget; photographing the two as one")
+                element = _WithAnswerBox(element, track, SLIDER_TRACK_MAX_GROWTH)
+        return element, answer_box
+
+    def capture(self, page: Any) -> Optional[Tuple[Widget, Any]]:
+        """The widget on `page` and the element the solver would photograph for it, without solving anything.
+
+        For release gates: whether the client finds a vendor's widget, by its selectors and URL markers, and frames
+        the whole board, is checkable on a live page at no inference cost. A checkbox widget is returned with its own
+        element; it is clicked, not photographed.
+        """
+        self._page = page
+        widget = self.detect_captcha(page)
+        if widget is None:
+            return None
+        if widget.role == FrameRole.CHECKBOX:
+            return widget, widget.element
+        frame = widget.element.content_frame()
+        if widget.vendor != Vendor.RECAPTCHA:
+            self._wait_for_board_painted(widget.element)
+        element, _ = self._framed(widget, frame, frame or widget.at)
+        return widget, element
+
+    def _board_inside(self, frame: Any, vendor: Any) -> Optional[Any]:
+        """The vendor's own `board`, found in the widget's frame or a frame nested in it, or None.
+
+        Proton's widget frame is 682x600 with its 370x534 `.protonCaptchaContainer` centred two frames down; the
+        pointer trained on that container, and shown the padded frame it repeated one answer until the solve gave up
+        (live 0/2 on 2026-11-13). The board is drawn a moment after the frame, so it is waited for briefly.
+        """
+        own = getattr(self._sel.selectors.get(vendor), "board", None)
+        if not own or frame is None:
+            return None
+        deadline = _now() + _BOARD_INSIDE_WAIT_MS
+        while True:
+            try:
+                frames = [frame]
+                while frames:
+                    where = frames.pop(0)
+                    for found in _visible(where, own):
+                        handle = _handle_of(found)
+                        if handle is not None and handle.bounding_box():
+                            return handle
+                    frames.extend(where.child_frames)
+            except Exception:
+                return None
+            if _now() >= deadline:
+                return None
+            _delay(_DETECTION_POLL_MS)
+
+    def _track_outside(self, scope: Any, vendor: Any, element: Any, at: Any = None) -> Optional[Any]:
+        """The vendor's own `bar`, else the track of its first slider handle, visible with its centre outside the widget.
+
+        The bar is what Yidun's click modes need: `.yidun_control` holds the 请依次点击 prompt that names the marks and
+        their order, and on the bare `.yidun_panel` the pointer was shown neither (live 0/6 on 2026-11-13). The
+        handle's track covers vendors that name only a handle. Either is looked for in the widget, then in its parent and grandparent: Yidun's `.yidun_slider` is in
         `.yidun_control`, a sibling of the `.yidun_panel` the widget resolves to. A match inside the widget is passed
         over, not taken as the answer: Yidun lists its piece (`.yidun_jigsaw`, in the panel) as a handle too. The
         track (the handle's parent) is returned rather than the handle, whose box moves as it slides and would
         resize the frame.
         """
-        own = getattr(self._sel.selectors.get(vendor), "slider_handle", None)
-        if not own:
+        mine = self._sel.selectors.get(vendor)
+        kinds = [(sels, is_bar) for sels, is_bar in ((getattr(mine, "bar", None), True), (getattr(mine, "slider_handle", None), False)) if sels]
+        if not kinds:
             return None
         # Widening the shot is a nicety: a scope that cannot be searched (a detached frame) leaves the shot as it was.
         try:
@@ -1076,16 +1298,17 @@ class PageSolver:
             a = element.bounding_box()
             if not a:
                 return None
-            for where in wheres:
-                for found in _visible(where, own):
-                    handle = _handle_of(found)
-                    b = handle.bounding_box() if handle is not None else None
-                    if not b:
-                        continue
-                    cx, cy = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
-                    if a["x"] <= cx <= a["x"] + a["width"] and a["y"] <= cy <= a["y"] + a["height"]:
-                        continue
-                    return _handle_of(found.locator("xpath=..")) or handle
+            for own, is_bar in kinds:
+                for where in wheres:
+                    for found in _visible(where, own):
+                        handle = _handle_of(found)
+                        b = handle.bounding_box() if handle is not None else None
+                        if not b:
+                            continue
+                        cx, cy = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+                        if a["x"] <= cx <= a["x"] + a["width"] and a["y"] <= cy <= a["y"] + a["height"]:
+                            continue
+                        return handle if is_bar else (_handle_of(found.locator("xpath=..")) or handle)
         except Exception:
             return None
         return None
@@ -1124,13 +1347,71 @@ class PageSolver:
         dims = _read_png_dimensions(shot)
         return dims[0] / css_width if dims and css_width > 0 else 1.0
 
+    def _bands_of(self, scope: Any, vendor: Optional[Vendor]) -> List[Any]:
+        """The vendor's `band` strips inside the widget, in table order; none for a vendor that names none."""
+        own = getattr(self._sel.selectors.get(vendor), "band", ()) if vendor is not None else ()
+        return _handles(_visible(scope, own)) if own else []
+
+    @staticmethod
+    def _read_bands(bands: Sequence[Any]) -> List[Dict[str, float]]:
+        """Where each band's picture sits now (see `band_roll`), in page CSS px."""
+        out = []
+        for band in bands:
+            try:
+                box = band.bounding_box() or {}
+            except Exception:
+                box = {}
+            try:
+                x, period = band.evaluate(_BAND_READ_JS)
+            except Exception:
+                x, period = 0.0, 0.0
+            top = float(box.get("y", 0.0))
+            out.append({"x": float(x) + float(box.get("x", 0.0)), "top": top,
+                        "bottom": top + float(box.get("height", 0.0)),
+                        "period": float(period) or float(box.get("width", 0.0))})
+        return out
+
+    def _band_rolling(self, bands: Sequence[Any], rest: Sequence[Dict[str, float]], seed: Sequence[float],
+                      goal: Sequence[float]) -> Optional[Tuple[int, float]]:
+        """Which band the probe rolled and how far it must roll in all (`band_roll`); a zero is read again first."""
+        rolling = band_roll(rest, self._read_bands(bands), seed, goal)
+        if rolling is None:
+            self._human.pause(PauseKind.PROBE)
+            rolling = band_roll(rest, self._read_bands(bands), seed, goal)
+        if rolling is not None:
+            _log(f"slider: band {rolling[0] + 1} of {len(bands)} rolls; it must roll {rolling[1]:.1f}px")
+        else:
+            _log("slider: no band rolled with the handle; steering by pixels")
+        return rolling
+
+    def _band_step(self, bands: Sequence[Any], rest: Sequence[Dict[str, float]], rolling: Tuple[int, float],
+                   s: float, rolled: List[Tuple[float, float]], k: float, seed: Sequence[float],
+                   bounds: Sequence[float], tol: float) -> Dict[str, Any]:
+        """One look of the slide loop for a band, in the tracker's terms (shot pixels): how far the rolling band has
+        gone against how far it must, and the travel that closes the gap at the roll per handle pixel seen so far."""
+        i, roll = rolling
+        d = (self._read_bands(bands)[i]["x"] - rest[i]["x"]) * k
+        rolled.append((s, d))
+        ss = sum(t * t for t, _ in rolled)
+        slope = sum(t * m for t, m in rolled) / ss if ss > 0 else 0.0
+        gap = roll * k - d
+        nxt = min(max(s + gap / slope, bounds[0]), bounds[1]) if slope else s
+        return {"pos": (seed[0] + d, seed[1]), "params": (0.0, d, 0.0), "error": abs(gap), "grabbed": False,
+                "kind": "slide", "next": nxt, "done": abs(gap) <= tol, "correlation": 1.0,
+                "observation": {"s": s, "params": [0.0, d, 0.0]}}
+
     def _execute_slide(self, page: Any, element: Any, scope: Any, action: Dict[str, Any],
-                       element_box: Dict[str, float]) -> bool:
+                       element_box: Dict[str, float], vendor: Optional[Vendor] = None) -> bool:
         """Press the handle, nudge it to see what it moves, then steer that part's point onto its target.
 
         A generation-3 answer names all three points, so nothing is read from the page but pixels. A generation-2
         answer names only the target: its handle comes from the selector table and the part it moves is whatever
         moved most. That path goes when the last generation-2 model does.
+
+        A vendor that names `band`s (DingXiang's restore) is steered by the DOM instead: the handle rolls one of two
+        picture strips, which one and how far per handle pixel are dealt per board, and the answer's point sits on one
+        strip and its target on the other, so there is no single moving part for pixels to follow. The strips'
+        background offsets say exactly how far the one that rolls has gone.
         """
         from .tool_calls.slide_tracker import TrackingError, slide_step
 
@@ -1143,6 +1424,9 @@ class PageSolver:
         goal = at(action["target_bounding_box"])
         if action.get("handle_bounding_box"):
             handle, seed = at(action["handle_bounding_box"]), at(action["source_bounding_box"])
+            t = action["target_bounding_box"]
+            handle = self._press_point(scope, element_box, handle, seed,
+                                       (float(t[0]) * w, float(t[1]) * h, float(t[2]) * w, float(t[3]) * h))
         else:
             slider = self._find_control(scope, self._sel.slider_handle)
             piece = None if slider is not None else self._find_control(scope, self._sel.piece)
@@ -1158,23 +1442,32 @@ class PageSolver:
         probe = SLIDE_PROBE_PX if goal[0] >= (seed or handle)[0] else -SLIDE_PROBE_PX
         timeout = self.config.element_screenshot_timeout_ms
         first, probed, current = (_tmp_png("slide") for _ in range(3))
+        bands = self._bands_of(scope, vendor) if seed is not None else []
         try:
             self._smooth_move(page, *press)
             self._human.press(page)
             self._human.pause(PauseKind.GRAB)
-            self._screenshot(element, first, timeout_ms=timeout)
+            rest = self._read_bands(bands) if bands else None
+            self._screenshot(element, first, timeout_ms=timeout, scale="css")
             k = self._shot_scale(first, w)
             self._smooth_move(page, press[0] + probe, press[1])
             self._human.pause(PauseKind.PROBE)
-            self._screenshot(element, probed, timeout_ms=timeout)
+            self._screenshot(element, probed, timeout_ms=timeout, scale="css")
             ask = dict(probe_s=probe * k, goal=(goal[0] * k, goal[1] * k), seed=seed and (seed[0] * k, seed[1] * k),
                        handle=(handle[0] * k, handle[1] * k), bounds=(-handle[0] * k, (w - handle[0]) * k),
                        tol=self.config.slide_tolerance_px * k)
+            rolling = None
+            if rest is not None:
+                origin = (element_box["x"], element_box["y"])
+                rolling = self._band_rolling(bands, rest, (origin[0] + seed[0], origin[1] + seed[1]),
+                                             (origin[0] + goal[0], origin[1] + goal[1]))
             look, s, history, moves = probed, probe * k, [], 0
+            rolled: List[Tuple[float, float]] = []
             last: Optional[Tuple[Any, Sequence[float]]] = None
             while True:
                 try:
-                    reply = slide_step(first, probed, look, s=s, history=history, **ask)
+                    reply = (self._band_step(bands, rest, rolling, s, rolled, k, ask["seed"], ask["bounds"], ask["tol"])
+                             if rolling is not None else slide_step(first, probed, look, s=s, history=history, **ask))
                 except TrackingError as exc:
                     _log(f"slider: {exc}; released where the handle is")
                     break
@@ -1196,8 +1489,10 @@ class PageSolver:
                 dx, dy = _offset(s)
                 self._smooth_move(page, press[0] + dx / k, press[1] + dy / k)
                 self._human.pause(PauseKind.PROBE)
-                self._screenshot(element, current, timeout_ms=timeout)
-                look, moves = current, moves + 1
+                moves += 1
+                if rolling is None:
+                    self._screenshot(element, current, timeout_ms=timeout, scale="css")
+                    look = current
             self._human.pause(PauseKind.SETTLE)
         finally:
             try:
@@ -1328,12 +1623,18 @@ class PageSolver:
             if any(self._has_value(scopes, s) for s in self._sel.response) or _visible_in(scopes, self._sel.accepted):
                 return True
             for probe in self._sel.widget_probes:
-                checked = self._sel.selectors[probe.vendor].checked
-                if probe.role != FrameRole.CHECKBOX or not checked:
-                    continue
-                at = next(iter(_visible_in(scopes, (probe.selector,))), None)
-                if at is not None and self._checked_in(at, checked):
-                    return True
+                vendor = self._sel.selectors[probe.vendor]
+                if probe.role == FrameRole.CHECKBOX and vendor.checked:
+                    at = next(iter(_visible_in(scopes, (probe.selector,))), None)
+                    if at is not None and self._checked_in(at, vendor.checked):
+                        return True
+                elif probe.role == FrameRole.CHALLENGE and vendor.accepted:
+                    # A vendor that draws its whole challenge in one frame (DataDome) paints its pass in there,
+                    # then reloads the page about a second later: unread, the next round filmed the closing frame.
+                    at = next(iter(_visible_in(scopes, (probe.selector,))), None)
+                    frame = _frame_of(at) if at is not None else None
+                    if frame is not None and _visible(frame, (vendor.accepted,)):
+                        return True
         except Exception:
             pass
         return False
@@ -1430,7 +1731,7 @@ class PageSolver:
             _delay(_DETECTION_POLL_MS)
 
     def _checkbox_on_screen(self, element: Any) -> Optional[Tuple[float, float]]:
-        """One capture and the element detector, no model: a point inside the tick box, or None when none is drawn."""
+        """One capture and plain pixel arithmetic, no model: a point inside the tick box, or None when none is drawn."""
         from .tool_calls.find_checkbox import find_checkbox
 
         box = element.bounding_box()
@@ -1462,30 +1763,46 @@ class PageSolver:
                     return
                 _delay(self.config.post_solve_outcome_poll_ms)
 
-    def _get_verify_button(self, scope: Any) -> Optional[Any]:
-        return self._find_control(scope, self._sel.submit)
+    def _get_verify_button(self, scope: Any, typed_at: Any = None) -> Optional[Any]:
+        """The widget's Verify, else, after a typed answer, the vendor-named submit beside its text box.
+
+        BotDetect's Validate sits in the widget's fieldset, outside the 280x50 `.BDC_CaptchaDiv`, like `#captchaCode`
+        (see `_answer_box`). Without it the code was typed and never sent: live 0/9 on 2026-11-13. Only vendor-named
+        selectors widen, so a login form's own Submit is never pressed.
+        """
+        inside = self._find_control(scope, self._sel.submit)
+        if inside is not None or typed_at is None:
+            return inside
+        around = (self._find_control(typed_at.locator(f"xpath={axis}"), self._sel.submit_vendor)
+                  for axis in ("ancestor::fieldset[1]", "ancestor::form[1]"))
+        return next((found for found in around if found is not None), None)
 
     # ── frames and polling ───────────────────────────────────────────────
 
     def _screenshot(self, element: Any, path: str, timeout_ms: Optional[int] = None,
-                    animations: str = "disabled") -> None:
+                    animations: str = "disabled", style: Optional[str] = None, scale: str = "device") -> None:
         """Every capture the driver takes: the whole viewport, cropped here to the element.
 
         Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at
         the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
         capture repaints nothing, and measured twice as fast. Short timeout; `disabled` freezes CSS animation,
-        so bursts and the keyframe gate pass `allow`.
+        so bursts and the keyframe gate pass `allow`. `style` is CSS applied for this capture only. `scale="css"`
+        takes one pixel per CSS pixel: the slide loop's choice, since on a phone (DPR 2.6) a device-pixel frame is
+        seven times the pixels and its tracking took 4.7 s of an 11.6 s solve.
         """
         timeout = 2_500 if timeout_ms is None else timeout_ms
         page = self._page
         view = _viewport_of(page)
         rect = self._rect_in_view(element, view) if _layout_is_the_viewport(page, view) else None
+        # Device scale is Playwright's default, so only the slide loop's css changes the call.
+        kw: Dict[str, Any] = {"scale": scale} if scale != "device" else {}
         if rect is None:
             # Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
             # coordinates, so the element photographs itself.
-            element.screenshot(path=path, timeout=timeout, animations=animations)
+            _shot(element.screenshot, style, path=path, timeout=timeout, animations=animations, **kw)
             return
-        png = crop_png(page.screenshot(timeout=timeout, animations=animations), rect, view["width"])
+        png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations, **kw), rect,
+                       view["width"])
         with open(path, "wb") as fh:
             fh.write(png)
 
@@ -1552,6 +1869,10 @@ class PageSolver:
                     self._screenshot(element, path)
                 except Exception:
                     _unlink(path)
+                    # A widget that has closed will not come back to be shot. Retrying it spent the whole
+                    # 9s settle window on DataDome's frame closing over an accepted slide; the JS port returns.
+                    if not _still_shown(element):
+                        return None
                     _delay(interval_ms)
                     continue
                 frames.append(path)
@@ -1594,7 +1915,7 @@ class PageSolver:
         def judge(frames, elapsed):
             if len(frames) < 2:
                 return None
-            boxes = self._find_grid(frames[1])
+            boxes = self._dom_grid(element, frames[1])
             if not boxes:
                 return False if elapsed >= cfg.grid_load_timeout_ms else None
             states = self._grid_cell_states(frames[0], frames[1], boxes)
@@ -1645,7 +1966,7 @@ class PageSolver:
         path = _tmp_png("findgrid")
         try:
             self._screenshot(element, path, timeout_ms=self.config.element_screenshot_timeout_ms)
-            boxes = self._find_grid(path)
+            boxes = self._dom_grid(element, path)
             dims = _read_png_dimensions(path)
             if not boxes or len(boxes) not in (9, 16) or not dims:
                 return None
@@ -1721,6 +2042,10 @@ class PageSolver:
             # that recording brings back is what decides — `_known_animated` is set from it, not from here.
             if not self._animated_probe_armed or self._animated_probe_done:
                 return False
+            if not _still_shown(element):
+                # Closing, most often over an accepted answer: there is nothing to film, and the loop head asks
+                # whether it was accepted.
+                raise AnimatedChallengeError("the widget closed before its second look could film it")
             self._animated_probe_done, self._animated_probe_armed = True, False
             _log("[animated] a second look at a board that did not solve as a still — recording it")
         self._known_animated = animated
@@ -1730,6 +2055,16 @@ class PageSolver:
             _log("[animated] challenge is animated — solving it from keyframes")
         return True
 
+    def _dealt_as_video(self, vendor: Vendor) -> bool:
+        """The vendor dealt this board as a video: waiting for it to settle would only wait out a cycle."""
+        if self._known_animated or self._board_motion(vendor) is not True:
+            return False
+        if not self.config.video_solve_enabled:
+            raise AnimatedChallengeError("the board was dealt as a video and video_solve_enabled is off")
+        _log("[animated] the vendor dealt this board as a video — filming it")
+        self._known_animated = True
+        return True
+
     def _arm_animated_probe(self) -> None:
         if self.config.animated_probe_enabled and not self._animated_probe_done:
             self._animated_probe_armed = True
@@ -1737,9 +2072,19 @@ class PageSolver:
     def _should_speculate(self, puzzle_source: Vendor, text_mode: bool) -> bool:
         # reCAPTCHA is excluded: its dynamic 3x3 replaces tiles in place, so a burst would film a fade and call
         # it a cycle. A text round has nothing to film.
+        # A vendor whose boards are all stills is asked at once: filming it cost every slider and hold 4s of a
+        # 15s budget (measured on the 5.0 Tier 3 run), and a still answer that fails earns the film next round.
+        # So is a board its vendor dealt as a still file; the burst stays for every board no network has described.
         cfg = self.config
+        entry = self._sel.selectors.get(puzzle_source)
         return (cfg.video_solve_enabled and cfg.speculative_burst_enabled and not self._acted_on_board
-                and puzzle_source != Vendor.RECAPTCHA and not text_mode)
+                and puzzle_source != Vendor.RECAPTCHA and not text_mode
+                and not (entry is not None and entry.stills_only)
+                and self._board_motion(puzzle_source) is not False)
+
+    def _board_motion(self, vendor: Optional[Vendor]) -> Optional[bool]:
+        """What the vendor's network said about the current board (verdicts.MOTION_SIGNALS), or None."""
+        return self._verdicts.board_motion(vendor) if self._verdicts is not None and vendor is not None else None
 
     def _burst(self, element: Any, known: AbstractSet[str] = frozenset(),
                max_ms: Optional[float] = None) -> Tuple[List[Any], List[str], bool, float, bool]:
@@ -2260,23 +2605,15 @@ class PageSolver:
             with self._phase(Phase.BOARD_PAINT):
                 self._wait_for_board_painted(element)
 
-        # Only the DOM can tell a typed captcha from a click puzzle; hCaptcha and reCAPTCHA never type.
-        answer_box = None if puzzle_source in VENDORS_WITH_BESPOKE_HANDLING else self._answer_box(scope, widget.at)
+        element, answer_box = self._framed(widget, frame, scope)
+        scope = _board_frame(element, frame) or scope
         text_mode = answer_box is not None
-        if text_mode:
-            _log("widget has a text box; solving as a distorted-text captcha")
-            element = _WithAnswerBox(element, answer_box)
-        elif puzzle_source not in VENDORS_WITH_BESPOKE_HANDLING:
-            track = self._track_outside(scope, puzzle_source, element, widget.at)
-            if track is not None:
-                _log("the slider track sits outside the widget; photographing the two as one")
-                element = _WithAnswerBox(element, track, SLIDER_TRACK_MAX_GROWTH)
 
         # A reCAPTCHA board is read by its grid below, not filmed.
         filmable = puzzle_source != Vendor.RECAPTCHA and not text_mode
         if filmable and not self._known_animated:
             self._step_off_the_board(page, element)
-        is_animated = filmable and self._settle_or_animated(element)
+        is_animated = filmable and (self._dealt_as_video(puzzle_source) or self._settle_or_animated(element))
         # hCaptcha keeps its challenge iframe visible ~2s after the final submit; read as a fresh puzzle it burned ~18s.
         if role == FrameRole.CHALLENGE and self.is_captcha_solved(page):
             _log("solved while waiting for the next round; skipping inference.")
@@ -2298,7 +2635,7 @@ class PageSolver:
 
         shot = _tmp_png("captcha")
         self._round_board = None
-        performed = slid = answered = have_shot = False
+        performed = slid = answered = typed = have_shot = False
         all_usage: List[Dict[str, Any]] = []
         keyframe_dir: Optional[str] = None
         try:
@@ -2341,7 +2678,7 @@ class PageSolver:
                 if not have_shot:
                     with self._phase(Phase.SCREENSHOT):
                         self._screenshot(element, shot, timeout_ms=self.config.element_screenshot_timeout_ms)
-                self._guard_fallbacks_to_board(self._board_hash(element, shot, filmed=have_shot))
+                self._guard_fallbacks_to_board(self._board_hash(element))
                 if self._should_speculate(puzzle_source, text_mode):
                     actions, all_usage, keyframe_dir = self._speculate(element, shot, puzzle_source, retry_mode, text_mode)
                     is_animated = keyframe_dir is not None
@@ -2363,6 +2700,7 @@ class PageSolver:
                 raise CaptchaSolveError("could not get bounding box of captcha element")
 
             _log("[answer] " + json.dumps({"actions": [_as_dict(a) for a in actions]}, default=str))
+            self._hold_fallbacks_to_submit_count()
             # A repeated answer is not re-performed: the widget already refused it, and every extra press is
             # behaviour a vendor scores. Re-asking, or asking a recording, is the round's only move.
             # `_note_answer` drops the refused animated answer on its way through, so the next round re-asks.
@@ -2390,7 +2728,7 @@ class PageSolver:
                             self._human.pause(PauseKind.BETWEEN)
                     performed = answered = True
                 elif kind == ActionKind.SLIDE or (kind == ActionKind.DRAG and not action.get("source_bounding_box")):
-                    if self._execute_slide(page, element, scope, action, element_box):
+                    if self._execute_slide(page, element, scope, action, element_box, puzzle_source):
                         performed = slid = True
                 elif kind == ActionKind.DRAG:
                     if await_kf:
@@ -2399,7 +2737,7 @@ class PageSolver:
                     performed = answered = True
                 elif kind == ActionKind.TYPE:
                     if self._execute_type(page, scope, action, widget.at):
-                        performed = answered = True
+                        performed = answered = typed = True
                 elif kind == ActionKind.HOLD:
                     # The widget submits itself when the hold completes, like a slide on release.
                     self._execute_hold(page, action, element_box, element, self._sel.selectors[widget.vendor].hold_completes)
@@ -2419,7 +2757,8 @@ class PageSolver:
             # `done` plan still presses Verify/Skip. FunCaptcha's answer is the click itself: an arrow pages and
             # Submit submits. The generic Verify fallback would submit the page an arrow just turned to.
             submits = self._submitted_on_board if slid else answered or not performed
-            verify_button = self._get_verify_button(scope) if submits and puzzle_source != Vendor.FUNCAPTCHA else None
+            verify_button = (self._get_verify_button(scope, widget.at if typed else None)
+                             if submits and puzzle_source != Vendor.FUNCAPTCHA else None)
             if verify_button:
                 _log(f"clicking Verify to submit ({puzzle_source}).")
                 self._move_and_click(page, verify_button)

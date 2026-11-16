@@ -13,7 +13,7 @@ Where CaptchaKraken is headed. Legend: 🟢 shipped · 🟡 in progress · ⚪ p
 | 🧩 **Click / drag puzzles** | 🟢 shipped | The v2 pointer model returns pixel-space click and drag actions. |
 | 🪶 **v2 models** | 🟢 shipped | Sunlight 0.8B, Twilight 2B, and Midnight 4B in merged, LoRA, and GGUF forms. Midnight Q4 is the one-command default. All are public on [Hugging Face](https://huggingface.co/collections/CaptchaKraken/captchakraken-v2). |
 | 🎥 **Video challenge support** | 🟢 shipped | Animated challenges are clipped into frames and answered with the action's time; the driver acts at that moment. |
-| 🎯 **v2 pointer architecture** | 🟢 shipped | A CNN element detector and a pointer model behind `/v1/pointer`, with one-command vLLM self-hosting. |
+| 🎯 **v2 pointer architecture** | 🟢 shipped | A pointer model behind `/v1/pointer` that reads the bare board, with one-command vLLM self-hosting. The CNN detector is no longer part of the client. |
 | 📱 **Mobile / touch input** | 🟢 shipped | `humanization: 'mobile'` dispatches real touch events with finger kinematics, in a Chromium page with `hasTouch` or at a real handset over Appium / WebdriverIO / Selenium. See [Usage → How it moves](./usage.md#how-it-moves--mouse-mobile-none-or-yours). |
 
 ## 🟡 In progress

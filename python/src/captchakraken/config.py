@@ -246,10 +246,6 @@ def serve_model() -> str:
     return os.getenv("CAPTCHA_BASE_MODEL") or selfhost_active().get("model_path") or base_model()
 
 
-def pointer_detector() -> Optional[str]:
-    return os.getenv("CAPTCHA_POINTER_DETECTOR") or selfhost_active().get("detector")
-
-
 def max_model_len() -> int:
     return int(os.getenv("VLLM_MAX_MODEL_LEN", "65536"))
 

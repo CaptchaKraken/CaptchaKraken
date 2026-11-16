@@ -89,8 +89,7 @@ round is billed separately.
 
 ## 2B. Self-host
 
-One command installs **Midnight V2 4B Q4**, its element detector, and the tested
-vLLM stack. Use a CUDA GPU with at least 8 GB of free VRAM.
+One command installs **Midnight V2 4B Q4** and the tested vLLM stack. Use a CUDA GPU with at least 8 GB of free VRAM.
 
 ```bash
 npx captchakraken fetch       # or: pipx run captchakraken fetch
@@ -276,15 +275,11 @@ Advanced — only to change **which** model is served:
 | `CAPTCHA_LORA_ADAPTER` | Model repository used for downloads and metadata | `CaptchaKraken/MidnightV2-4B-q4` |
 | `CAPTCHA_LORA_REVISION` | Model git revision | `main` |
 | `CAPTCHA_LORA_NAME` | Name the client sends as `model` | `captcha-pointer` |
-| `CAPTCHA_POINTER_DETECTOR` | v2 CNN element detector | set by `captchakraken fetch` |
 | `VLLM_PORT` | Local server port | `8000` |
 | `VLLM_GPU_MEMORY_UTILIZATION` | Fraction of VRAM vLLM may use | `0.80` |
 | `VLLM_EXTRA_ARGS` | Extra flags for the local server | empty |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` never auto-starts a local server | `1` |
 | `CAPTCHA_KRAKEN_STATE_DIR` | Where the pidfile, log, and credentials live | `~/.captchakraken` |
-| `CAPTCHA_KRAKEN_DETECTOR` | A local element-detector `.onnx` to run instead of the released one | the released weights |
-| `CAPTCHA_KRAKEN_DETECTOR_MODEL` | `auto`, `standard` or `lite`; overrides `detector` in `captchakraken.config.json` | the config's `detector` (`auto`: `lite` on two usable CPUs or fewer, else `standard` when one board times under 200 ms) |
-| `HF_TOKEN` | A Hugging Face token, sent only when downloading the detector weights from a private copy of their repo | unset: the download sends no credential |
 | `CAPTCHA_KRAKEN_SESSION` | Groups rounds of one solve for billing | set per solve by both drivers |
 | `CAPTCHA_KRAKEN_VENDOR`, `CAPTCHA_KRAKEN_SITE` | Which captcha vendor and which site (hostname only) a hosted solve was for; sent to the hosted API only | set per solve by both drivers |
 | `CAPTCHA_REPORT_OUTCOME` | `0` stops the driver telling the hosted API whether each solve was accepted | `1` |
@@ -360,7 +355,8 @@ Common setup problems:
 ## If you write your own client
 
 Do not skip this. Grid screenshots must be sent with **cell numbers drawn on
-them**. The solver runs `find_grid`, renders `get_numbered_grid_overlay` (red
+them**. The solver reads the cell boxes from the reCAPTCHA challenge frame's
+tiles (`td.rc-imageselect-tile`), renders `get_numbered_grid_overlay` (red
 labels, top-right, cells `1..N`), and sends that image. The model reads those
 labels — it was never trained to invent a numbering.
 

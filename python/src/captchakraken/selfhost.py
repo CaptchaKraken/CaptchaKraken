@@ -20,9 +20,6 @@ from typing import Callable, List, NamedTuple, Optional, Sequence
 
 from . import __version__, config, server_manager
 
-DETECTOR_REPO = "CaptchaKraken/CaptchaKrakenV2-CNN-large"
-DETECTOR_FILE = "detector_r18.pt"
-
 ALWAYS_ON = "always"
 FIRST_SOLVE = "first-solve"
 
@@ -241,18 +238,15 @@ def install_client(python: Path, extra: str = "") -> None:
 
 _DOWNLOAD = """
 import sys
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import snapshot_download
 print(snapshot_download(sys.argv[1]))
-print(hf_hub_download(sys.argv[2], sys.argv[3]))
 """
 
 
-def download(python: Path, repo: str) -> "tuple[str, str]":
-    """(model directory, detector file). Stored as paths so a server never asks the Hub again."""
-    out = subprocess.run([str(python), "-c", _DOWNLOAD, repo, DETECTOR_REPO, DETECTOR_FILE],
-                         stdout=subprocess.PIPE, text=True, check=True)
-    model_path, detector = out.stdout.strip().splitlines()[-2:]
-    return model_path, detector
+def download(python: Path, repo: str) -> str:
+    """The model directory. Stored as a path so a server never asks the Hub again."""
+    out = subprocess.run([str(python), "-c", _DOWNLOAD, repo], stdout=subprocess.PIPE, text=True, check=True)
+    return out.stdout.strip().splitlines()[-1]
 
 
 def free_port(start: int = 8000) -> int:
@@ -267,13 +261,12 @@ def free_port(start: int = 8000) -> int:
     raise RuntimeError(f"No free port between {start} and {start + 99}.")
 
 
-def settings(choice: Choice, model_path: str, detector: str, saved: dict) -> dict:
+def settings(choice: Choice, model_path: str, saved: dict) -> dict:
     small = choice.gpu.total_mib < SMALL_CARD_MIB
     return {
         "model": choice.model.repo,
         "title": choice.model.title,
         "model_path": model_path,
-        "detector": detector,
         "gpu": choice.gpu.index,
         "gpu_name": choice.gpu.name,
         "startup": choice.startup,
@@ -332,10 +325,10 @@ def install(choice: Choice, saved: dict) -> dict:
     python = make_venv(config.runtime_dir())
     install_client(python, "[serve]")
 
-    _step(f"Downloading {choice.model.title} and the element detector")
-    model_path, detector = download(python, choice.model.repo)
+    _step(f"Downloading {choice.model.title}")
+    model_path = download(python, choice.model.repo)
 
-    values = settings(choice, model_path, detector, saved)
+    values = settings(choice, model_path, saved)
     write_settings(values)
     config.selfhost.cache_clear()
 

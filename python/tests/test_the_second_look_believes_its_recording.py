@@ -12,6 +12,13 @@ from captchakraken.page_solver import PageSolver, PageSolverConfig, Widget
 from captchakraken.solver import AnimatedRecording
 
 
+class _Shown:
+    """A board still on the page: the second look only films an element that is."""
+
+    def is_visible(self):
+        return True
+
+
 def _armed(verdict: SettleVerdict) -> PageSolver:
     solver = PageSolver(config=PageSolverConfig())
     solver._reset_animated_state()
@@ -22,21 +29,21 @@ def _armed(verdict: SettleVerdict) -> PageSolver:
 
 def test_the_probe_records_without_declaring_the_board_animated():
     solver = _armed(SettleVerdict.SETTLED)
-    assert solver._settle_or_animated(object()) is True, "an armed probe still buys its recording"
+    assert solver._settle_or_animated(_Shown()) is True, "an armed probe still buys its recording"
     assert solver._known_animated is False, "the probe called the board animated before filming it"
 
 
 def test_a_measured_animation_needs_no_probe():
     solver = _armed(SettleVerdict.ANIMATED)
-    assert solver._settle_or_animated(object()) is True
+    assert solver._settle_or_animated(_Shown()) is True
     assert solver._known_animated is True
 
 
 def test_the_probe_is_spent_once():
     solver = _armed(SettleVerdict.SETTLED)
-    solver._settle_or_animated(object())
+    solver._settle_or_animated(_Shown())
     solver._arm_animated_probe()
-    assert solver._settle_or_animated(object()) is False, "a second recording per solve"
+    assert solver._settle_or_animated(_Shown()) is False, "a second recording per solve"
 
 
 def test_the_recording_reports_whether_the_board_moved(monkeypatch):
@@ -64,11 +71,12 @@ def _round(tmp_path, monkeypatch, moved: bool, verdict: SettleVerdict = SettleVe
     recording = AnimatedRecording(frames=[], fps=10.0, keyframes=None, keyframe_paths=keyframes)
     monkeypatch.setattr(solver, "_record_keyframes", lambda _el: (recording, str(tmp_path), moved))
     monkeypatch.setattr(solver, "_should_speculate", lambda *_a: False)
-    monkeypatch.setattr(solver, "_get_verify_button", lambda _scope: None)
+    monkeypatch.setattr(solver, "_get_verify_button", lambda _scope, *_: None)
     monkeypatch.setattr(solver, "_get_keyframe_solution", lambda _recording: (asked.append("video"), ([], []))[1])
     monkeypatch.setattr(solver, "_get_solution", lambda *_a, **_kw: (asked.append("still"), ([], []))[1])
 
-    element = type("El", (), {"content_frame": lambda self: None, "bounding_box": lambda self: None})()
+    element = type("El", (), {"content_frame": lambda self: None, "bounding_box": lambda self: None,
+                               "is_visible": lambda self: True})()
     widget = Widget(element=element, at=object(), vendor=Vendor.GEETEST, role=FrameRole.CHALLENGE)
     solver._solve_single(object(), widget, None)
     return asked

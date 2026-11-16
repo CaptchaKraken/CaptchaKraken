@@ -5,7 +5,7 @@ download, no server to run.
 
 The hosted API answers the current client with **Midnight V2 4B Q4**, the same
 public weights `captchakraken fetch` installs. It uses the v2 pointer endpoint,
-`POST /v1/pointer`, and the downloadable CNN element detector.
+`POST /v1/pointer`, and is sent the bare board.
 
 An older client keeps using its registered chat-completion model because its
 prompts and inference protocol belong to that generation. There is no silent
@@ -131,6 +131,29 @@ readable, and the page's done-signal otherwise. Hosted requests also carry
 hostnames only, never a path or query. A failed report never changes the
 solve's result; it is logged as a warning. Set `CAPTCHA_REPORT_OUTCOME=0` to
 send none.
+
+### Checking the balance
+
+The key you solve with can also read what it has left:
+
+```bash
+curl -H "Authorization: Bearer $CAPTCHA_KRAKEN_API_KEY" https://api.captchakraken.com/v1/balance
+# {"object":"balance","balance_credits":74250,"balance_usd":"9.90","credits_per_usd":7500,"unlimited":false,"top_up_url":"..."}
+```
+
+It costs nothing. Every solve response also carries `X-CK-Balance-Credits` and
+`X-CK-Balance-USD`, the balance after that round was charged, so a long run can
+watch it without a second request. Card auto-recharge on the dashboard tops the
+balance up before it runs out.
+
+`GET /v1/usage`, with the same key, returns the last 30 days: totals, a daily
+series, recent rounds (including any served free and why) and top-ups.
+
+### Rate limits
+
+Every response carries `X-RateLimit-Limit` (requests you may send at once),
+`X-RateLimit-Remaining` and `X-RateLimit-Reset` (seconds until the allowance
+is full again). A `429` also carries `Retry-After`.
 
 ### Model names
 

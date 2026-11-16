@@ -3,6 +3,121 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [5.0.0] - 2026-11-13
+
+### Removed (breaking)
+
+- **The element detector.** The client runs no CNN. `onnxruntime` is no longer
+  a dependency and no detector weights are downloaded; `captchakraken fetch`
+  downloads the model alone. The pointer models score higher on the bare board
+  than with the detector's numbered marks (TwilightV2-2B 72.6% against 68.2%,
+  MidnightV2-4B q4 75.1% against 70.8%, on 1,067 real boards), so every board is
+  now sent bare.
+- `find_grid`, `config.pointer_detector()`, the CLI commands `find-grid`,
+  `detect-selected`, `get-numbered-grid` and `grid-cell-states`, and the
+  `CAPTCHA_POINTER_DETECTOR`, `CAPTCHA_KRAKEN_DETECTOR` and
+  `CAPTCHA_KRAKEN_DETECTOR_MODEL` variables. A `detector` key in
+  `captchakraken.config.json` is ignored rather than refused.
+- The letter detector beside the pointer model: a typed code is read by the
+  model alone. The pointer server ignores `marked`, returns `"elements": []`, and
+  still accepts `--detector` and `--letters` so an existing unit file starts it.
+
+### Changed
+
+- **A vendor whose boards are all stills is asked at once.** A new
+  `stills_only` field in `captchakraken.config.json` marks the fourteen vendors
+  that deal only sliders, holds, clicks and typed codes (Tencent, Yidun, Yandex,
+  Lemin, Prosopo, MTCaptcha, BotDetect, HUMAN, AWS WAF, CaptchaFox, DingXiang,
+  FunCaptcha, Proton, DataDome). Their boards are no longer filmed for 4 seconds
+  to check for animation before the model's answer is used. hCaptcha, GeeTest,
+  CyberSiara and an unlisted widget are still filmed.
+- **hCaptcha, GeeTest and CyberSiara say whether a board moves, and the burst
+  is only the fallback.** Both ports read it off the vendor's own network.
+  hCaptcha deals each board as a file from `imgs*.hcaptcha.com/tip/`:
+  `image/jpeg` or `image/png` for a still, `video/webm` for an animated one (a
+  GIF says nothing). CyberSiara's `GenerateCaptcha` names a `.gif` board, and it
+  always moves. GeeTest v4's `/load` names its
+  `captcha_type`, and only `svg_icon` and `svg_seed` move. Measured over 46 live
+  hCaptcha deals and 22 GeeTest deals, the file type matched the board's motion
+  every time. A board dealt as a still is now asked at once, and one dealt as a
+  video is filmed without first waiting for it to settle. A board dealt before
+  `solve()` started, which the listener never heard, is read off each frame's
+  resource timeline instead: what loaded after the vendor's latest deal, and
+  what loaded it. A board no network has described, an unknown GeeTest type, and every other vendor keep the 4 s
+  burst.
+- **The slide loop tracks frames in CSS pixels.** On a phone (device pixel ratio
+  2.6) each frame had seven times the pixels, and tracking them took 4.7 s of an
+  11.6 s Tencent solve. A Tencent slide on a Pixel 7 now takes 5.8 s, down from
+  16.8 s.
+- **DataDome's pass is read inside its frame.** `accepted` is now also looked for
+  inside the vendor's challenge frame, and DataDome's is
+  `.sliderContainer.slider-success .slider`. Before, the pass went unseen, the
+  page reloaded, and the next round spent its 9-second settle window
+  photographing a closing frame. The Python port no longer retries screenshots of
+  a widget that has closed, and no longer arms a second look at one. The JS port
+  already stopped.
+
+- **A Proton board's Verify and Next are read from the board's own frame.** The
+  board, its pieces and its Next sit a frame below the widget's frame; both
+  ports now read those buttons from the frame that holds the photographed board,
+  if that frame is inside the widget's frame.
+- **A slide whose handle is answered on its target presses the page's handle.**
+  On a slide-to-end bar (DataDome) the handle is also the part that moves. When
+  the answer puts the handle point inside the target box and the source on the
+  handle the page names, the press goes to that handle. Before, it pressed empty
+  track and nothing moved.
+
+- **A reCAPTCHA grid's cells come from its markup.** The selector config's new
+  `tiles` field names them (`td.rc-imageselect-tile`); both ports read each
+  tile's rectangle in the challenge frame and scale it onto the screenshot.
+- **The tick box is found with pixel arithmetic:** the largest flat, square
+  region closed in by an outline, with no model. It must also be empty, flat and
+  neutral inside, sit near the widget's leading edge, and sit on the widget's
+  flat panel on two sides, so a square on a puzzle board is never taken for one:
+  0 hits on 4,329 real boards, against 777 for the first version, and every
+  tick box found on 1,128 labelled reCAPTCHA, hCaptcha, Turnstile and CaptchaFox
+  widgets, in every theme, size and scale. A label or warning crowding one side
+  of the box no longer hides it (German and Russian widgets).
+- **`captchakraken fetch` downloads licensed weights** with the caller's own
+  Hugging Face credentials (`hf auth login` or `HF_TOKEN`) instead of refusing
+  them. A refusal by the Hub names the licence and points at the hosted API.
+- **The board's identity ignores verdict toasts.** The hash that tells one board
+  from the next is taken from its own screenshot, with every feedback selector
+  (each vendor's banners, plus generic `[role="alert"]` and toast names) hidden.
+  A "try again" toast over an unchanged board no longer makes it a new board.
+  The model's screenshot is unchanged. The Puppeteer adapter injects the style
+  itself, and Playwright before 1.41, which has no screenshot `style`, retakes
+  the shot without it.
+- **DingXiang's restore slide is steered by its bands.** A new `band` selector
+  field names the two picture strips; the slide reads their background offsets
+  and stops when the strip has rolled as far as the answer's two points are
+  apart. A probe that rolls neither strip falls back to the pixel tracker.
+- **Betas publish from `dev`:** a push to `dev` publishes a pre-release
+  (`X.Y.Zb<run>` on PyPI, `X.Y.Z-beta.<run>` under npm's `beta` tag) unless
+  that version is already final. Plain installs get the last final.
+
+### Added
+
+- **A `board` selector field** names the board inside a vendor's frame, and
+  `capture(page)` (both ports) returns the box a solve would photograph,
+  without asking the model.
+- **CyberSiara is a vendor:** the `#myModal .pluginPopups` modal, its
+  `#Input_Captcha` box and its refresh are found and typed into. It has no
+  submit button; it checks itself on the fourth letter. The models are not
+  trained on it yet, so it is detected but not yet solved.
+
+### Fixed
+
+- **Proton is shot as its board,** two frames down, not the whole padded
+  682x600 frame around it.
+- **Yidun's click modes are shot with their prompt bar** (`.yidun_control`),
+  which names the marks to click and their order.
+- **A typed BotDetect answer is sent.** Its Validate button sits beside the
+  widget, outside the scope where a submit was looked for, so the code was typed
+  and never sent. After a typed answer the lookup also searches the widget's own
+  fieldset or form, and only for the vendor's named submit selectors, so a host
+  page's Submit is never pressed.
+
 ## [4.2.0] - 2026-11-12
 
 ### Added

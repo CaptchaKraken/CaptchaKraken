@@ -108,14 +108,17 @@ async function serveFixtures(): Promise<{ url: string; close: () => Promise<void
 
 async function onTheRecordedPage(run: (page: any) => Promise<void>): Promise<void> {
   const served = await serveFixtures();
-  const browser = await playwright.chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  // The server is open before the browser is: a launch that throws (no browser at this Playwright's revision)
+  // must still close it, or node --test waits on the open socket until it is killed instead of failing.
+  let browser: any;
   try {
+    browser = await playwright.chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await page.goto(served.url);
     await page.frameLocator('iframe[src*="/live/"]').frameLocator('iframe[src*="frame=challenge"]').locator('.button-submit').waitFor();
     await run(page);
   } finally {
-    await browser.close();
+    await browser?.close();
     await served.close();
   }
 }

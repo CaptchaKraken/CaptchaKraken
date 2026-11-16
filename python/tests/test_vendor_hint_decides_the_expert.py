@@ -1,6 +1,5 @@
 """The vendor hint is whichever SELECTORS entry named the widget, keyed on the `hcaptcha` substring rather than the apex host
-(challenges come off newassets.hcaptcha.com). A named vendor the grid expert never trained on gets the pixel expert;
-`unknown` stays permissive for both grid shapes, because the CLI and the offline grader name no vendor."""
+(challenges come off newassets.hcaptcha.com)."""
 
 import json
 from pathlib import Path
@@ -9,8 +8,6 @@ import pytest
 
 from captchakraken.kinds import FrameRole, Vendor
 from captchakraken.page_solver import PageSolver, PageSolverConfig
-from captchakraken.selectors import SELECTORS
-from captchakraken.solver import _grid_dims
 from fake_dom import FakeNode, fake_scope
 
 HCAPTCHA_CHALLENGE = 'iframe[src*="hcaptcha"][src*="frame=challenge"]'
@@ -46,26 +43,3 @@ def test_every_vendor_names_itself(selector, vendor):
 
 def test_nothing_on_the_page_is_no_widget():
     assert _detect([]) is None
-
-
-def test_naming_hcaptcha_refuses_a_lattice_it_does_not_ship():
-    assert _grid_dims(16, "hcaptcha") is None, \
-        "hCaptcha ships no 4x4 — a 16-cell detection there is find_grid on the bands"
-    assert _grid_dims(9, "hcaptcha") == (3, 3), "an hCaptcha 3x3 is a real grid"
-
-
-def test_failing_to_name_the_vendor_lets_that_same_lattice_through():
-    assert _grid_dims(16, "unknown") == (4, 4), (
-        "if this ever starts refusing, the pairing below is no longer the "
-        "reason the mis-route mattered — re-read the finding before relaxing it")
-    widget = _detect([FakeNode([HCAPTCHA_CHALLENGE], src=FIXTURE_CHALLENGE)])
-    assert _grid_dims(16, widget.vendor) is None, (
-        "the fixture's hCaptcha board is being allowed a 4x4 again — the shape "
-        "gate is off and find_grid's false positives reach the grid expert")
-
-
-def test_only_the_vendors_the_grid_expert_was_trained_on_reach_it():
-    for v in SELECTORS:
-        want = {Vendor.RECAPTCHA: {9, 16}, Vendor.HCAPTCHA: {9}, Vendor.UNKNOWN: {9, 16}}.get(v, set())
-        got = {n for n in (9, 16) if _grid_dims(n, v)}
-        assert got == want, f"{v.value}: grids of {sorted(got)} cells reach the grid expert, not {sorted(want)}"

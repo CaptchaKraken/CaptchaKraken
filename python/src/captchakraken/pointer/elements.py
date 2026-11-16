@@ -2,7 +2,7 @@
 
 An element is {"class", "box": [x0, y0, x1, y1], "score", "mask": ((x, y), bool
 array)} in board pixels; the mask is cropped to its own extent and placed at
-(x, y), as `detector.Detector.detect` returns it. Numbers are 1-based in reading
+(x, y), as an element detector returns it. Numbers are 1-based in reading
 order (rows of ~12 px, then left to right), so a grid's cells number row-major.
 
 `element_at` is the inverse question training asks: which numbered element does

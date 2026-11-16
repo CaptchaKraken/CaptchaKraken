@@ -64,8 +64,8 @@ captchakraken path/to/captcha.png    # prints a JSON click plan
 
 Other CLI modes, all printing JSON: `captchakraken server start|stop|status|run`
 manages a local vLLM server, `captchakraken fetch` updates weights and the
-serving stack together, and the detector tool calls (`find-grid`, `find-checkbox`,
-`get-numbered-grid`, `detect-selected`, …) are exposed one per subcommand. The
+serving stack together, and the pixel tool calls (`find-checkbox`,
+`grid-cell-states-fixed`) are exposed one per subcommand. The
 module docstring of `captchakraken/cli.py` lists every mode with its arguments.
 
 ## 4. Errors
@@ -92,8 +92,9 @@ succeed.
 
 ## 5. If you drive the model yourself
 
-Grid screenshots must be sent with **cell numbers drawn on them** — the client
-runs `find_grid`, renders the numbered overlay, and sends that image, because
+Grid screenshots sent to a chat model must have **cell numbers drawn on them** —
+the client reads the cell boxes from the reCAPTCHA challenge frame's tiles,
+renders the numbered overlay, and sends that image, because
 the model reads those labels and was never trained to invent a numbering.
 Without the overlay reCAPTCHA 4×4 scores zero without erroring. Image area is
 also clamped into the `pixel_budget` the model declares in

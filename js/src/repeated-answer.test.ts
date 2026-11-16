@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -185,18 +186,9 @@ test('a page that cannot be listened to keeps the repeat as its only evidence', 
 });
 
 test('a filmed picture and a plain one of the same board are one board', async () => {
+  // The identity takes its own plain photograph, so whatever frame the model was handed never decides it.
   const { solver } = solverWithFixedAnswer();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'board-'));
   const plain = Buffer.from('the board, as the element paints it');
   solver.shot = async (_el: unknown, p: string) => fs.writeFileSync(p, plain);
-  const filmed = path.join(dir, 'filmed.png');
-  const shot = path.join(dir, 'shot.png');
-  fs.writeFileSync(filmed, 'the same board, out of a recording');
-  fs.writeFileSync(shot, plain);
-
-  try {
-    assert.equal(await solver.boardHash(null, filmed, true), await solver.boardHash(null, shot, false));
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  assert.equal(await solver.boardHash(null), crypto.createHash('sha1').update(plain).digest('hex'));
 });

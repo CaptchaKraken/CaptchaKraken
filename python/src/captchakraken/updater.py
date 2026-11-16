@@ -35,29 +35,52 @@ def _pip_upgrade_cmd() -> "list[str]":
     return [sys.executable, "-m", "pip", "install", "--upgrade", *ENGINE_PACKAGES]
 
 
+PLANS_URL = "https://captchakraken.com/plans"
+
+
 class LicensedModelError(RuntimeError):
     pass
 
 
-def _refuse_licensed(repo_id: str) -> None:
-    """A licensed model has no Hub repo; the Hub's RepositoryNotFoundError reads as "you are not logged in".
-
-    A `private` model is deliberately NOT refused: its 401 is the true answer, and pre-empting it would stop
-    the holder of an authorised token from fetching weights they are entitled to.
-    """
-    from . import prompts
-
-    if not prompts.is_licensed(repo_id):
-        return
-    raise LicensedModelError(
-        f"{repo_id} is a LICENSED model: its weights are not published and "
-        "there is nothing at that Hub id to download.\n"
-        "  Reach it through the hosted API (https://api.captchakraken.com), "
-        "which needs no weights at all,\n"
-        "  or ask us about a self-hosting licence: https://captchakraken.com/contact\n"
-        "  To fetch a downloadable model instead, unset CAPTCHA_LORA_ADAPTER "
-        "or point it at a published one."
+def _licence_message(repo_id: str) -> str:
+    return (
+        f"{repo_id} needs an Abyss Licence: its weights are in a gated Hugging Face repo, "
+        "and the Hub refused this download.\n"
+        f"  Buy a licence at {PLANS_URL}, add your Hugging Face username on that page,\n"
+        "  then sign in as that account (`hf auth login`, or HF_TOKEN) and run fetch again.\n"
+        "  Or use the hosted API (https://api.captchakraken.com), which needs no weights at all."
     )
+
+
+def _hub_refused(error: "BaseException | None") -> bool:
+    """snapshot_download wraps some refusals (a 403 on the repo lookup) in LocalEntryNotFoundError, so walk the causes."""
+    from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
+
+    while error is not None:
+        # GatedRepoError is a RepositoryNotFoundError, which is also how the Hub answers a token it will not show the repo to.
+        if isinstance(error, RepositoryNotFoundError):
+            return True
+        if isinstance(error, HfHubHTTPError) and error.response is not None \
+                and error.response.status_code in (401, 403):
+            return True
+        error = error.__cause__
+    return False
+
+
+def _download_licensed(repo_id: str) -> None:
+    """In-process, not through `hf download`, so a refusal arrives as an exception that names the licence."""
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as e:
+        raise RuntimeError(f'Fetching {repo_id} needs huggingface_hub: pip install "captchakraken[serve]"') from e
+
+    _log(f"$ snapshot_download({repo_id!r})")
+    try:
+        snapshot_download(repo_id)
+    except Exception as e:
+        if _hub_refused(e):
+            raise LicensedModelError(_licence_message(repo_id)) from e
+        raise
 
 
 def _needs_auth(*repo_ids: "str | None") -> "list[str]":
@@ -65,6 +88,13 @@ def _needs_auth(*repo_ids: "str | None") -> "list[str]":
     from . import prompts
 
     return [r for r in repo_ids if r and prompts.requires_auth(r)]
+
+
+def _hub_id(model: str) -> str:
+    """A served name such as `abyss` is not a Hub id; download the repo it names."""
+    from . import prompts
+
+    return prompts.canonical_model_id(model) or model
 
 
 def plan(
@@ -75,13 +105,9 @@ def plan(
     base: "str | None" = None,
     lora: "str | None" = None,
 ) -> dict:
-    base_model = base or config.base_model()
-    lora_adapter = lora or config.lora_adapter()
+    base_model = _hub_id(base or config.base_model())
+    lora_adapter = _hub_id(lora or config.lora_adapter())
     base_url = config.base_url()
-
-    if weights:
-        _refuse_licensed(lora_adapter)
-        _refuse_licensed(base_model)
 
     repos = [lora_adapter, base_model] if weights else []
     return {
@@ -127,12 +153,16 @@ def fetch(
         return {**p, "dry_run": True}
 
     if weights:
+        from . import prompts
+
         _log(f"Pulling latest weights from {p['hf_org']} (+ base) …")
         for repo in p["needs_auth"]:
-            _log(f"{repo} is a PRIVATE repo — this needs a HuggingFace token "
-                 "authorised on it (`hf auth login`, or HF_TOKEN).")
-        for cmd in p["downloads"]:
-            _run(cmd)
+            _log(f"{repo} needs a Hugging Face token authorised on it (`hf auth login`, or HF_TOKEN).")
+        for repo, cmd in zip((p["lora_adapter"], p["base_model"]), p["downloads"]):
+            if prompts.is_licensed(repo):
+                _download_licensed(repo)
+            else:
+                _run(cmd)
 
     if engine:
         _log("Upgrading the vLLM serving stack …")

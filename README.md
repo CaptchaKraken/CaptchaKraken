@@ -355,8 +355,8 @@ partially-correct grid answer is a rejected captcha — taken over the full
 customer path (HTTPS → gateway → vLLM) rather than a local checkpoint, against
 captures the adapter has never trained on.
 
-> **Grids are sent with the cell numbers drawn on.** `solver.py` runs
-> `find_grid`, renders `get_numbered_grid_overlay` (red labels, top-right, all
+> **Grids are sent with the cell numbers drawn on** (v1 chat models). `solver.py`
+> reads the cell boxes from the reCAPTCHA challenge frame's tiles, renders `get_numbered_grid_overlay` (red labels, top-right, all
 > cells 1..N — byte-identical to the overlay the training data was built with)
 > and sends *that*. This is not cosmetic: measured on raw un-numbered
 > screenshots the same model scores **0% on 4×4**, because it has to invent a
@@ -378,9 +378,14 @@ accuracy: **[docs/performance.md](./docs/performance.md)**.
 
 ### v2 — current
 
-The v2 architecture combines an element detector with a vision-language pointer
-model. The server owns the fixed prompt and exposes `POST /v1/pointer`; clients
+The v2 architecture is a vision-language pointer model that reads the bare
+board. The server owns the fixed prompt and exposes `POST /v1/pointer`; clients
 send a board and receive points, paths, text, or a no-answer decision.
+
+The client runs no detector model of its own. Measured on real boards, the
+pointer models score higher on bare boards than on boards with numbered marks
+drawn on (TwilightV2-2B 72.6% plain vs 68.2% marked; MidnightV2-4B q4 75.1% vs
+70.8%), and leaving the detector out keeps the client light.
 
 | Family | Parameters | Formats |
 |---|---|---|
@@ -393,10 +398,8 @@ The default for both self-hosting and the hosted API is **Midnight V2 4B Q4**.
 
 The published Sunlight V2 pointer heads predate this release's head layout and fail a
 strict load, so use Twilight V2 or Midnight V2 until they are republished.
-The separate [CNN element detectors](https://huggingface.co/CaptchaKraken/CaptchaKrakenV2-CNN-large)
-are included in the same collection.
 
-`captchakraken fetch` installs a merged model, its pointer heads, and the detector.
+`captchakraken fetch` installs a merged model and its pointer heads.
 The LoRA repositories are for further training. GGUF repositories include the
 vision projector and pointer heads for custom llama.cpp integrations; stock
 Ollama and `llama-server` alone cannot evaluate those heads and are not a
@@ -421,7 +424,8 @@ Serving details: **[docs/self-hosting.md](./docs/self-hosting.md)**.
 ### What a solve actually looks like
 
 One inference round sends a board to `POST /v1/pointer`. The server owns the
-prompt, runs the detector and pointer heads, and returns an action plan:
+prompt, runs the model and its pointer heads on the bare board, and returns an
+action plan:
 
 ```json
 {"action": "click", "points": [[375, 262], [625, 262]]}
@@ -497,7 +501,7 @@ Most of the detail lives in the docs hub — start at **[docs/](./docs/README.md
 | ☁️ [Hosted API](./docs/hosted-api.md) | Sign in, keys, pricing, per-session billing, error codes |
 | 📦 [Self-hosting](./docs/self-hosting.md) | `captchakraken fetch`, model sizes, server management, config, **updating** |
 | 🚀 [Usage](./docs/usage.md) | Install, the 4 browser frameworks, **mouse / mobile / no humanization**, the Python CLI, migrating from v1 |
-| ⚙️ [How it works](./docs/how-it-works.md) | The solve pipeline, `find_grid`, the freshness guard, dedup |
+| ⚙️ [How it works](./docs/how-it-works.md) | The solve pipeline, grid cells from the DOM, the freshness guard, dedup |
 | 📊 [Benchmarks](./docs/benchmarks.md) | The canonical numbers: real captchas in a browser, and per-puzzle model accuracy |
 | ⚡ [Performance](./docs/performance.md) | Speed-by-device tables, IP-reputation & rate limits |
 | 🗺️ [Roadmap](./docs/roadmap.md) | What shipped, what's in progress, and what's planned |
@@ -510,8 +514,8 @@ Most of the detail lives in the docs hub — start at **[docs/](./docs/README.md
 - 🟢 **Shipped** — the **hosted API** (`api.captchakraken.com`, self-serve
   signup), a mid-inference **freshness guard** (never act on a stale frame),
   and a one-command **`captchakraken fetch`** updater.
-- 🟢 **Shipped** — **v2**: the CNN element detector and pointer architecture,
-  one-command vLLM hosting, and public Sunlight 0.8B, Twilight 2B, and Midnight
+- 🟢 **Shipped** — **v2**: the pointer architecture (the CNN detector is no
+  longer part of the client), one-command vLLM hosting, and public Sunlight 0.8B, Twilight 2B, and Midnight
   4B weights in the [v2 collection](https://huggingface.co/collections/CaptchaKraken/captchakraken-v2).
 - 🟢 **Shipped** — **Midnight V2 4B Q4** as the default for both self-hosting
   and the hosted API.

@@ -77,7 +77,7 @@ def _driver(states: Optional[Dict[str, List[int]]], answers: List[Dict[str, Any]
         lambda _page, action, _box: log["clicked"].append(action["target_bounding_box"])
     )
     solver._wait_for_any_clicked_tile_loaded = wait_loaded
-    solver._get_verify_button = lambda _frame: "verify"
+    solver._get_verify_button = lambda _frame, *_: "verify"
     solver._move_and_click = submit
     return solver, log
 

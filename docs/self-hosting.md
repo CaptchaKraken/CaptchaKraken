@@ -24,8 +24,8 @@ It detects your NVIDIA GPUs and asks three things:
    - **Warm start** starts now, and after a reboot on the first solve, then
      stays loaded.
 
-Then it installs the tested serving stack, downloads the weights and the element
-detector, fetches a browser for the demo, starts the server and waits until it
+Then it installs the tested serving stack, downloads the weights, fetches a
+browser for the demo, starts the server and waits until it
 answers. There is nothing to export and no PATH to edit. Try it:
 
 ```bash
@@ -134,8 +134,8 @@ offered until they are republished.
   evaluate the external pointer heads and therefore is not a supported
   one-command CaptchaKraken server.
 
-The CNN detector is downloaded from
-[`CaptchaKraken/CaptchaKrakenV2-CNN-large`](https://huggingface.co/CaptchaKraken/CaptchaKrakenV2-CNN-large).
+`captchakraken fetch` downloads only the model; the client runs no detector
+model of its own.
 The client and all CaptchaKraken models are LGPL-3.0-only.
 
 ## Updating parts separately
@@ -144,6 +144,22 @@ The client and all CaptchaKraken models are LGPL-3.0-only.
 `captchakraken fetch --engine-only` upgrades the serving stack, and
 `captchakraken fetch --weights-only --no-restart` pulls weight revisions; restart
 the server afterward to load them.
+
+## Licensed weights
+
+Abyss is served through the hosted API to every account. Its weights are in a
+gated Hugging Face repo, `CaptchaKraken/Abyss`, open to Abyss Licence holders:
+buy a licence at <https://captchakraken.com/plans>, add your Hugging Face
+username on that page, then sign in as that account and fetch:
+
+```bash
+hf auth login
+CAPTCHA_LORA_ADAPTER=CaptchaKraken/Abyss captchakraken fetch --weights-only --no-restart
+```
+
+`--dry-run` lists the repo under `needs_auth`. If the Hub refuses the download
+(no token, or an account without access), `fetch` stops and says where to get a
+licence.
 
 ## Legacy generation-3 chat servers
 

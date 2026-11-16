@@ -21,21 +21,34 @@ nothing at all.
 
 ## Watch it work
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/recaptcha_4x4.webp" width="260"
-       alt="A live reCAPTCHA 4×4 tile grid challenge being solved end to end">
-  <img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/geetest_slide.webp" width="260"
-       alt="A live GeeTest slide jigsaw challenge being solved end to end">
-</p>
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/recaptcha_4x4.webp" width="240" alt="A live reCAPTCHA 4×4 tile grid challenge being solved end to end"><br><sub><b>reCAPTCHA 4×4 tile grid</b><br>14/14 solved · median 6.6 s</sub></td>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/recaptcha_3x3.webp" width="240" alt="A live reCAPTCHA 3×3 tile grid challenge being solved end to end"><br><sub><b>reCAPTCHA 3×3 tile grid</b><br>20/22 solved · median 6.5 s</sub></td>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/canvas_drag.webp" width="240" alt="A live Canvas drag puzzle challenge being solved end to end"><br><sub><b>Canvas drag puzzle</b><br>37/37 solved · median 7.3 s per board</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/geetest_slide.webp" width="240" alt="A live GeeTest slide jigsaw challenge being solved end to end"><br><sub><b>GeeTest slide jigsaw</b><br>6/6 solved · median 7.7 s</sub></td>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/geetest_icon.webp" width="240" alt="A live GeeTest ordered icon click challenge being solved end to end"><br><sub><b>GeeTest ordered icon click</b><br>6/7 solved · median 7.6 s</sub></td>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/geetest_nine.webp" width="240" alt="A live GeeTest 3×3 photo grid challenge being solved end to end"><br><sub><b>GeeTest 3×3 photo grid</b><br>6/6 solved · median 6.9 s</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/tencent_slide.webp" width="240" alt="A live Tencent slide jigsaw challenge being solved end to end"><br><sub><b>Tencent slide jigsaw</b><br>6/6 solved · median 6.2 s</sub></td>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/yidun_pictureclick.webp" width="240" alt="A live NetEase Yidun characters in order challenge being solved end to end"><br><sub><b>NetEase Yidun characters in order</b><br>6/6 solved · median 7.7 s</sub></td>
+    <td align="center" width="33%"><img src="https://raw.githubusercontent.com/CaptchaKraken/CaptchaKraken/main/docs/assets/demo/dingxiang_icon.webp" width="240" alt="A live DingXiang icon click challenge being solved end to end"><br><sub><b>DingXiang icon click</b><br>6/6 solved · median 7.6 s</sub></td>
+  </tr>
+</table>
 
-reCAPTCHA 4×4 tile grid 9/10 in 8.7s · GeeTest slide jigsaw 10/10 in 7.6s — median of the solved attempts, measured 2026-08-19 on **captcha-v12**
-against each vendor's own public demo page. Counts rather than percentages
-because ten attempts is not a percentage. Idle time is cut from the clips, so
-they run shorter than the solves they show.
+Recorded 2026-11-15 on each vendor's own public demo page through the hosted
+API (**CaptchaKraken Abyss**), one solve at a time. Counts rather than
+percentages, because a handful of attempts is not a percentage. The median is
+the measured time from the challenge opening to the vendor verifying it, taken
+from the run and never from the footage. Idle time is cut from the clips, so
+they run shorter than the solves they show. The canvas puzzle deals a varying
+number of boards per challenge, so it is timed per board.
 
-**More puzzle types**, as video and with the full method, at
-[captchakraken.com](https://captchakraken.com) and in the
-[main repo](https://github.com/CaptchaKraken/CaptchaKraken#watch-it-work).
+**Every puzzle type**, with the full results table, at
+[captchakraken.com](https://captchakraken.com).
 
 ## Install
 
@@ -158,7 +171,6 @@ Full details, including writing your own humanizer:
 | `CAPTCHA_BASE_MODEL` | Merged v2 weights vLLM loads | `CaptchaKraken/MidnightV2-4B-q4` |
 | `CAPTCHA_LORA_ADAPTER` | Model repository (HF id or path) | `CaptchaKraken/MidnightV2-4B-q4` |
 | `CAPTCHA_LORA_NAME` | Served model name sent as `model` | `captcha-pointer` |
-| `CAPTCHA_POINTER_DETECTOR` | CNN element detector | set by `captchakraken fetch` |
 | `CAPTCHA_KRAKEN_AUTOSTART` | `0` never auto-starts a local server | `1` |
 | `CAPTCHA_KRAKEN_PYTHON` | Interpreter used for the bundled engine | the package's venv, else `python3` |
 | `CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP` | `1` skips the `postinstall` bootstrap | unset |

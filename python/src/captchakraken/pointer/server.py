@@ -1,20 +1,20 @@
 """The /pointer HTTP endpoint: one board per request, generation 3's answer back.
 
-    python -m captchakraken.pointer.server --model /models/pointer-0.8b \\
-        --detector /models/detector_r18.pt --port 8001
+    python -m captchakraken.pointer.server --model /models/pointer-0.8b --port 8001
 
 POST /v1/pointer
     {"image": "<base64 PNG/JPEG>"}                    a still, as captured
     {"frames": ["<base64 JPEG>", ...], "fps": 5.0}    a video, `clipvideo`-cut
-    {"marked": false}                                 optional: skip the detector
     {"avoid": [answer, ...]}                          optional: answers already refused on this
                                                       board; the likeliest other ones come back
 -> {"actions": [{...}, {...}, {...}],                 the three likeliest distinct answers, best first
     "answer": {...},                                 the first action, kept for older callers
-    "elements": [{"id", "class", "box", "score"}], "size": [W, H]}
+    "elements": [], "size": [W, H]}
 
-`elements` are in the pixels of the board as the model saw it (`size`), numbered
-as the answer's ids are. The client sends no prompt: the server owns it.
+`size` is the board in pixels as the model saw it. `elements` is always empty and
+`marked` in a request is ignored: both are left from the element detector, which
+the client no longer has, so older callers keep working. The client sends no
+prompt: the server owns it.
 """
 from __future__ import annotations
 
@@ -45,7 +45,6 @@ def parse(body: Dict) -> Dict:
     """A request body -> PointerService.solve's arguments. Raises ValueError on a bad one."""
     if ("image" in body) == ("frames" in body):
         raise ValueError("send exactly one of image or frames")
-    marked = bool(body.get("marked", True))
     avoid = body.get("avoid") or []
     if not isinstance(avoid, list) or not all(isinstance(a, dict) for a in avoid):
         raise ValueError("avoid is a list of earlier answers")
@@ -55,7 +54,7 @@ def parse(body: Dict) -> Dict:
     if "image" in body:
         if len(history) > L.MAX_HISTORY:
             raise ValueError(f"{len(history)} earlier screens; at most {L.MAX_HISTORY}")
-        return {"image": _image(body["image"]), "marked": marked, "avoid": avoid,
+        return {"image": _image(body["image"]), "avoid": avoid,
                 "history": [_image(h) for h in history]}
     if history:
         raise ValueError("a video board carries no earlier screens")
@@ -65,14 +64,12 @@ def parse(body: Dict) -> Dict:
     frames = [np.asarray(Image.open(io.BytesIO(base64.b64decode(f))).convert("RGB")) for f in body["frames"]]
     if len(frames) < 2:
         raise ValueError("a video needs at least two frames")
-    return {"frames": frames, "marked": False, "avoid": avoid}
+    return {"frames": frames, "avoid": avoid}
 
 
 def reply(result: Dict) -> Dict:
     return {"actions": result.get("answers") or [result["answer"]],
-            "answer": result["answer"], "size": list(result["size"]),
-            "elements": [{"id": n, "class": e["class"], "box": [round(v, 1) for v in e["box"]],
-                          "score": e["score"]} for n, e in enumerate(result["elements"], 1)]}
+            "answer": result["answer"], "size": list(result["size"]), "elements": []}
 
 
 def make_handler(service):
@@ -129,9 +126,9 @@ def make_handler(service):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, help="an exported pointer checkpoint")
-    ap.add_argument("--detector", default=None, help="the element detector; without it every board goes plain")
-    ap.add_argument("--letters", default=None,
-                    help="the letter detector: a typed code is the one it and the model read together")
+    # Left from the element and letter detectors; a unit file that still passes them starts the same server.
+    ap.add_argument("--detector", default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--letters", default=None, help=argparse.SUPPRESS)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8001)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.45)
@@ -140,8 +137,7 @@ def main():
     a = ap.parse_args()
     from .service import PointerService
     capture = a.max_cudagraph_capture_size
-    svc = PointerService(a.model, detector=a.detector, letters=a.letters,
-                         gpu_memory_utilization=a.gpu_memory_utilization,
+    svc = PointerService(a.model, gpu_memory_utilization=a.gpu_memory_utilization,
                          **({"compilation_config": {"max_cudagraph_capture_size": capture}} if capture else {}))
     ThreadingHTTPServer((a.host, a.port), make_handler(svc)).serve_forever()
 

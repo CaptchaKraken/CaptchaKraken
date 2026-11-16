@@ -11,7 +11,7 @@ export type { Page, PlaywrightPage, PlaywrightFrame, PlaywrightElementHandle, Pl
 // Configuration
 export type { CaptchaKrakenConfig } from './types';
 export { DEFAULT_CONFIG_PATH, SelectorConfigError, loadConfig } from './selectors';
-export type { CustomSelectors, DetectorModel, SelectorConfig, SelectorConfigFile, VendorSelectors } from './selectors';
+export type { CustomSelectors, SelectorConfig, SelectorConfigFile, VendorSelectors } from './selectors';
 export { HumanizationMode, PromptFamily, Vendor } from './kinds';
 
 // Results, events and errors

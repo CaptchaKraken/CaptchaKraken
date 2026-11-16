@@ -15,7 +15,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from captchakraken.solver import CaptchaSolver
 from captchakraken.action_types import ClickAction, DragAction, DoneAction
-from captchakraken.tool_calls.find_grid import find_grid
 from captchakraken.overlay import add_overlays_to_image
 
 os.environ["CAPTCHA_DEBUG"] = "1"
@@ -39,26 +38,6 @@ def setup_module(module):
         except Exception:
             pass
     debug_dir.mkdir(exist_ok=True, parents=True)
-
-def label_grid_manually(image_path: str, output_name: str):
-    grid_boxes = find_grid(image_path)
-    if not grid_boxes:
-        print(f"[Warning] No grid detected for {image_path}")
-        return None
-
-    overlays = []
-    for i, (x1, y1, x2, y2) in enumerate(grid_boxes):
-        overlays.append({
-            "bbox": [x1, y1, x2 - x1, y2 - y1],
-            "number": i + 1,
-            "color": "#00FF00",
-            "box_style": "solid"
-        })
-
-    output_path = Path("latestDebugRun") / output_name
-    add_overlays_to_image(image_path, overlays, output_path=str(output_path), label_position="top-right")
-    print(f"[Test] Manually labeled grid saved to {output_path}")
-    return grid_boxes
 
 def save_final_result_overlay(image_path, actions, test_name):
     if not actions:
@@ -144,18 +123,15 @@ def run_solver_test(image_path, test_name, expected_action_type=ClickAction, min
 
 def test_3x3_recaptcha():
     image_path = "captchaimages/coreRecaptcha/recaptchaImages.png"
-    label_grid_manually(image_path, "manual_label_3x3.png")
 
     run_solver_test(image_path, "3x3_recaptcha")
 
 def test_4x4_recaptcha():
     image_path = "captchaimages/coreRecaptcha/recaptchaImages2.png"
-    label_grid_manually(image_path, "manual_label_4x4.png")
     run_solver_test(image_path, "4x4_recaptcha")
 
 def test_slanted_grid():
     image_path = "captchaimages/slantedGrid.png"
-    label_grid_manually(image_path, "manual_label_slanted.png")
     run_solver_test(image_path, "slanted_grid")
 
 def test_hcaptcha_puzzle_solve():

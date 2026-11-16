@@ -129,6 +129,113 @@ export function readVerdict(url: string, status: number, body: string): RoundVer
   return verdict ? { vendor: found.vendor, verdict } : null;
 }
 
+// ── whether a board moves, read off the file it is dealt as ──────────────────
+// Measured 2026-11-14 on the live demos. hCaptcha (46 deals over three sitekeys) loads each board from
+// imgs*.hcaptcha.com/tip/: image/jpeg for every still deal, video/webm for every animated one. GeeTest v4's /load names
+// its challenge in plain JSONP, and only the two svg types moved (22 deals over seven demo pages). A vendor, file or
+// type not listed here gives no hint, and the driver films the board to find out, as it always has.
+const GEETEST_MOVING = new Set(['svg_icon', 'svg_seed']);
+const GEETEST_STILL = new Set(['slide', 'icon', 'nine', 'match', 'winlinze']);
+
+const mediaMoves = (contentType: string): boolean | null => {
+  // A GIF may move, so it says nothing either way; every still hCaptcha board measured was a jpeg or a png.
+  const type = contentType.split(';', 1)[0].trim().toLowerCase();
+  if (type === 'image/gif') return null;
+  const kind = type.split('/', 1)[0];
+  return kind === 'video' ? true : kind === 'image' ? false : null;
+};
+
+// GenerateCaptcha names the board's file in HtmlFormate; every one measured (4 deals) was a GIF that moved.
+const cybersiaraBoardMoves = (_contentType: string, body: string): boolean | null => {
+  const board = (parse(body) as { HtmlFormate?: unknown } | null)?.HtmlFormate;
+  return typeof board === 'string' && board.toLowerCase().split('?', 1)[0].endsWith('.gif') ? true : null;
+};
+
+const geetestTypeMoves = (_contentType: string, body: string): boolean | null => {
+  const start = body.indexOf('(');
+  const end = body.lastIndexOf(')');
+  const data = (start >= 0 && start < end ? parse(body.slice(start + 1, end)) : null) as
+    { data?: { captcha_type?: unknown } } | null;
+  const kind = data?.data?.captcha_type;
+  if (typeof kind !== 'string') return null;
+  return GEETEST_MOVING.has(kind) ? true : GEETEST_STILL.has(kind) ? false : null;
+};
+
+export interface MotionSignal {
+  /** A URL substring naming the response that carries the board, or names its kind. */
+  marker: string;
+  read: (contentType: string, body: string) => boolean | null;
+  needsBody: boolean;
+}
+
+export const MOTION_SIGNALS: Partial<Record<Vendor, readonly MotionSignal[]>> = {
+  [Vendor.HCAPTCHA]: [{ marker: 'hcaptcha.com/tip/', read: mediaMoves, needsBody: false }],
+  [Vendor.GEETEST]: [{ marker: 'geetest.com/load', read: geetestTypeMoves, needsBody: true }],
+  [Vendor.CYBERSIARA]: [{ marker: 'mycybersiara.com/api/GenerateCaptcha', read: cybersiaraBoardMoves, needsBody: true }],
+};
+
+// ── the same, read back from a frame's performance timeline ──────────────────
+// The listener hears only what loads after solve() starts. A widget the caller opened first, or a board the browser
+// served from its cache, was dealt before then, and each frame's resource timeline still lists what it loaded and what
+// loaded it. Only entries after the vendor's latest deal count, and a full buffer (where new entries are dropped and the
+// latest deal may be missing) says nothing. Measured 2026-11-14: GeeTest's board files sit under
+// static.geetest.com/captcha_v4/policy/<id>/<captcha_type>/, hCaptcha's under /tip/ loaded by an img, CyberSiara's as
+// a GIF under embed.mycybersiara.com/CyberSiara/.
+export const TIMELINE_JS = `() => {
+  const all = performance.getEntriesByType('resource');
+  return {full: all.length >= 250, entries: all.map(e => [e.initiatorType, e.name])};
+}`;
+
+export interface Timeline { full?: boolean; entries?: [string, string][] }
+
+interface TimelineBoard { deal: string; board: string; read: (initiator: string, url: string) => boolean | null }
+
+const hcaptchaTipMoves = (initiator: string): boolean | null =>
+  ['video', 'audio', 'source'].includes(initiator) ? true : initiator === 'img' ? false : null;
+
+const geetestPathMoves = (_initiator: string, url: string): boolean | null => {
+  const kind = url.split('captcha_v4/policy/').slice(-1)[0].split('/')[1];
+  return kind === undefined ? null : GEETEST_MOVING.has(kind) ? true : GEETEST_STILL.has(kind) ? false : null;
+};
+
+const cybersiaraFileMoves = (_initiator: string, url: string): boolean | null =>
+  url.toLowerCase().split('?', 1)[0].endsWith('.gif') ? true : null;
+
+export const TIMELINE_BOARDS: Partial<Record<Vendor, TimelineBoard>> = {
+  [Vendor.HCAPTCHA]: { deal: 'hcaptcha.com/getcaptcha/', board: 'hcaptcha.com/tip/', read: hcaptchaTipMoves },
+  [Vendor.GEETEST]: { deal: 'geetest.com/load', board: 'static.geetest.com/captcha_v4/policy/', read: geetestPathMoves },
+  [Vendor.CYBERSIARA]: {
+    deal: 'mycybersiara.com/api/GenerateCaptcha', board: 'mycybersiara.com/CyberSiara/', read: cybersiaraFileMoves,
+  },
+};
+
+const combine = (reads: (boolean | null)[]): boolean | null =>
+  reads.includes(true) ? true : reads.includes(false) ? false : null;
+
+/** What one frame's resource timeline says about the vendor's latest board, or null. */
+export function motionFromTimeline(vendor: Vendor, timeline: Timeline | null | undefined): boolean | null {
+  const spec = TIMELINE_BOARDS[vendor];
+  if (!spec || !timeline || timeline.full) return null;
+  const entries = (timeline.entries ?? []).filter((e) => Array.isArray(e) && e.length === 2);
+  let lastDeal = -1;
+  entries.forEach(([, url], i) => { if (String(url).includes(spec.deal)) lastDeal = i; });
+  if (lastDeal < 0) return null;
+  return combine(entries.slice(lastDeal + 1).filter(([, url]) => String(url).includes(spec.board))
+    .map(([kind, url]) => spec.read(String(kind), String(url))));
+}
+
+export function motionSignalFor(url: string): { vendor: Vendor; signal: MotionSignal } | null {
+  return (Object.entries(MOTION_SIGNALS) as [Vendor, readonly MotionSignal[]][])
+    .flatMap(([vendor, signals]) => signals.map((signal) => ({ vendor, signal })))
+    .find(({ signal }) => url.includes(signal.marker)) ?? null;
+}
+
+/** The vendor whose deal endpoint this is: what it said about the last board no longer holds. */
+function dealsABoard(url: string): Vendor | null {
+  const found = endpointFor(url);
+  return found && found.endpoint.read === urlOnly ? found.vendor : null;
+}
+
 const SCRIPTED_REQUESTS = new Set(['xhr', 'fetch', 'script']);
 
 /**
@@ -148,13 +255,63 @@ export class VerdictLog {
     const url = response.url();
     const status = response.status();
     if (SCRIPTED_REQUESTS.has(response.request?.().resourceType?.() ?? '')) this.exchanges++;
-    if (!endpointFor(url)) return;
+    const dealt = dealsABoard(url);
+    // At once, not when the body lands: the new board's own file can arrive first.
+    if (dealt) {
+      this.motion.delete(dealt);
+      this.deals.set(dealt, (this.deals.get(dealt) ?? 0) + 1);
+    }
+    const found = motionSignalFor(url);
+    const judged = endpointFor(url) !== null;
+    if (!judged && !found) return;
+    if (found && status >= 200 && status < 300 && !found.signal.needsBody) {
+      let contentType = '';
+      try { contentType = response.headers?.()['content-type'] ?? ''; } catch { /* no header, no hint */ }
+      this.noteMotion(found.vendor, found.signal.read(contentType, ''));
+    }
+    const needsBody = judged || (found?.signal.needsBody ?? false);
+    // A body read for an earlier deal must not describe a board that has since been replaced.
+    const deal = found ? this.deals.get(found.vendor) ?? 0 : 0;
+    if (!needsBody) return;
     const body = status === TOO_MANY_REQUESTS ? Promise.resolve('') : response.text();
     this.pending.push(body.then((text) => {
+      if (found?.signal.needsBody && status >= 200 && status < 300 && (this.deals.get(found.vendor) ?? 0) === deal) {
+        this.noteMotion(found.vendor, found.signal.read('', text));
+      }
       const verdict = readVerdict(url, status, text);
       if (verdict) this.verdicts.push(verdict);
     }).catch(() => {}));
   };
+  /** What each vendor's network said about its current board: true moves, false is still. */
+  private readonly motion = new Map<Vendor, boolean>();
+  private readonly deals = new Map<Vendor, number>();
+
+  private noteMotion(vendor: Vendor, moves: boolean | null): void {
+    // One moving file makes the board a moving one: a board may also load a still example.
+    if (moves !== null && !this.motion.get(vendor)) this.motion.set(vendor, moves);
+  }
+
+  /** Whether the vendor dealt its current board as a moving one; null when its network has not said. */
+  async boardMotion(vendor: Vendor): Promise<boolean | null> {
+    await Promise.all([...this.pending]);
+    const heard = this.motion.get(vendor);
+    if (heard !== undefined || !TIMELINE_BOARDS[vendor]) return heard ?? null;
+    type TimelineFrame = { evaluate?(fn: string): Promise<unknown> };
+    let frames: TimelineFrame[] = [];
+    try {
+      frames = (this.page as unknown as { frames?(): TimelineFrame[] }).frames?.() ?? [];
+    } catch {
+      return null;
+    }
+    const reads = await Promise.all(frames.map(async (frame) => {
+      try {
+        return motionFromTimeline(vendor, (await frame.evaluate?.(TIMELINE_JS)) as Timeline);
+      } catch {
+        return null;
+      }
+    }));
+    return combine(reads);
+  }
 
   constructor(private readonly page: PlaywrightPage) {
     this.listening = typeof page.on === 'function';

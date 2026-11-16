@@ -128,12 +128,13 @@ requirements → one agent.
 
 - **The model is Qwen3.5-9B.** Never reference Qwen2 / Qwen2.5 / Qwen-VL anywhere;
   grep before any change that touches serving or the planner.
-- **`find_grid` is the foundation.** It reads the element detector (a small
-  Mask R-CNN run on the CPU through onnxruntime, no planner model): the grid and
-  its cells are boxes the network found. Every board that once reached the wrong
-  expert is a test under `python/tests/test_grid_*` and
-  `test_hcaptcha_boards_reach_the_right_expert.py`; run them before you change
-  how detections become a lattice.
+- **The client carries no detector model.** A reCAPTCHA grid's cells are read
+  from the vendor's DOM (the `tiles` selector, `td.rc-imageselect-tile`), each
+  tile's rectangle scaled onto the screenshot; `find_checkbox` is pixel
+  arithmetic on numpy, PIL and scipy. Keep it that way: the client must stay
+  light. `test_a_grid_is_read_from_the_vendors_tiles.py` and
+  `a-grid-is-read-from-the-vendors-tiles.test.ts` pin the DOM read; run them
+  before you change how tiles become cell boxes.
 - **Locators, never `page.$()` / `page.$$()` / `query_selector()`.** The
   driver reads the page through `scope.locator(sel).filter({ visible: true })`
   (`filter(visible=True)` in Python), `.all()`, `.count()` and

@@ -35,7 +35,7 @@ def test_the_client_imports_with_opencv_unavailable():
         "import captchakraken.tool_calls.find_grid, captchakraken.tool_calls.find_checkbox\n"
         "import captchakraken.tool_calls.slide_tracker, captchakraken.tool_calls.fill_tracker\n"
         "import captchakraken.tool_calls.board_painted, captchakraken.keyframes, captchakraken.clipvideo\n"
-        "import captchakraken.pointer.detector, captchakraken.pointer.marks, captchakraken.pointer.elements\n"
+        "import captchakraken.pointer.marks, captchakraken.pointer.elements\n"
     )
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                        cwd=PACKAGE.parent)
