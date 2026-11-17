@@ -3,7 +3,7 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [Unreleased]
+## [5.1.0] - 2026-11-16
 
 ### Added
 
