@@ -68,6 +68,7 @@ matching serving stack as part of the same run.
 captchakraken fetch --yes                     # previous answers, then the defaults
 captchakraken fetch --model MidnightV2-4B-q4 --gpu 0 --startup always
 captchakraken fetch --model TwilightV2-2B --startup first-solve
+captchakraken fetch abyss                     # Abyss V2 Q4, with an Abyss Licence
 ```
 
 ### What it leaves on your machine
@@ -145,21 +146,30 @@ The client and all CaptchaKraken models are LGPL-3.0-only.
 `captchakraken fetch --weights-only --no-restart` pulls weight revisions; restart
 the server afterward to load them.
 
-## Licensed weights
+## Abyss (licensed)
 
-Abyss is served through the hosted API to every account. Its weights are in a
-gated Hugging Face repo, `CaptchaKraken/Abyss`, open to Abyss Licence holders:
-buy a licence at <https://captchakraken.com/plans>, add your Hugging Face
-username on that page, then sign in as that account and fetch:
+Abyss is served through the hosted API to every account. With an Abyss Licence
+you can also run it yourself:
+
+1. Buy the licence at <https://captchakraken.com/plans> and add your Hugging
+   Face username on that page. Access to the gated `CaptchaKraken/AbyssV2`
+   repos follows within a couple of minutes.
+2. Run:
 
 ```bash
-hf auth login
-CAPTCHA_LORA_ADAPTER=CaptchaKraken/Abyss captchakraken fetch --weights-only --no-restart
+npx captchakraken fetch abyss      # or: pipx run captchakraken fetch abyss
 ```
 
-`--dry-run` lists the repo under `needs_auth`. If the Hub refuses the download
-(no token, or an account without access), `fetch` stops and says where to get a
-licence.
+It asks for a Hugging Face token (read access is enough) unless you are
+already signed in with `hf auth login` or `HF_TOKEN`, checks that the account
+can download Abyss, and only then installs the serving stack, downloads
+Abyss V2 Q4, and starts the server on your roomiest GPU. A typed token is saved
+where `hf auth login` keeps it, so later updates use it too. For the
+full-precision checkpoint (16 GB of VRAM), use `--model AbyssV2`. Both are also
+in the `captchakraken fetch` menu.
+
+If the account cannot download it, `fetch` names the account and points at the
+plans page before anything installs.
 
 ## Legacy generation-3 chat servers
 

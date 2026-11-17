@@ -3,6 +3,17 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [Unreleased]
+
+### Added
+
+- **`captchakraken fetch abyss`** sets up Abyss V2 for Abyss Licence holders
+  in one command: it signs in to Hugging Face (or uses `hf auth login` /
+  `HF_TOKEN`), checks the account can download the gated repo before
+  anything installs, then installs, downloads and starts it like any other
+  model. `AbyssV2-q4` and `AbyssV2` are also in the `fetch` menu, and are
+  registered as licensed.
+
 ## [5.0.0] - 2026-11-13
 
 ### Removed (breaking)

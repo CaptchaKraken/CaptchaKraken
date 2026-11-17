@@ -308,6 +308,18 @@
       "js/src/timing.ts",
       "python/src/captchakraken/timing.py"
     ],
+    "HF_HOME": [
+      "python/src/captchakraken/selfhost.py"
+    ],
+    "HF_TOKEN": [
+      "python/src/captchakraken/selfhost.py"
+    ],
+    "HF_TOKEN_PATH": [
+      "python/src/captchakraken/selfhost.py"
+    ],
+    "HUGGING_FACE_HUB_TOKEN": [
+      "python/src/captchakraken/selfhost.py"
+    ],
     "PYTHONPATH": [
       "js/src/solver.ts"
     ],
@@ -339,6 +351,9 @@
     "VLLM_PORT": [
       "python/src/captchakraken/config.py"
     ],
+    "XDG_CACHE_HOME": [
+      "python/src/captchakraken/selfhost.py"
+    ],
     "XDG_CONFIG_HOME": [
       "mcp/src/credentials.ts"
     ]
@@ -352,6 +367,8 @@
       "CaptchaKraken/Abyss-grid",
       "CaptchaKraken/Abyss-text",
       "CaptchaKraken/Abyss-video",
+      "CaptchaKraken/AbyssV2",
+      "CaptchaKraken/AbyssV2-q4",
       "CaptchaKraken/CaptchaKraken-Lora-v1.2",
       "CaptchaKraken/CaptchaKraken-v1.2-GGUF",
       "CaptchaKraken/CaptchaKrakenV1_Lora",
