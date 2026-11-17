@@ -178,6 +178,32 @@
       },
       "note": "Midnight V2 4B at bf16. The full-precision alternative to the default Q4 checkpoint."
     },
+    "CaptchaKraken/AbyssV2-q4": {
+      "availability": "licensed",
+      "prompt_version": "4",
+      "kind": "merged",
+      "base_model": "CaptchaKraken/AbyssV2-q4",
+      "lora_revision": "main",
+      "lora_name": "captcha-pointer",
+      "pixel_budget": {
+        "min": 4096,
+        "max": 518400
+      },
+      "note": "Abyss V2, the licensed pointer model, at Q4: the checkpoint `captchakraken fetch abyss` installs. Same architecture, heads and pixel band as Midnight V2 4B Q4, so it is served the same way. Its repo is gated and open to Abyss Licence holders."
+    },
+    "CaptchaKraken/AbyssV2": {
+      "availability": "licensed",
+      "prompt_version": "4",
+      "kind": "merged",
+      "base_model": "CaptchaKraken/AbyssV2",
+      "lora_revision": "main",
+      "lora_name": "captcha-pointer",
+      "pixel_budget": {
+        "min": 4096,
+        "max": 518400
+      },
+      "note": "Abyss V2 at bf16, the full-precision alternative to AbyssV2-q4. Gated like it."
+    },
     "CaptchaKraken/CaptchaKraken-Lora-v1.2": {
       "prompt_version": "2",
       "kind": "lora",
