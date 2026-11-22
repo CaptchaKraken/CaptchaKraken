@@ -3,7 +3,18 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [5.2.0] - Unreleased
+## [5.2.1] - 2026-11-22
+
+### Fixed
+
+- **`captchakraken fetch custom-yidun` downloads only the 4-bit build.** Its
+  repo now also holds the full-precision weights and the LoRA, each in its own
+  folder; the fetch takes the `q4/` folder (3.8 GB) instead of the whole repo,
+  and checks access against that folder.
+- An account without access to that model is told to use the access token it
+  was sent.
+
+## [5.2.0] - 2026-11-22
 
 ### Added
 

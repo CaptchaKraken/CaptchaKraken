@@ -53,6 +53,8 @@ class Model:
     listed: bool = True
     # How an account without access gets it; empty means the Abyss Licence.
     access: str = ""
+    # The folder of the repo that is served, when the repo holds several builds; empty means the whole repo.
+    subfolder: str = ""
 
     @property
     def licensed(self) -> bool:
@@ -73,9 +75,9 @@ MODELS = (
           3.8, 8, aliases=("abyss",)),
     Model("CaptchaKraken/AbyssV2", "Abyss V2", "Abyss at full precision, needs an Abyss Licence", 9.1, 16),
     Model("CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision", "CaptchaKraken Custom Yidun", "Abyss tuned for Yidun icon click-in-order boards",
-          3.8, 8, aliases=("custom-yidun",), listed=False,
-          access="  Access to this model is granted by hand once its purchase is confirmed: send the CaptchaKraken team\n"
-                 "  your Hugging Face username. Then run this again."),
+          3.8, 8, aliases=("custom-yidun",), listed=False, subfolder="q4",
+          access="  Use the access token the CaptchaKraken team sent you once your purchase was confirmed:\n"
+                 "  HF_TOKEN=hf_... captchakraken fetch custom-yidun"),
 )
 
 
@@ -277,7 +279,7 @@ def _licence_steps() -> str:
 
 
 def ensure_access(repo: str, *, interactive: bool, http: Optional[Callable] = None,
-                  read_secret: Callable[[str], str] = getpass.getpass, access: str = "") -> str:
+                  read_secret: Callable[[str], str] = getpass.getpass, access: str = "", subfolder: str = "") -> str:
     """The Hugging Face account that will download `repo`, once it is known to be allowed to. A token typed here is saved where huggingface_hub looks, so the download and later updates use it."""
     http = http or _HUB_REQUEST
     token, typed = hub_token(), False
@@ -299,7 +301,7 @@ def ensure_access(repo: str, *, interactive: bool, http: Optional[Callable] = No
         raise RuntimeError(f"Hugging Face answered {who.status_code} when asked who the token belongs to. Try again shortly.")
     user = who.json().get("name") or "this account"
 
-    probe = _hub(http, "HEAD", f"{HUB}/{repo}/resolve/main/config.json", token)
+    probe = _hub(http, "HEAD", f"{HUB}/{repo}/resolve/main/{subfolder + '/' if subfolder else ''}config.json", token)
     if probe.status_code in (401, 403, 404):
         if access:
             raise RuntimeError(f"Hugging Face account {user} cannot download {repo} yet.\n" + access)
@@ -359,15 +361,17 @@ def install_client(python: Path, extra: str = "") -> None:
 
 
 _DOWNLOAD = """
-import sys
+import os, sys
 from huggingface_hub import snapshot_download
-print(snapshot_download(sys.argv[1]))
+repo, sub = sys.argv[1], sys.argv[2]
+path = snapshot_download(repo, allow_patterns=[sub + "/*"] if sub else None)
+print(os.path.join(path, sub) if sub else path)
 """
 
 
-def download(python: Path, repo: str) -> str:
-    """The model directory. Stored as a path so a server never asks the Hub again."""
-    out = subprocess.run([str(python), "-c", _DOWNLOAD, repo], stdout=subprocess.PIPE, text=True, check=True)
+def download(python: Path, repo: str, subfolder: str = "") -> str:
+    """The model directory. Stored as a path so a server never asks the Hub again. Only `subfolder` is fetched when one is given."""
+    out = subprocess.run([str(python), "-c", _DOWNLOAD, repo, subfolder], stdout=subprocess.PIPE, text=True, check=True)
     return out.stdout.strip().splitlines()[-1]
 
 
@@ -448,7 +452,7 @@ def install(choice: Choice, saved: dict) -> dict:
     install_client(python, "[serve]")
 
     _step(f"Downloading {choice.model.title}")
-    model_path = download(python, choice.model.repo)
+    model_path = download(python, choice.model.repo, choice.model.subfolder)
 
     values = settings(choice, model_path, saved)
     write_settings(values)
@@ -529,7 +533,8 @@ def fetch(*, yes: bool = False, model: Optional[str] = None, gpu: Optional[int] 
             choice = ask(gpus, saved)
         if choice.model.licensed:
             # A sign-in, not a choice: asked for whenever there is a terminal, --yes or not.
-            ensure_access(choice.model.repo, interactive=interactive, access=choice.model.access)
+            ensure_access(choice.model.repo, interactive=interactive, access=choice.model.access,
+                          subfolder=choice.model.subfolder)
         values = install(choice, saved)
     except Cancelled:
         print("Cancelled. Nothing was changed.")
