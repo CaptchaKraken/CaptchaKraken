@@ -314,6 +314,23 @@ async function viewportOf(page: Page): Promise<ViewportSize> {
  * zoomed out to fit, which is every mobile layout of a desktop page: there the box is in layout pixels and the
  * capture is not.
  */
+/** Gecko answers with a number and Chromium/WebKit have no such property. Camoufox spoofs the user agent, not this. */
+export const GECKO_JS = "typeof mozInnerScreenX === 'number'";
+
+/**
+ * Is this Firefox, whose clipped capture renders the rect offscreen (`drawSnapshot`) and repaints nothing?
+ *
+ * Chromium is the engine that flashes on a clip, and the reason every other capture is viewport-and-crop. On Firefox
+ * the full viewport costs ~420ms to the clip's ~100ms; a still Yidun board took 8 of them, 2.6s of its solve.
+ */
+async function drawsClipsOffscreen(page: Page): Promise<boolean> {
+  try {
+    return (await page.evaluate?.(GECKO_JS)) === true;
+  } catch {
+    return false;
+  }
+}
+
 async function layoutIsTheViewport(page: Page, view: ViewportSize): Promise<boolean> {
   const frame = await page.evaluate?.(() => ({
     width: window.innerWidth,
@@ -416,6 +433,8 @@ export class CaptchaKrakenSolver {
   private animatedFilm: ReturnType<CaptchaKrakenSolver['startKeyframeBurst']> | null = null;
   private lastBurstFps: number | null = null;
   private actedOnBoard = false;
+  /** (page, is Firefox), asked once per page: see drawsClipsOffscreen. */
+  private gecko: { page: unknown; clips: boolean } | null = null;
   private submittedOnBoard = false;
   private lastSubmitFrameHash: string | null = null;
   private solveSessionId: string | null = null;
@@ -464,9 +483,10 @@ export class CaptchaKrakenSolver {
   /**
    * Every capture the driver takes: the whole viewport, cropped here to the element.
    *
-   * Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at the
-   * clip's size for that frame, which the user watches as the page flashing and jumping; a viewport capture
-   * repaints nothing, and measured twice as fast. `disabled` freezes CSS animation, which once sliced GeeTest svg to
+   * Never a clipped capture on Chromium. An element screenshot, or any `clip`, makes a headed Chromium repaint the
+   * page at the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
+   * capture repaints nothing, and measured twice as fast. Firefox is the exception: it draws a clip offscreen, and
+   * there the clip is four times faster than the viewport (see drawsClipsOffscreen). `disabled` freezes CSS animation, which once sliced GeeTest svg to
    * a static clip; callers filming motion pass `allow`.
    */
   /** `scale: 'css'` is one pixel per CSS pixel: the slide loop's, since a phone's device-pixel frame is ~7x the pixels to track. */
@@ -481,6 +501,11 @@ export class CaptchaKrakenSolver {
       // Bigger than the viewport, or a zoomed-out mobile layout: no viewport capture holds it in its own
       // coordinates, so the element photographs itself.
       await el.screenshot({ path: p, timeout, animations, style, ...css });
+      return;
+    }
+    if (this.gecko?.page !== page) this.gecko = { page, clips: await drawsClipsOffscreen(page) };
+    if (this.gecko.clips) {
+      fs.writeFileSync(p, await page.screenshot({ timeout, animations, style, ...css, clip: { ...rect } }));
       return;
     }
     fs.writeFileSync(p, cropPng(await page.screenshot({ timeout, animations, style, ...css }), rect, view.width));

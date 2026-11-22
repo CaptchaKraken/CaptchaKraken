@@ -276,10 +276,40 @@ desktop solve to touch dispatch would break every one of them silently.
 
 | Mode | What it dispatches | Use it when |
 |---|---|---|
-| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised (Cursory); one move per gesture when the browser humanises its own pointer | Default. Desktop pages. |
+| `mouse` | Trajectories recorded from real people, morphed onto the requested endpoints and re-noised, and keystrokes timed like a person's ([myuri](https://github.com/JWriter20/Myuri)); one move per gesture when the browser humanises its own pointer | Default. Desktop pages. |
 | `mobile` | Real touch events with finger kinematics — see below | The page is a mobile site, or you are driving a phone |
 | `none` | One move, one press, one release. No dwell, no jitter | Your own fixtures, or your stack humanises elsewhere |
 | custom | Whatever you write | You already model your users' input |
+
+### Speed, and myuri's own settings
+
+`speed` picks how fast the hand goes. `human` (the default) is an ordinary
+person. `fast` plays the same recorded paths 2.5x faster, types at about 110
+wpm, and halves the waits between gestures. It is still a path, still one event
+per mouse report, and still the same person for the whole solve. Use it when a
+site gives you only a few seconds. On a three-icon click-in-order board it cut
+the mouse from 1.9–3.3 s to 1.0–1.2 s, and the whole board from 3.8–6.0 s to
+2.7–2.9 s.
+
+```typescript
+new CaptchaKrakenSolver({ speed: 'fast' })
+new CaptchaKrakenSolver({ speed: 'fast', humanizeSettings: { mouse: { speedFactor: 3 } } })
+```
+
+```python
+PageSolverConfig(speed="fast")
+PageSolverConfig(speed="fast", humanize_settings={"mouse": {"speed_factor": 3}})
+```
+
+Unset, both ports read `CAPTCHA_SPEED`, then fall back to `human`.
+
+`humanizeSettings` (`humanize_settings` in Python) is handed straight to myuri
+and laid over the speed's own values, so whatever you set wins. Every key is
+listed in [myuri's settings](https://github.com/JWriter20/Myuri#settings):
+`mouse.speedFactor`, `overshoot.*`, `typing.wpm`, `typing.mistakeMultiplier`,
+`typing.pauses.*`, `variation`. JS keys are camelCase and Python keys are
+snake_case, as in myuri itself. An unknown key raises when the solver is
+constructed, not halfway through a solve.
 
 ### `mobile` — touch, not a smaller mouse
 

@@ -1,8 +1,9 @@
-"""Every capture is one unclipped viewport screenshot, cropped here.
+"""On Chromium every capture is one unclipped viewport screenshot, cropped here.
 
 A clipped capture — an element screenshot, or `page.screenshot(clip=...)` — makes a headed Chromium repaint the page
 at the clip's size for that frame, and the user watches the page flash and jump on every poll and every burst
-frame. Mirror of `js/src/a-capture-never-clips-the-page.test.ts`.
+frame. Firefox draws a clip offscreen, and there the clip is taken: its viewport capture cost a live Yidun solve
+2.6s. Mirror of `js/src/a-capture-never-clips-the-page.test.ts`.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from captchakraken.page_solver import (_STALE_HANDLE_RE, CaptureRect, PageSolver, crop_png,  # noqa: E402
-                                       enclosing_rect)
+from captchakraken.page_solver import (_GECKO_JS, _STALE_HANDLE_RE, CaptureRect, PageSolver,  # noqa: E402
+                                       crop_png, enclosing_rect)
 
 
 def _viewport_png(width: int, height: int) -> bytes:
@@ -37,18 +38,29 @@ def _pixels(png: bytes) -> np.ndarray:
 
 class FakePage:
     def __init__(self, viewport: Optional[Dict[str, float]] = None, dpr: int = 1,
-                 inner: Optional[Dict[str, float]] = None) -> None:
+                 inner: Optional[Dict[str, float]] = None, gecko: bool = False) -> None:
         self.viewport_size = viewport
+        self._gecko = gecko
+        self.engine_asks = 0
         self._inner = inner
         self._dpr = dpr
         self.shots: List[Dict[str, Any]] = []
 
     def screenshot(self, **kwargs: Any) -> bytes:
         self.shots.append(kwargs)
+        if "clip" in kwargs:
+            return self.screenshot_clip(kwargs)
         view = self.viewport_size or self._inner
         return _viewport_png(int(view["width"] * self._dpr), int(view["height"] * self._dpr))
 
-    def evaluate(self, *_: Any) -> Optional[Dict[str, float]]:
+    def screenshot_clip(self, kwargs: Dict[str, Any]) -> bytes:
+        clip = kwargs["clip"]
+        return _viewport_png(int(clip["width"] * self._dpr), int(clip["height"] * self._dpr))
+
+    def evaluate(self, script: Any = None, *_: Any) -> Any:
+        if script == _GECKO_JS:
+            self.engine_asks += 1
+            return self._gecko
         # A real window always answers; when nothing says otherwise its layout is the viewport.
         return self._inner if self._inner is not None else self.viewport_size
 
@@ -140,3 +152,25 @@ def test_a_mobile_layout_zoomed_out_to_fit_photographs_the_element(tmp_path: Pat
     _solver(page)._screenshot(element, str(tmp_path / "shot.png"))
     assert element.element_shots == 1
     assert page.shots == []
+
+
+def test_firefox_takes_the_clip_it_draws_offscreen(tmp_path: Path) -> None:
+    page = FakePage({"width": 640, "height": 480}, dpr=2, gecko=True)
+    element = FakeElement({"x": 10.5, "y": 20, "width": 100, "height": 50})
+    solver = _solver(page)
+    out = tmp_path / "shot.png"
+    for _ in range(3):
+        solver._screenshot(element, str(out), timeout_ms=1234)
+    clip = {"x": 10, "y": 20, "width": 101, "height": 50}
+    assert page.shots == [{"timeout": 1234, "animations": "disabled", "clip": clip}] * 3, page.shots
+    assert element.element_shots == 0
+    assert page.engine_asks == 1, "the engine is asked once per page, not once per capture"
+    assert _pixels(out.read_bytes()).shape == (100, 202, 3), "the clip lost the device pixel ratio"
+
+
+def test_a_page_that_cannot_say_its_engine_is_cropped(tmp_path: Path) -> None:
+    page = FakePage({"width": 640, "height": 480})
+    page.evaluate = lambda script=None, *_: (_ for _ in ()).throw(RuntimeError("closed")) if script == _GECKO_JS \
+        else page.viewport_size
+    _solver(page)._screenshot(FakeElement({"x": 0, "y": 0, "width": 30, "height": 20}), str(tmp_path / "x.png"))
+    assert page.shots == [{"timeout": 2500, "animations": "disabled"}]

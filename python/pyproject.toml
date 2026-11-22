@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "captchakraken"
-version = "5.1.0"
+version = "5.2.0"
 description = "Captcha-solving engine and CLI: a v2 pointer model for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,7 +43,7 @@ classifiers = [
 # `Requires-Python >=3.12`, so pip could not find it at all.
 #
 # The floor is 3.11 as of 3.0.0, and it moved because the MOUSE moved: `cursory`
-# declares `Requires-Python >=3.11` and drags numpy 2.3.x with it, which declares
+# (and now `myuri`, which installs it) declares `Requires-Python >=3.11` and drags numpy 2.3.x with it, which declares
 # the same. Neither is a pin we could have chosen differently — 2.2.6 was the
 # newest numpy covering 3.10, and cursory does not run there at all. Resolve
 # against the floor before changing any of these, and see TRIBAL_KNOWLEDGE.md.
@@ -64,10 +64,14 @@ dependencies = [
   "av==18.1.0",
   "requests==2.34.2",
   "python-dotenv==1.2.3",
-  # The mouse. LGPL-3.0-or-later, used as an ordinary installed dependency and
-  # never vendored or bundled, which is the arrangement the licence is written
-  # for — see NOTICE. Its TypeScript port `cursory-js` is the JS driver's
-  # dependency, and the two agree bit for bit on a seed.
+  # The mouse and the keyboard: human paths (on `cursory`, which it installs)
+  # and keystroke timing. LGPL-3.0-or-later, used as an ordinary installed
+  # dependency and never vendored or bundled, which is the arrangement the
+  # licence is written for — see NOTICE. Its TypeScript port `@jwriter20/myuri`
+  # is the JS driver's dependency, and the two agree bit for bit on a seed.
+  "myuri==5.1.0",
+  # Pinned exactly although myuri asks only for >=2.1,<3: the path is cursory's,
+  # and the cross-port test pins it against cursory-js 2.1.0.
   "cursory==2.1.0",
 ]
 

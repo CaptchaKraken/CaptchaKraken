@@ -90,10 +90,13 @@ export interface PlaywrightPage extends PlaywrightScope {
     up(options?: { button?: 'left' | 'right' | 'middle'; clickCount?: number }): Promise<void>;
   };
 
-  /** `type` is called per character by the humanizer; a constant `delay` would itself be a signal. */
+  /** The humanizer presses and releases each key at a planned time; a constant `delay` would itself be a signal. */
   keyboard: {
     type(text: string, options?: { delay?: number }): Promise<void>;
     press(key: string, options?: { delay?: number }): Promise<void>;
+    down(key: string): Promise<void>;
+    up(key: string): Promise<void>;
+    insertText(text: string): Promise<void>;
   };
 
   waitForTimeout(timeout: number): Promise<void>;
@@ -106,10 +109,11 @@ export interface PlaywrightPage extends PlaywrightScope {
   viewportSize(): ViewportSize | null;
 
   /** The whole viewport as a PNG: the driver's only capture, cropped locally, because a clipped one repaints the page. */
-  screenshot(options?: { timeout?: number; animations?: 'disabled' | 'allow'; style?: string; scale?: 'css' | 'device' }): Promise<Buffer>;
+  screenshot(options?: { timeout?: number; animations?: 'disabled' | 'allow'; style?: string; scale?: 'css' | 'device';
+    clip?: { x: number; y: number; width: number; height: number } }): Promise<Buffer>;
 
   /** Optional: the mouse humanizer asks the window for its size when `viewportSize()` is null (camoufox). */
-  evaluate?<R>(pageFunction: () => R): Promise<R>;
+  evaluate?<R>(pageFunction: (() => R) | string): Promise<R>;
 
   context?(): { newCDPSession(page: PlaywrightPage): Promise<any> };
 

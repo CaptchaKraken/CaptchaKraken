@@ -1072,9 +1072,27 @@ THE LICENCE IS THE PART TO BE CAREFUL WITH. CaptchaKraken and all its models are
 LGPL-3.0-only; Cursory's packages remain LGPL-3.0-or-later. They are ordinary
 installed dependencies: declared in `pyproject.toml` and `package.json`, resolved
 by the user's package manager, never vendored, inlined, or bundled. `tsc` leaves
-`require('cursory-js')` as a runtime import rather than inlining it, and
-`copy-python.mjs` copies only our own tree. Vendoring either one would change the
-distribution and notice obligations, so do not, and see NOTICE.
+`require('@jwriter20/myuri')` (which brings `cursory-js`) as a runtime import
+rather than inlining it, and `copy-python.mjs` copies only our own tree.
+Vendoring any of them would change the distribution and notice obligations, so
+do not, and see NOTICE.
+
+**Since 5.2.0 the driver reaches cursory through myuri**, which mirrors what
+camoufox did. myuri plays a recording at the mouse's own report rate instead of
+at a fixed `frequency`. It draws one person per seed (speed factor, overshoot,
+wpm, typo rate, each inside its `variation`), and it plans keystrokes as timed
+down/up pairs with rollover and corrected typos. Three things stayed ours.
+First, `_tame`: the recordings still swing up to 300 px off a 140 px line, and a
+drag carrying a piece cannot afford that. Second, `_densify`: myuri's samples
+can still be 70 ms and 230 px apart. Third, the pause table between gestures.
+`speed` is the only new knob. `fast` lays `mouse.speed_factor 2.5` and
+`typing.wpm 110` under the caller's `humanize_settings` and scales the pause
+table by 0.5. It exists because a customer's Yidun click-in-order board had a
+5 s budget and the mouse alone took 2 to 3.6 s of it. The settings passthrough
+refuses unknown keys at construction, as camoufox's does. A typo in a speed
+knob that silently did nothing is the failure this guards against. myuri's JS
+package is ESM-only and our client is CommonJS, so `require()` of it needs
+Node 20.19 or newer (require(esm)); `engines` says so.
 
 TWO PACKAGING CONSEQUENCES, both deliberate and both part of the major bump.
 The Python client's `numpy` pin moves from 2.2.6 to 2.3.5, because Cursory

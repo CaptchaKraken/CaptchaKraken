@@ -22,6 +22,7 @@ from .errors import CaptchaKrakenAPIError
 from .humanize import (
     Humanizer,
     MobileHumanizer,
+    Motion,
     MouseHumanizer,
     NullHumanizer,
     TouchBackend,
@@ -34,6 +35,7 @@ from .kinds import (
     PauseKind,
     PromptFamily,
     RetryMode,
+    Speed,
     Vendor,
     Verdict,
 )
@@ -85,6 +87,7 @@ __all__ = [
     "load_config",
     "Vendor",
     "HumanizationMode",
+    "Speed",
     # Results and errors
     "RoundVerdict",
     "Outcome",
@@ -96,8 +99,9 @@ __all__ = [
     "MouseHumanizer",
     "MobileHumanizer",
     "NullHumanizer",
+    "Motion",
     "TouchBackend",
     "PauseKind",
 ]
 
-__version__ = "5.1.0"
+__version__ = "5.2.0"

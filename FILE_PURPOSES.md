@@ -132,6 +132,7 @@ answers with a frame number the driver then waits for on screen.
 | `js/tsconfig.test.json` | The inverse: compiles every test **and everything it imports** to `.test-build/` for `node --test`, so adding a test cannot silently leave it unrun. |
 | `js/scripts/copy-python.mjs` | Build step that copies repo-root `python/` into `js/python/`, because npm can only pack files inside the package root and the engine has exactly one source of truth. Skips tests, venvs and caches. |
 | `js/bin/captchakraken.js` | `npx captchakraken`: forwards to the Python engine's command in the package's own environment. |
+| `js/scripts/record-mouse-cross-port.cjs` | Records `python/tests/fixtures/myuri_cross_port.json` from the built JS port, so Tier 1 (which has no node) can pin the Python mouse to it exactly. Never re-run it to make that test pass. |
 | `js/scripts/setup-python.js` | The `postinstall`: create a venv beside the bundled engine and install it, so `captchakraken` works out of the box. Opt out with `CAPTCHA_KRAKEN_SKIP_PYTHON_SETUP=1`; force an interpreter with `CAPTCHA_KRAKEN_PYTHON`. |
 
 ### `js/src/` — runtime
@@ -308,7 +309,7 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/keyframes.py` | Reduces a recorded clip to the few frames the model is shown. A verbatim port of the extractor the model was trained with — if this copy sliced differently, the frame number the model answers with would name a picture that does not exist. Its region-diff metric is also the driver's wait-for-state gate. |
 | `python/src/captchakraken/clipvideo.py` | Turns a recorded clip into the frames a video-generation model watches, and maps the time it answers with back to the recorded frame the driver waits for. A verbatim port of the module the model was trained with. |
 | `python/src/captchakraken/humanize.py` | The Python mirror of `js/src/humanize.ts`: one pluggable object per input device. |
-| `NOTICE` | Third-party licence notices — currently Cursory (LGPL), used as an installed dependency and never vendored. |
+| `NOTICE` | Third-party licence notices — Myuri and the Cursory it installs (LGPL), used as installed dependencies and never vendored. |
 | `python/src/captchakraken/selfhost.py` | `captchakraken fetch`: ask for a model, GPU and startup mode in the terminal (or take one by name, like `abyss`), check a licensed model's Hugging Face access before anything installs, then install the serving stack, download the weights, record the choices in `selfhost.json` and start the server. |
 | `python/src/captchakraken/demo.py` | `captchakraken demo`: solve the vendors' public demo pages through whatever this install points at, from its own small browser environment. |
 | `python/src/captchakraken/server_manager.py` | Hands-off local vLLM lifecycle: start in the background and wait until healthy, run in the foreground, stop, report status, and auto-start on the first solve unless told not to. |
@@ -407,7 +408,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_a_board_with_no_answer_is_skipped.py` | A board the model has no answer for presses Skip for a new one, instead of being re-asked until the loop cap; an unread text captcha is never submitted empty. |
 | `python/tests/test_a_typed_answer_is_sent.py` | A typed answer is sent: BotDetect's Validate beside the widget is pressed after typing, a host form's own Submit never is, and CyberSiara's self-checking modal is found and typed into with nothing pressed. |
 | `python/tests/test_an_unchanged_board_keeps_its_hash.py` | An unchanged board keeps its hash while a verdict toast comes and goes: the identity's photograph leaves every feedback selector out, and the model's photograph does not. |
-| `python/tests/test_the_notice_travels_with_the_package.py` | The LGPL notice for Cursory has to reach both published packages, and three copies are three chances to drift. |
+| `python/tests/test_the_notice_travels_with_the_package.py` | The LGPL notice for Myuri and Cursory has to reach both published packages, and three copies are three chances to drift. |
 | `python/tests/test_grid_round_pays_once.py` | One grid round costs one detection, not one per cell. |
 | `python/tests/test_hcaptcha_badge_detection.py` | A photo is not a selection badge: the selected-state check must not read tile content as a tick. |
 | `python/tests/test_freshness_check.py` | The stale-frame guard: an image that changed while the model was thinking must not be acted on. |
@@ -446,7 +447,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_overlay_is_what_the_model_reads.py` | `add_overlays_to_image` is exported API and the model reads what it draws. Pins where marks land for each of the two accepted bbox forms, that the source is not overwritten when an output path is given, that the result is RGB, and that an unusable box raises instead of writing a wrong overlay. |
 | `python/tests/test_find_checkbox_rejects_what_is_not_a_checkbox.py` | The tick box of every vendor's widget is found by pixel arithmetic on real captures in a language none of its thresholds were tuned against; a ticked widget, GeeTest's selector-clicked bar, a blank page, a grid tile, a disc and an unreadable file give none; every fixture on disk is named by one of its lists. |
 | `python/tests/test_the_two_ports_share_one_mouse.py` | The mouse is a port, not a rewrite, so the two drivers agree on a seed exactly rather than statistically. |
-| `python/tests/fixtures/cursory_cross_port.json` | The recorded JS-port trajectories `test_the_two_ports_share_one_mouse.py` checks the Python port against: four seeds, points and timings. |
+| `python/tests/fixtures/myuri_cross_port.json` | The recorded JS-port trajectories `test_the_two_ports_share_one_mouse.py` checks the Python port against: four seeds across both speeds and a settings override, points and timings after taming and densifying. Recorded by `js/scripts/record-mouse-cross-port.cjs`. |
 | `python/tests/fixtures/grid/groceries_6x3_mac.png` | A 6x3 grocery board as the engine received it on macOS, where scrollbars shift the layout; a grid tile find_checkbox must not take for a tick box. |
 | `python/tests/fixtures/grid/photos_3x3_offcentre.png` | An hCaptcha 3x3 photo grid sitting off-centre in its panel, as the engine received it; a grid tile find_checkbox must not take for a tick box. |
 | `python/tests/fixtures/checkbox/captchafox.png` | CaptchaFox's widget, captured in a language none of find_checkbox's thresholds were tuned against; a find_checkbox fixture. |

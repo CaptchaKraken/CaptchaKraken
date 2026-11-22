@@ -6,10 +6,12 @@ import {
   AppiumTouchBackend,
   touchBackendFor,
   MobileHumanizer,
+  Motion,
   MouseHumanizer,
   NullHumanizer,
   PAUSE_KINDS,
   resolveHumanizer,
+  resolveSpeed,
   trajectory,
   MAX_EVENT_GAP_MS,
   MAX_EVENT_STEP_PX,
@@ -18,6 +20,7 @@ import {
   type TouchBackend,
   type TouchSample,
 } from './humanize.js';
+import { Speed } from './kinds.js';
 import type { Page } from './playwright-types.js';
 
 class RecordingPage {
@@ -339,7 +342,7 @@ class NoViewportPage extends RecordingPage {
 
 test('no viewport and no window means no clamp at all', async () => {
   const page = new NoViewportPage();
-  await new MouseHumanizer([10, 10], 1000).move(page.asPage(), [3000, 50]);
+  await new MouseHumanizer([10, 10], new Motion(undefined, 1, Speed.FAST)).move(page.asPage(), [3000, 50]);
   const last = page.moves()[page.moves().length - 1];
   assert.deepEqual(last, [3000, 50], 'the path must reach its target, not a guessed 1920 edge');
 });
@@ -347,7 +350,7 @@ test('no viewport and no window means no clamp at all', async () => {
 test('no viewport but a window clamps to the window, like Python', async () => {
   const page = new NoViewportPage();
   page.inner = { width: 1366, height: 768 };
-  await new MouseHumanizer([10, 10], 1000).move(page.asPage(), [3000, 50]);
+  await new MouseHumanizer([10, 10], new Motion(undefined, 1, Speed.FAST)).move(page.asPage(), [3000, 50]);
   for (const [x, y] of page.moves()) {
     assert.ok(x >= 1 && x <= 1365 && y >= 1 && y <= 767, `(${x}, ${y}) left the 1366x768 window`);
   }
@@ -356,12 +359,12 @@ test('no viewport but a window clamps to the window, like Python', async () => {
 
 test('a known viewport clamps to one pixel inside its edge', async () => {
   const page = new RecordingPage();
-  await new MouseHumanizer([10, 10], 1000).move(page.asPage(), [3000, 50]);
+  await new MouseHumanizer([10, 10], new Motion(undefined, 1, Speed.FAST)).move(page.asPage(), [3000, 50]);
   const moves = page.events.filter((e) => e[0] === 'move'); const last = moves[moves.length - 1];
   assert.deepEqual([last[1], last[2]], [799, 50]);
 });
 
-// cursory's samples were up to 250 ms and 560 px apart, and a 5 px reach swung 61 px wide: a cursor that vanished
+// myuri's recorded reports can be 70 ms and 230 px apart, and a 5 px reach once swung 61 px wide: a cursor that vanished
 // and reappeared, and darted about while it waited.
 test('a reach never teleports and stays near the line between its ends', () => {
   const reaches: [[number, number], [number, number]][] = [
@@ -370,7 +373,7 @@ test('a reach never teleports and stays near the line between its ends', () => {
   for (const [s, e] of reaches) {
     const limit = Math.max(MIN_DEVIATION_PX, MAX_DEVIATION * Math.hypot(e[0] - s[0], e[1] - s[1]));
     for (let k = 0; k < 50; k++) {
-      const [points, timings] = trajectory(s, e, 60);
+      const [points, timings] = trajectory(s, e);
       assert.deepEqual(points[0], s);
       assert.deepEqual(points[points.length - 1], e);
       for (let i = 1; i < points.length; i++) {
@@ -383,5 +386,76 @@ test('a reach never teleports and stays near the line between its ends', () => {
         assert.ok(Math.hypot(p[0] - s[0] - t * dx, p[1] - s[1] - t * dy) <= limit + 1e-6);
       }
     }
+  }
+});
+
+// Speed. A customer's three-icon board spent 2-3.6s of a 5s budget on the mouse; `fast` is the lever.
+const meanMoveMs = (motion: Motion) => {
+  let total = 0;
+  for (let k = 0; k < 30; k++) { const [, t] = trajectory([100, 100], [300, 250], motion); total += t[t.length - 1]; }
+  return total / 30;
+};
+
+test('fast reaches in well under the time a human speed takes', () => {
+  const human = meanMoveMs(new Motion(undefined, 3, Speed.HUMAN));
+  const fast = meanMoveMs(new Motion(undefined, 3, Speed.FAST));
+  assert.ok(fast < human * 0.6, `fast ${fast.toFixed(0)}ms vs human ${human.toFixed(0)}ms`);
+});
+
+test('fast still never teleports', () => {
+  const [points, timings] = trajectory([50, 50], [900, 600], new Motion(undefined, 5, Speed.FAST));
+  for (let i = 1; i < points.length; i++) {
+    assert.ok(timings[i] - timings[i - 1] <= MAX_EVENT_GAP_MS + 1e-9);
+    assert.ok(Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]) <= MAX_EVENT_STEP_PX + 1e-9);
+  }
+});
+
+test('fast halves the waits between gestures', () => {
+  assert.equal(new Motion(undefined, 1, Speed.FAST).pauseScale, 0.5);
+  assert.equal(new Motion(undefined, 1, Speed.HUMAN).pauseScale, 1);
+});
+
+test('humanizeSettings reach myuri and win over the speed preset', () => {
+  const slow = new Motion({ mouse: { speedFactor: 0.5 }, variation: 0 }, 1, Speed.FAST);
+  assert.equal(slow.settings.mouse.speedFactor, 0.5);
+  const h = resolveHumanizer({ speed: Speed.FAST, humanizeSettings: { variation: 0 } }) as MouseHumanizer;
+  assert.equal(h.motion.settings.mouse.speedFactor, 2.5);
+  assert.equal(h.motion.settings.typing.wpm, 110);
+});
+
+test('an unknown humanizeSettings key is refused at construction', () => {
+  assert.throws(() => resolveHumanizer({ humanizeSettings: { mouse: { speed: 2 } } as any }), /unknown setting 'mouse\.speed'/);
+  assert.throws(() => new Motion({ nope: 1 } as any), /humanizeSettings/);
+});
+
+test('speed comes from config, then CAPTCHA_SPEED, and an unknown one is refused', () => {
+  const saved = process.env.CAPTCHA_SPEED;
+  try {
+    delete process.env.CAPTCHA_SPEED;
+    assert.equal(resolveSpeed({}), Speed.HUMAN);
+    process.env.CAPTCHA_SPEED = 'FAST';
+    assert.equal(resolveSpeed({}), Speed.FAST);
+    assert.equal(resolveSpeed({ speed: Speed.HUMAN }), Speed.HUMAN);
+    assert.throws(() => resolveSpeed({ speed: 'ludicrous' as any }), /unknown speed 'ludicrous'/);
+  } finally {
+    if (saved === undefined) delete process.env.CAPTCHA_SPEED; else process.env.CAPTCHA_SPEED = saved;
+  }
+});
+
+test('typing presses and releases each key and leaves the answer in the box', async () => {
+  const keys: [string, string][] = [];
+  let box = '';
+  const page = { keyboard: {
+    press: async () => {}, type: async (t: string) => { box += t; },
+    down: async (k: string) => { keys.push(['down', k]); if (k === 'Backspace') box = box.slice(0, -1); else if (k.length === 1) box += k; },
+    up: async (k: string) => { keys.push(['up', k]); },
+    insertText: async (t: string) => { box += t; },
+  } } as any;
+  for (let seed = 0; seed < 20; seed++) {
+    box = ''; keys.length = 0;
+    const h = new MouseHumanizer([0, 0], new Motion({ typing: { mistakeMultiplier: 6 } }, seed, Speed.FAST));
+    assert.equal(await h.typeText(page, {} as any, 'kq7Zp2'), true);
+    assert.equal(box, 'kq7Zp2', `seed ${seed}`);
+    assert.equal(keys.filter(([k]) => k === 'down').length, keys.filter(([k]) => k === 'up').length, 'a key left held');
   }
 });

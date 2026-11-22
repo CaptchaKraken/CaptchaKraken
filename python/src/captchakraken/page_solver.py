@@ -23,7 +23,7 @@ from . import config, planner
 from .action_types import CaptchaAction
 from .humanize import Humanizer, hold, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
-                    RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
+                    RecaptchaBanner, RetryMode, SettleVerdict, Speed, Vendor, Verdict)
 from .selectors import DEFAULT_CONFIG_PATH, DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe
 from .server_manager import ensure_server
 from .solver import AnimatedRecording, CaptchaSolver, UnsupportedCaptchaError, cut_recording
@@ -128,6 +128,22 @@ _FRAME_JS = ("() => ({ width: window.innerWidth, height: window.innerHeight,"
 def _viewport_of(page: Any) -> Dict[str, float]:
     """`viewport_size` is None on a context launched without one (camoufox), where only the window knows."""
     return page.viewport_size or page.evaluate(_VIEWPORT_JS)
+
+
+# Gecko answers with a number and Chromium/WebKit have no such property. Camoufox spoofs the user agent, not this.
+_GECKO_JS = "() => typeof mozInnerScreenX === 'number'"
+
+
+def _draws_clips_offscreen(page: Any) -> bool:
+    """Is this Firefox, whose clipped capture renders the rect offscreen (`drawSnapshot`) and repaints nothing?
+
+    Chromium is the engine that flashes on a clip, and the reason every other capture is viewport-and-crop. On Firefox
+    the full viewport costs ~420ms to the clip's ~100ms; a still Yidun board took 8 of them, 2.6s of its solve.
+    """
+    try:
+        return page.evaluate(_GECKO_JS) is True
+    except Exception:
+        return False
 
 
 def _layout_is_the_viewport(page: Any, view: Dict[str, float]) -> bool:
@@ -321,6 +337,11 @@ HOLD_MAX_MS = 12000
 class PageSolverConfig:
     humanization: Optional[HumanizationMode] = None
     humanizer: Optional[Humanizer] = None
+    # "human" (default) or "fast": fast plays myuri's recorded paths 2.5x faster and halves the waits between
+    # gestures. CAPTCHA_SPEED sets it when this is None.
+    speed: Optional[Speed] = None
+    # myuri settings laid over the speed's, e.g. {"mouse": {"speed_factor": 3}}; an unknown key raises at construction.
+    humanize_settings: Optional[Dict[str, Any]] = None
     # Every URL pattern and selector the solver detects and drives with: a path to a config file of the shape of the
     # repository's `captchakraken.config.json`, or the parsed object. What it gives is laid over the shipped default,
     # so a file holding only a `custom` entry adds that entry and keeps every built-in vendor.
@@ -653,6 +674,8 @@ class PageSolver:
 
     def _reset_animated_state(self) -> None:
         self._acted_on_board = False
+        # (page, is Firefox), asked once per page: see _draws_clips_offscreen.
+        self._gecko: Optional[Tuple[Any, bool]] = None
         self._submitted_on_board = False
         self._known_animated = False
         self._animated_probe_armed = False
@@ -1783,9 +1806,10 @@ class PageSolver:
                     animations: str = "disabled", style: Optional[str] = None, scale: str = "device") -> None:
         """Every capture the driver takes: the whole viewport, cropped here to the element.
 
-        Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at
-        the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
-        capture repaints nothing, and measured twice as fast. Short timeout; `disabled` freezes CSS animation,
+        Never a clipped capture on Chromium. An element screenshot, or any `clip`, makes a headed Chromium repaint
+        the page at the clip's size for that frame, which the user watches as the page flashing and jumping; a
+        viewport capture repaints nothing, and measured twice as fast. Firefox is the exception: it draws a clip
+        offscreen, and there the clip is four times faster than the viewport (see `_draws_clips_offscreen`). Short timeout; `disabled` freezes CSS animation,
         so bursts and the keyframe gate pass `allow`. `style` is CSS applied for this capture only. `scale="css"`
         takes one pixel per CSS pixel: the slide loop's choice, since on a phone (DPR 2.6) a device-pixel frame is
         seven times the pixels and its tracking took 4.7 s of an 11.6 s solve.
@@ -1801,8 +1825,13 @@ class PageSolver:
             # coordinates, so the element photographs itself.
             _shot(element.screenshot, style, path=path, timeout=timeout, animations=animations, **kw)
             return
-        png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations, **kw), rect,
-                       view["width"])
+        if self._gecko is None or self._gecko[0] is not page:
+            self._gecko = (page, _draws_clips_offscreen(page))
+        if self._gecko[1]:
+            png = _shot(page.screenshot, style, timeout=timeout, animations=animations, clip=rect._asdict(), **kw)
+        else:
+            png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations, **kw), rect,
+                           view["width"])
         with open(path, "wb") as fh:
             fh.write(png)
 

@@ -3,6 +3,38 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [5.2.0] - Unreleased
+
+### Added
+
+- **`speed: 'fast'`** (`PageSolverConfig(speed="fast")`, or `CAPTCHA_SPEED=fast`)
+  plays the same recorded human paths 2.5x faster, types at about 110 wpm, and
+  halves the waits between gestures. On a three-icon click-in-order board it cut
+  the board from 3.8–6.0 s to 2.7–2.9 s, all solved on the first try. The
+  default, `human`, is unchanged.
+- **`humanizeSettings`** (`humanize_settings` in Python) passes any
+  [myuri setting](https://github.com/JWriter20/Myuri#settings) straight through,
+  laid over the speed's values. An unknown key raises when the solver is
+  constructed.
+- `Speed` and `Motion` are exported from both packages.
+
+### Changed
+
+- **The mouse and keyboard now run on myuri** (`myuri` 5.1.0 on PyPI,
+  `@jwriter20/myuri` 5.1.0 on npm), the same move camoufox made. The paths are
+  still cursory's recordings. myuri plays them at the mouse's own report rate,
+  draws one consistent person per solve, and types with timed key presses,
+  rollover and corrected typos instead of one `type()` per character. Both
+  ports still agree exactly on a seed.
+- The JS client needs **Node 20.19 or newer**: myuri is ESM-only, and our
+  CommonJS build loads it with `require()`. `engines` now says so.
+- `MouseHumanizer` and `MobileHumanizer` still accept `frequency` but ignore
+  it, because myuri samples at the recording's own rate. Pass
+  `motion=Motion(...)` (`new Motion(...)` in JS) to control the hand.
+- A page object handed to the JS solver needs `keyboard.down`, `keyboard.up`
+  and `keyboard.insertText`. Playwright has them, and the Puppeteer adapter
+  maps them.
+
 ## [5.1.0] - 2026-11-16
 
 ### Added

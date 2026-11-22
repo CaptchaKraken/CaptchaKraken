@@ -22,6 +22,6 @@ export { CaptchaKrakenAPIError } from './errors';
 export type { CaptchaKrakenErrorCode } from './errors';
 
 // Humanizers: the built-in three, and what one of your own implements
-export { MobileHumanizer, MouseHumanizer, NullHumanizer } from './humanize';
-export type { Humanizer, Point, TouchBackend, TouchTransform } from './humanize';
-export { PauseKind } from './kinds';
+export { MobileHumanizer, Motion, MouseHumanizer, NullHumanizer } from './humanize';
+export type { HumanizeSettings, Humanizer, Point, TouchBackend, TouchTransform } from './humanize';
+export { PauseKind, Speed } from './kinds';

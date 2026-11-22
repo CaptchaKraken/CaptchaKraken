@@ -7,7 +7,18 @@ General Public License, version 3 only (LGPL-3.0-only), which governs
 everything in this repository that is not listed here.
 
 ────────────────────────────────────────────────────────────────────────────
-Cursory  —  mouse trajectory generation
+Myuri  —  human mouse paths and keystroke timing
+────────────────────────────────────────────────────────────────────────────
+
+  myuri             https://github.com/JWriter20/Myuri   (Python, PyPI: myuri)
+  @jwriter20/myuri  https://github.com/JWriter20/Myuri   (TypeScript, npm: @jwriter20/myuri)
+
+  Copyright (c) Jake Writer and the Myuri contributors.
+  Licensed under the GNU Lesser General Public License, version 3 or later
+  (LGPL-3.0-or-later). A copy is available at https://www.gnu.org/licenses/lgpl-3.0.html
+
+────────────────────────────────────────────────────────────────────────────
+Cursory  —  mouse trajectory generation, installed by Myuri
 ────────────────────────────────────────────────────────────────────────────
 
   cursory      https://github.com/Vinyzu/cursory      (Python, PyPI: cursory)
@@ -17,20 +28,21 @@ Cursory  —  mouse trajectory generation
   Licensed under the GNU Lesser General Public License, version 3 or later
   (LGPL-3.0-or-later). A copy is available at https://www.gnu.org/licenses/lgpl-3.0.html
 
-  HOW WE USE IT, AND WHY THAT MATTERS. Both are ORDINARY INSTALLED
-  DEPENDENCIES — `cursory` is declared in python/pyproject.toml and `cursory-js`
-  in js/package.json, and each is resolved by the user's own package manager at
-  install time. Neither is vendored into this repository, copied into our
-  sources, or bundled into a build artifact: the TypeScript build is `tsc`, which
-  leaves `require('cursory-js')` as a runtime import rather than inlining it, and
+  HOW WE USE THEM, AND WHY THAT MATTERS. All four are ORDINARY INSTALLED
+  DEPENDENCIES — `myuri` is declared in python/pyproject.toml and
+  `@jwriter20/myuri` in js/package.json, each brings its cursory port as its own
+  dependency, and all are resolved by the user's own package manager at install
+  time. None is vendored into this repository, copied into our sources, or
+  bundled into a build artifact: the TypeScript build is `tsc`, which leaves
+  `require('@jwriter20/myuri')` as a runtime import rather than inlining it, and
   `js/scripts/copy-python.mjs` copies only our own `python/` tree.
 
   That arrangement is the one the LGPL is written for, and it is what lets this
-  product remain under its own licence. It also means a user may replace either
-  library with a modified version of their own — reinstall the package, and the
-  driver picks it up — which is the freedom section 4 of the LGPL requires be
-  preserved. Do not vendor, inline, or bundle either one without taking legal
+  product remain under its own licence. It also means a user may replace any of
+  these libraries with a modified version of their own — reinstall the package,
+  and the driver picks it up — which is the freedom section 4 of the LGPL requires be
+  preserved. Do not vendor, inline, or bundle any of them without taking legal
   advice first; doing so is the change that would put this obligation somewhere
   other than where it now sits.
 
-  We have not modified either library.
+  We have not modified any of them.
