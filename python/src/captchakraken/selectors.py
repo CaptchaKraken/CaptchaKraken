@@ -263,8 +263,17 @@ class SelectorTable:
             for vendor, s in self.vendors
             for selector in getattr(s, key))
         self.enclave: Sequence[str] = self._of_every_vendor("enclave")
+        # The frames a widget may sit inside: a vendor's enclave, or any frame no vendor serves (a block page, a modal,
+        # an embed). A vendor's own frame is its widget, read through the probes, never searched as a page.
+        self.frames: Sequence[str] = (
+            *self.enclave, "iframe" + "".join(f':not([src*="{h}"])' for _, v in self.vendors for h in v.hosts))
         self.response: Sequence[str] = tuple(s.response for _, s in self.vendors if s.response)
         self.accepted: Sequence[str] = tuple(s.accepted for _, s in self.vendors if s.accepted)
+        # Anything of a vendor's a document can hold. A frame walked into that holds none of it (an ad, a login button) is
+        # passed through to the frames inside it, but no probe is read in it: every probe costs a round trip per frame.
+        self.markers: str = ", ".join(dict.fromkeys((
+            *(p.selector for p in self.widget_probes), *self.response, *self.accepted, *self.enclave,
+            *self._of_every_vendor("passive"), *(f'iframe[src*="{h}"]' for _, v in self.vendors for h in v.hosts))))
         # A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks.
         self.submit_vendor: Sequence[str] = self._of_every_vendor("submit")
         self.submit: Sequence[str] = (*map(submit_by_text, loaded.generic["submit_text"]), *self.submit_vendor)
@@ -289,6 +298,7 @@ DEFAULT_TABLE = SelectorTable(config=DEFAULT_CONFIG)
 VENDORS = DEFAULT_TABLE.vendors
 WIDGET_PROBES = DEFAULT_TABLE.widget_probes
 ENCLAVE_SELECTORS = DEFAULT_TABLE.enclave
+FRAME_SELECTORS = DEFAULT_TABLE.frames
 RESPONSE_SELECTORS = DEFAULT_TABLE.response
 ACCEPTED_SELECTORS = DEFAULT_TABLE.accepted
 SUBMIT_SELECTORS = DEFAULT_TABLE.submit

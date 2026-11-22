@@ -277,8 +277,18 @@ export class SelectorTable {
   /** Every host-page selector with what it names, in detection order: open challenges, then checkboxes, then inline widgets. */
   readonly widgetProbes: ReadonlyArray<WidgetProbe>;
   readonly enclave: readonly string[];
+  /**
+   * The frames a widget may sit inside: a vendor's enclave, or any frame no vendor serves (a block page, a modal, an
+   * embed). A vendor's own frame is its widget, read through the probes, never searched as a page.
+   */
+  readonly frames: readonly string[];
   readonly response: readonly string[];
   readonly accepted: readonly string[];
+  /**
+   * Anything of a vendor's a document can hold. A frame walked into that holds none of it (an ad, a login button) is
+   * passed through to the frames inside it, but no probe is read in it: every probe costs a round trip per frame.
+   */
+  readonly markers: string;
   /** A real Verify/Next/Submit/Skip/Confirm first; the vendor-named controls are fallbacks. */
   readonly submit: readonly string[];
   readonly textInputVendor: readonly string[];
@@ -311,8 +321,14 @@ export class SelectorTable {
     this.widgetProbes = DETECTED_BY.flatMap(([role, key]) =>
       this.vendors.flatMap(([vendor, s]) => (s[key] ?? []).map((selector) => ({ vendor, role, selector }))));
     this.enclave = every('enclave');
+    this.frames = [...this.enclave, `iframe${this.vendors.flatMap(([, s]) => s.hosts).map((h) => `:not([src*="${h}"])`).join('')}`];
     this.response = this.vendors.flatMap(([, s]) => s.response ?? []);
     this.accepted = this.vendors.flatMap(([, s]) => s.accepted ?? []);
+    this.markers = [...new Set([
+      ...this.widgetProbes.map((p) => p.selector), ...this.response, ...this.accepted, ...this.enclave,
+      ...this.vendors.flatMap(([, s]) => s.passive ?? []),
+      ...this.vendors.flatMap(([, s]) => s.hosts.map((h) => `iframe[src*="${h}"]`)),
+    ])].join(', ');
     this.submitVendor = every('submit');
     this.submit = [...loaded.generic.submit_text.map(submitByText), ...this.submitVendor];
     this.textInputVendor = every('textInput');
@@ -331,6 +347,7 @@ export const DEFAULT_TABLE = new SelectorTable(undefined, DEFAULT_CONFIG);
 export const VENDORS = DEFAULT_TABLE.vendors;
 export const WIDGET_PROBES = DEFAULT_TABLE.widgetProbes;
 export const ENCLAVE_SELECTORS = DEFAULT_TABLE.enclave;
+export const FRAME_SELECTORS = DEFAULT_TABLE.frames;
 export const RESPONSE_SELECTORS = DEFAULT_TABLE.response;
 export const ACCEPTED_SELECTORS = DEFAULT_TABLE.accepted;
 export const SUBMIT_SELECTORS = DEFAULT_TABLE.submit;

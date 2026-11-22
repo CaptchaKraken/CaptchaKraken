@@ -90,8 +90,9 @@ export function fakeDom(nodes: FakeNode[], opts: Options = {}): PlaywrightFrame 
 export function iframeMatches(src: string, selectors: readonly string[] = WIDGET_PROBES.map((p) => p.selector)): string[] {
   const wants = (sel: string) => [...sel.matchAll(/\[src\*="([^"]+)"\]/g)].map((m) => m[1]);
   return selectors.filter((sel) => {
-    if (!sel.startsWith('iframe[src')) return false;
-    const [positive, negative = ''] = sel.split(':not(');
+    if (!sel.startsWith('iframe[src') && !sel.startsWith('iframe:not(')) return false;
+    const cut = sel.includes(':not(') ? sel.indexOf(':not(') : sel.length;
+    const [positive, negative] = [sel.slice(0, cut), sel.slice(cut)];
     return wants(positive).every((s) => src.includes(s)) && wants(negative).every((s) => !src.includes(s));
   });
 }
