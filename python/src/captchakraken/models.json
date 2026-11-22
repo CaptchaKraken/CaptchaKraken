@@ -204,18 +204,18 @@
       },
       "note": "Abyss V2 at bf16, the full-precision alternative to AbyssV2-q4. Gated like it."
     },
-    "CaptchaKraken/AbyssV2-Yidun-q4": {
+    "CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision": {
       "availability": "licensed",
       "prompt_version": "4",
       "kind": "merged",
-      "base_model": "CaptchaKraken/AbyssV2-Yidun-q4",
+      "base_model": "CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision",
       "lora_revision": "main",
       "lora_name": "captcha-pointer",
       "pixel_budget": {
         "min": 4096,
         "max": 518400
       },
-      "note": "Abyss V2 tuned for Yidun icon click-in-order boards, at Q4. Same architecture, heads and pixel band as AbyssV2-q4, so it is served the same way. Sold separately: its gated repo opens by hand once a purchase is confirmed, and `captchakraken fetch abyss-yidun` installs it."
+      "note": "A custom model for Yidun icon click-in-order boards: Abyss V2 tuned on them, at Q4. Same architecture, heads and pixel band as AbyssV2-q4, so it is served the same way. Sold separately: its gated repo opens by hand once a purchase is confirmed, and `captchakraken fetch custom-yidun` installs it."
     },
     "CaptchaKraken/CaptchaKraken-Lora-v1.2": {
       "prompt_version": "2",

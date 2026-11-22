@@ -149,11 +149,11 @@ def test_a_free_model_never_asks_the_hub(hub_home, monkeypatch):
     assert selfhost.fetch(yes=True, model="MidnightV2-4B-q4") == 0
 
 
-YIDUN = "CaptchaKraken/AbyssV2-Yidun-q4"
+YIDUN = "CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision"
 
 
 def test_the_yidun_model_is_fetched_by_name_and_never_offered_in_the_menu():
-    assert selfhost._from_flags([GPU], {}, "abyss-yidun", None, None).model.repo == YIDUN
+    assert selfhost._from_flags([GPU], {}, "custom-yidun", None, None).model.repo == YIDUN
     assert prompts.resolve(YIDUN).pointer and prompts.is_licensed(YIDUN)
     assert YIDUN not in {m.repo for m in selfhost.listed_models()}
     with pytest.raises(RuntimeError) as exc:
@@ -178,4 +178,4 @@ def test_a_refused_yidun_account_installs_nothing(hub_home, monkeypatch):
     monkeypatch.setattr(selfhost, "_HUB_REQUEST", _hub(readable=False))
     monkeypatch.setenv("HF_TOKEN", "hf_good")
     monkeypatch.setattr(selfhost, "install", lambda *a: pytest.fail("installed without access"))
-    assert selfhost.fetch(yes=True, model="abyss-yidun") == 1
+    assert selfhost.fetch(yes=True, model="custom-yidun") == 1

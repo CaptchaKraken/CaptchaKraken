@@ -17,7 +17,7 @@ semantic versioning; v2 is a major, **breaking** release.
   laid over the speed's values. An unknown key raises when the solver is
   constructed.
 - `Speed` and `Motion` are exported from both packages.
-- **`captchakraken fetch abyss-yidun`** installs Abyss V2 Yidun Q4, Abyss tuned for
+- **`captchakraken fetch custom-yidun`** installs CaptchaKraken-Custom-Yidun-Commision, Abyss tuned for
   Yidun icon click-in-order boards. It is sold separately and reached only by
   name, never offered in the `fetch` menu; an account without access is told to
   ask the CaptchaKraken team rather than sent to the Abyss Licence page.

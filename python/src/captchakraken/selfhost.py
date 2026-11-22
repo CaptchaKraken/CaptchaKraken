@@ -72,8 +72,8 @@ MODELS = (
     Model("CaptchaKraken/AbyssV2-q4", "Abyss V2 Q4", "our most accurate model, needs an Abyss Licence",
           3.8, 8, aliases=("abyss",)),
     Model("CaptchaKraken/AbyssV2", "Abyss V2", "Abyss at full precision, needs an Abyss Licence", 9.1, 16),
-    Model("CaptchaKraken/AbyssV2-Yidun-q4", "Abyss V2 Yidun Q4", "Abyss tuned for Yidun icon click-in-order boards",
-          3.8, 8, aliases=("abyss-yidun",), listed=False,
+    Model("CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision", "CaptchaKraken Custom Yidun", "Abyss tuned for Yidun icon click-in-order boards",
+          3.8, 8, aliases=("custom-yidun",), listed=False,
           access="  Access to this model is granted by hand once its purchase is confirmed: send the CaptchaKraken team\n"
                  "  your Hugging Face username. Then run this again."),
 )
