@@ -1,11 +1,15 @@
 """`captchakraken fetch`: ask which model, GPU and startup mode, then install, download and start it.
 
+A licensed model (Abyss) downloads from a gated Hub repo as the licence holder's own Hugging Face account,
+so `fetch` checks that account can read it before the 8 GB serving stack installs, and says what to do if not.
+
 Everything lands under the state directory and the choices live in `selfhost.json`, so a solve, the
 server and `captchakraken start` read one file and nobody exports anything or edits their PATH.
 The serving stack gets its own environment because the one running this command may be a throwaway:
 npx and pipx both evict theirs, and a server must not break when they do.
 """
 
+import getpass
 import json
 import os
 import secrets
@@ -16,9 +20,12 @@ import sys
 import venv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, NamedTuple, Optional, Sequence
+from typing import Callable, List, NamedTuple, Optional, Sequence, Tuple
 
-from . import __version__, config, server_manager
+import requests
+
+from . import __version__, config, prompts, server_manager
+from .updater import PLANS_URL
 
 ALWAYS_ON = "always"
 FIRST_SOLVE = "first-solve"
@@ -40,6 +47,20 @@ class Model:
     min_vram_gb: int
     # Its share of a small card. Twilight's full-precision weights leave no KV cache at the default (measured, 8 GB).
     small_card_utilization: float = 0.72
+    # Other names `fetch <name>` and `--model` accept, besides the repo and its last part.
+    aliases: Tuple[str, ...] = ()
+    # False keeps it out of the interactive menu: a single-purpose model is reached by name, never offered to everyone.
+    listed: bool = True
+    # How an account without access gets it; empty means the Abyss Licence.
+    access: str = ""
+
+    @property
+    def licensed(self) -> bool:
+        """Read from the registry, the one place that says which weights are gated."""
+        return prompts.is_licensed(self.repo)
+
+    def named(self, wanted: str) -> bool:
+        return wanted.lower() in {n.lower() for n in (self.repo, self.repo.split("/")[-1], *self.aliases)}
 
 
 # Sunlight is absent on purpose: its published heads predate this client's layout and refuse to load.
@@ -48,7 +69,18 @@ MODELS = (
           3.8, 8),
     Model("CaptchaKraken/TwilightV2-2B", "Twilight V2 2B", "smaller model, full precision", 4.5, 8, 0.80),
     Model("CaptchaKraken/MidnightV2-4B", "Midnight V2 4B", "the same model at full precision", 9.1, 16),
+    Model("CaptchaKraken/AbyssV2-q4", "Abyss V2 Q4", "our most accurate model, needs an Abyss Licence",
+          3.8, 8, aliases=("abyss",)),
+    Model("CaptchaKraken/AbyssV2", "Abyss V2", "Abyss at full precision, needs an Abyss Licence", 9.1, 16),
+    Model("CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision", "CaptchaKraken Custom Yidun", "Abyss tuned for Yidun icon click-in-order boards",
+          3.8, 8, aliases=("custom-yidun",), listed=False,
+          access="  Access to this model is granted by hand once its purchase is confirmed: send the CaptchaKraken team\n"
+                 "  your Hugging Face username. Then run this again."),
 )
+
+
+def listed_models() -> Tuple[Model, ...]:
+    return tuple(m for m in MODELS if m.listed)
 
 
 class Gpu(NamedTuple):
@@ -170,12 +202,13 @@ def choose(title: str, options: Sequence[Option], default: int = 0) -> int:
 def ask(gpus: Sequence[Gpu], saved: dict) -> Choice:
     """Model, then GPU, then startup. A previous choice is where the cursor starts."""
     biggest = max(gpus, key=lambda g: g.total_mib)
-    default_model = next((i for i, m in enumerate(MODELS) if m.repo == saved.get("model")), 0)
-    picked = MODELS[choose("Which model do you want to run?", [
+    menu = listed_models()
+    default_model = next((i for i, m in enumerate(menu) if m.repo == saved.get("model")), 0)
+    picked = menu[choose("Which model do you want to run?", [
         Option(m.title, f"{m.blurb}, {m.download_gb:.1f} GB download, needs {m.min_vram_gb} GB of VRAM",
                "" if _fits(m, biggest) else f"needs {m.min_vram_gb} GB of VRAM, your largest has "
                                             f"{biggest.total_mib / 1024:.0f} GB")
-        for m in MODELS], default_model)]
+        for m in menu], default_model)]
 
     fitting = [g for g in gpus if _fits(picked, g)]
     default_gpu = next((i for i, g in enumerate(gpus) if g.index == saved.get("gpu")), None)
@@ -191,6 +224,95 @@ def ask(gpus: Sequence[Gpu], saved: dict) -> Choice:
         Option("Warm start", "starts now and after a reboot on the first solve, then stays loaded"),
     ], modes.index(saved["startup"]) if saved.get("startup") in modes else 0)]
     return Choice(picked, gpu, startup)
+
+
+# ── a licensed model's Hugging Face access ───────────────────────────────────
+
+HUB = "https://huggingface.co"
+HOSTED_API = "https://api.captchakraken.com"
+# Replaced in tests; the signature is requests.request's.
+_HUB_REQUEST: Callable = requests.request
+
+
+def _hub_token_path() -> Path:
+    """Where huggingface_hub keeps the login `hf auth login` writes, so the download finds what was saved here."""
+    if os.getenv("HF_TOKEN_PATH"):
+        return Path(os.environ["HF_TOKEN_PATH"])
+    home = os.getenv("HF_HOME") or os.path.join(os.getenv("XDG_CACHE_HOME") or Path.home() / ".cache", "huggingface")
+    return Path(home) / "token"
+
+
+def hub_token() -> Optional[str]:
+    token = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        return token.strip()
+    try:
+        return _hub_token_path().read_text().strip() or None
+    except OSError:
+        return None
+
+
+def _save_hub_token(token: str) -> None:
+    path = _hub_token_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(token)
+        os.chmod(path, 0o600)
+    except OSError as e:
+        raise RuntimeError(f"Could not save the Hugging Face token to {path}: {e}") from e
+
+
+def _hub(http: Callable, method: str, url: str, token: str):
+    try:
+        return http(method, url, headers={"Authorization": f"Bearer {token}"}, timeout=20, allow_redirects=False)
+    except requests.RequestException as e:
+        raise RuntimeError(f"Could not reach Hugging Face to check the licence: {e}") from e
+
+
+def _licence_steps() -> str:
+    return (f"  An Abyss Licence comes with access: buy one at {PLANS_URL} and add your Hugging Face username there.\n"
+            f"  Or use the hosted API ({HOSTED_API}), which serves Abyss to every account and needs no weights.")
+
+
+def ensure_access(repo: str, *, interactive: bool, http: Optional[Callable] = None,
+                  read_secret: Callable[[str], str] = getpass.getpass, access: str = "") -> str:
+    """The Hugging Face account that will download `repo`, once it is known to be allowed to. A token typed here is saved where huggingface_hub looks, so the download and later updates use it."""
+    http = http or _HUB_REQUEST
+    token, typed = hub_token(), False
+    if not token:
+        if not interactive:
+            raise RuntimeError(f"{repo} downloads as your Hugging Face account, and none is signed in here.\n"
+                               "  Set HF_TOKEN, or run `hf auth login`, then run this again.\n" + (access or _licence_steps()))
+        print(f"{repo} downloads as your Hugging Face account. Paste a token from "
+              f"{HUB}/settings/tokens (read access is enough).")
+        token, typed = read_secret("Hugging Face token: ").strip(), True
+        if not token:
+            raise Cancelled()
+
+    who = _hub(http, "GET", f"{HUB}/api/whoami-v2", token)
+    if who.status_code == 401:
+        raise RuntimeError("Hugging Face did not accept that token. Make a new one at "
+                           f"{HUB}/settings/tokens and run this again.")
+    if who.status_code != 200:
+        raise RuntimeError(f"Hugging Face answered {who.status_code} when asked who the token belongs to. Try again shortly.")
+    user = who.json().get("name") or "this account"
+
+    probe = _hub(http, "HEAD", f"{HUB}/{repo}/resolve/main/config.json", token)
+    if probe.status_code in (401, 403, 404):
+        if access:
+            raise RuntimeError(f"Hugging Face account {user} cannot download {repo} yet.\n" + access)
+        raise RuntimeError(f"Hugging Face account {user} cannot download {repo} yet.\n"
+                           f"  If you have an Abyss Licence, set your Hugging Face username to {user} at {PLANS_URL};\n"
+                           "  access follows within a couple of minutes. Then run this again.\n" + _licence_steps())
+    if not 200 <= probe.status_code < 400:
+        raise RuntimeError(f"Hugging Face answered {probe.status_code} for {repo}. Try again shortly.")
+
+    if typed:
+        _save_hub_token(token)
+    _ok(f"Hugging Face account {user} has access to {repo}")
+    return user
 
 
 # ── installing ───────────────────────────────────────────────────────────────
@@ -363,10 +485,10 @@ def _summary(values: dict) -> None:
 def _from_flags(gpus: Sequence[Gpu], saved: dict, model: Optional[str], gpu: Optional[int],
                 startup: Optional[str]) -> Choice:
     wanted = model or saved.get("model") or MODELS[0].repo
-    found = next((m for m in MODELS if wanted in (m.repo, m.repo.split("/")[-1])), None)
+    found = next((m for m in MODELS if m.named(wanted)), None)
     if found is None:
-        raise RuntimeError(f"Unknown model {wanted!r}. Choose from: "
-                           + ", ".join(m.repo.split("/")[-1] for m in MODELS))
+        raise RuntimeError(f"Unknown model {wanted!r}. Choose from: abyss, "
+                           + ", ".join(m.repo.split("/")[-1] for m in listed_models()))
     index = gpu if gpu is not None else saved.get("gpu")
     if index is None:
         fitting = [g for g in gpus if _fits(found, g)]
@@ -405,6 +527,9 @@ def fetch(*, yes: bool = False, model: Optional[str] = None, gpu: Optional[int] 
         else:
             print("\n\033[1mCaptchaKraken self-hosted setup\033[0m\n")
             choice = ask(gpus, saved)
+        if choice.model.licensed:
+            # A sign-in, not a choice: asked for whenever there is a terminal, --yes or not.
+            ensure_access(choice.model.repo, interactive=interactive, access=choice.model.access)
         values = install(choice, saved)
     except Cancelled:
         print("Cancelled. Nothing was changed.")

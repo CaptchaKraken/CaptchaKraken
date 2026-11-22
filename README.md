@@ -275,6 +275,11 @@ new CaptchaKrakenSolver({ humanization: 'none' })     // straight to the DOM eff
 new CaptchaKrakenSolver({ humanizer: myOwn })         // yours
 ```
 
+**Short on time?** `speed: 'fast'` (or `CAPTCHA_SPEED=fast`) plays the same
+human paths 2.5x faster and halves the waits between gestures; `humanizeSettings`
+passes any [myuri setting](https://github.com/JWriter20/Myuri#settings) straight
+through.
+
 `mobile` never touches `page.mouse` — a mousemove at a touch-only widget is the
 wrong event, not a weaker one. It drives a Chromium page with `hasTouch: true`,
 or a real handset over **Appium / WebdriverIO / Selenium** via `touchDriver`.
@@ -562,13 +567,16 @@ re-noises it — realism that is measured rather than asserted. It replaced the
 hand-tuned curves we shipped before it; see
 [docs/usage.md § How it moves](./docs/usage.md#how-it-moves--mouse-mobile-none-or-yours).
 
-**[cursory-js](https://github.com/JWriter20/cursory-js)** is our TypeScript port
-of it, published so the JS driver has the same mouse. It is a port rather than a
-rewrite, so a seed gives the same trajectory in both ports.
+We drive it through **[myuri](https://github.com/JWriter20/Myuri)**, which
+plays those recordings at a mouse's report rate, draws one consistent person per
+seed (speed, overshoot, typing rhythm), and times keystrokes and typos the way
+people make them. Its TypeScript port `@jwriter20/myuri` runs on
+**[cursory-js](https://github.com/JWriter20/cursory-js)**, our port of cursory,
+so a seed gives the same path in both drivers.
 
-Both are **LGPL-3.0-or-later**, and both are ordinary installed dependencies —
-never vendored, inlined, or bundled — so you can swap in a modified build of
-either by reinstalling the package. Full third-party notice: **[NOTICE](./NOTICE)**.
+All of them are **LGPL-3.0-or-later**, and all are ordinary installed
+dependencies — never vendored, inlined, or bundled — so you can swap in a
+modified build of any of them by reinstalling the package. Full third-party notice: **[NOTICE](./NOTICE)**.
 
 ---
 

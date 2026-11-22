@@ -1,6 +1,6 @@
 {
   "name": "captchakraken",
-  "version": "5.0.0",
+  "version": "5.2.0",
   "description": "Captcha solver for Playwright and Puppeteer. Finds the captcha, reads it with the v2 pointer model, and clicks, drags, slides or types through to a token \u2014 reCAPTCHA, GeeTest, NetEase Yidun, Tencent, Lemin, Prosopo, Turnstile and distorted text. Hosted API or self-hosted.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -52,16 +52,19 @@
   "author": "Jake Writer",
   "license": "LGPL-3.0-only",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20.19"
+  },
   "bugs": {
     "url": "https://github.com/CaptchaKraken/CaptchaKraken/issues"
   },
   "homepage": "https://github.com/CaptchaKraken/CaptchaKraken#readme",
-  "dependencies": {
-    "cursory-js": "2.1.0"
-  },
   "devDependencies": {
     "@types/node": "24.10.2",
     "c8": "12.0.0",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@jwriter20/myuri": "5.1.0"
   }
 }

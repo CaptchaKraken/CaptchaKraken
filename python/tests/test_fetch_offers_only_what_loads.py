@@ -61,7 +61,8 @@ def test_nvidia_smi_is_read_and_its_absence_is_no_gpus():
 
 
 def test_an_eight_gigabyte_card_fits_what_is_sold_for_eight():
-    midnight_q4, _, midnight = selfhost.MODELS
+    by_repo = {m.repo: m for m in selfhost.MODELS}
+    midnight_q4, midnight = by_repo["CaptchaKraken/MidnightV2-4B-q4"], by_repo["CaptchaKraken/MidnightV2-4B"]
     assert selfhost._fits(midnight_q4, SMALL)
     assert not selfhost._fits(midnight, SMALL)
     assert selfhost._fits(midnight, LARGE)

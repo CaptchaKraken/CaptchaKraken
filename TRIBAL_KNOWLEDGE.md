@@ -362,9 +362,7 @@ is self-hosted and has no vendor host.
 live page was found loading a vendor's enclave loader, which draws no frame on
 the host page: each render gets a full-viewport enclave iframe, and the
 challenge and checkbox frames live inside it. Every host-page selector still matched inside its frame, so the
-table was not stale; it was being read in the wrong document. The enclave is a
-row field (`enclave`) rather than a recursive frame walk, because a walk would
-also descend into every ad and login frame on the page. Only a visible enclave
+table was not stale; it was being read in the wrong document. Only a visible frame
 is read: Playwright judges an element's visibility within its own document, so
 a frame inside a hidden enclave measures as visible unless the enclave's own
 document hides it too. Playwright's
@@ -373,6 +371,18 @@ which is what lets the crop and the clicks work unchanged; that was checked on
 the recorded page in Chromium and in a Firefox-based browser. The enclave itself is `passive`,
 or a page showing nothing but an idle enclave would be reported as markup the
 table no longer matches.
+
+**A widget inside another site's frame is found too.** Imperva's block page is
+one same-origin iframe and nothing else, and the captcha is drawn inside that
+iframe's document, so reading the page plus the vendor's enclaves found nothing
+while a challenge was open on screen. Detection now walks every visible frame
+that no vendor serves, up to `FRAME_DEPTH` (4) levels. A vendor's own frame is
+never entered: it is the widget, read through the probes. The walk was first
+ruled out because it also enters every ad and login frame on the page. It is
+affordable because a frame holding none of the table's `markers` (any probe,
+response, enclave, passive or vendor-host frame) is walked through but no probe
+is read in it. Detection with ten ad frames costs ~110 ms instead of ~380 ms,
+against ~17 ms with none.
 
 **A modal opened by a box on the page is a `challenge`, not a `widget`.**
 CaptchaFox's "I am human" box stays on screen under the puzzle it opens, and
@@ -1072,9 +1082,27 @@ THE LICENCE IS THE PART TO BE CAREFUL WITH. CaptchaKraken and all its models are
 LGPL-3.0-only; Cursory's packages remain LGPL-3.0-or-later. They are ordinary
 installed dependencies: declared in `pyproject.toml` and `package.json`, resolved
 by the user's package manager, never vendored, inlined, or bundled. `tsc` leaves
-`require('cursory-js')` as a runtime import rather than inlining it, and
-`copy-python.mjs` copies only our own tree. Vendoring either one would change the
-distribution and notice obligations, so do not, and see NOTICE.
+`require('@jwriter20/myuri')` (which brings `cursory-js`) as a runtime import
+rather than inlining it, and `copy-python.mjs` copies only our own tree.
+Vendoring any of them would change the distribution and notice obligations, so
+do not, and see NOTICE.
+
+**Since 5.2.0 the driver reaches cursory through myuri**, which mirrors what
+camoufox did. myuri plays a recording at the mouse's own report rate instead of
+at a fixed `frequency`. It draws one person per seed (speed factor, overshoot,
+wpm, typo rate, each inside its `variation`), and it plans keystrokes as timed
+down/up pairs with rollover and corrected typos. Three things stayed ours.
+First, `_tame`: the recordings still swing up to 300 px off a 140 px line, and a
+drag carrying a piece cannot afford that. Second, `_densify`: myuri's samples
+can still be 70 ms and 230 px apart. Third, the pause table between gestures.
+`speed` is the only new knob. `fast` lays `mouse.speed_factor 2.5` and
+`typing.wpm 110` under the caller's `humanize_settings` and scales the pause
+table by 0.5. It exists because a customer's Yidun click-in-order board had a
+5 s budget and the mouse alone took 2 to 3.6 s of it. The settings passthrough
+refuses unknown keys at construction, as camoufox's does. A typo in a speed
+knob that silently did nothing is the failure this guards against. myuri's JS
+package is ESM-only and our client is CommonJS, so `require()` of it needs
+Node 20.19 or newer (require(esm)); `engines` says so.
 
 TWO PACKAGING CONSEQUENCES, both deliberate and both part of the major bump.
 The Python client's `numpy` pin moves from 2.2.6 to 2.3.5, because Cursory

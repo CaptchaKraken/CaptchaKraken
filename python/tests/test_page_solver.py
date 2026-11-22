@@ -7,7 +7,7 @@ import time
 from types import SimpleNamespace
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pytest
 
@@ -582,12 +582,30 @@ class _Scope:
 
 
 class _Keyboard:
+    """A field's text as the keys leave it: a character key adds itself, Backspace takes the last one back."""
+
     def __init__(self) -> None:
         self.typed: List[str] = []
         self.pressed: List[str] = []
+        self.downs: List[str] = []
+        self.held: Set[str] = set()
 
     def type(self, text: str) -> None:
-        self.typed.append(text)
+        self.typed.extend(text)
+
+    def insert_text(self, text: str) -> None:
+        self.typed.extend(text)
+
+    def down(self, key: str) -> None:
+        self.downs.append(key)
+        self.held.add(key)
+        if key == "Backspace" and self.typed:
+            self.typed.pop()
+        elif len(key) == 1:
+            self.typed.append(key)
+
+    def up(self, key: str) -> None:
+        self.held.discard(key)
 
     def press(self, key: str) -> None:
         self.pressed.append(key)
@@ -647,6 +665,17 @@ class TestTextCaptchas:
         scope = _Scope({"input[type=text]": FakeElement()})
         assert _solver()._execute_type(page, scope, {"text": "aB3d"}) is True
         assert page.keyboard.typed == ["a", "B", "3", "d"]
+        # One key at a time, each released, Shift held for the capital: not one `type("aB3d")`.
+        assert {"a", "B", "3", "d", "Shift"} <= set(page.keyboard.downs) and not page.keyboard.held
+
+    def test_a_typo_is_corrected_before_the_code_is_sent(self):
+        # myuri types the odd wrong key and backspaces it; what the box is left holding must still be the answer.
+        from captchakraken.humanize import Motion, MouseHumanizer
+        for seed in range(40):
+            page = _typing_page()
+            human = MouseHumanizer(motion=Motion({"typing": {"mistake_multiplier": 6}}, seed=seed, speed="fast"))
+            assert human.type_text(page, FakeElement(), "kq7Zp2") is True
+            assert "".join(page.keyboard.typed) == "kq7Zp2", seed
 
     def test_the_mouse_travels_to_the_box_before_typing(self):
         page = _typing_page()

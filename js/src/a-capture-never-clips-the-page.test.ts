@@ -1,6 +1,7 @@
-// Every capture is one unclipped viewport screenshot, cropped here. A clipped capture — an element screenshot, or
-// `page.screenshot({ clip })` — makes a headed Chromium repaint the page at the clip's size for that frame, and the
-// user watches the page flash and jump on every poll and every burst frame. Mirror of
+// On Chromium every capture is one unclipped viewport screenshot, cropped here. A clipped capture — an element
+// screenshot, or `page.screenshot({ clip })` — makes a headed Chromium repaint the page at the clip's size for that
+// frame, and the user watches the page flash and jump on every poll and every burst frame. Firefox draws a clip
+// offscreen, and there the clip is taken: its viewport capture cost a live Yidun solve 2.6s. Mirror of
 // python/tests/test_a_capture_never_clips_the_page.py.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 
-import { CaptchaKrakenSolver, isStaleHandleError } from './solver';
+import { CaptchaKrakenSolver, GECKO_JS, isStaleHandleError } from './solver';
 import { cropPng, enclosingRect } from './png';
 
 /** Every pixel distinct, so a crop off by one pixel anywhere cannot match. */
@@ -77,14 +78,26 @@ for (const dpr of [1, 2]) {
 
 function rig(opts: { viewport?: { width: number; height: number } | null;
                      inner?: { width: number; height: number; scale?: number };
-                     dpr?: number; box: any; scrolledTo?: any }) {
+                     dpr?: number; box: any; scrolledTo?: any; gecko?: boolean | 'throws' }) {
   const shots: any[] = [];
   const view = opts.viewport ?? opts.inner!;
   const page: any = {
     viewportSize: () => opts.viewport ?? null,
     // A real window always answers; when nothing says otherwise its layout is the viewport.
-    evaluate: async () => opts.inner ?? opts.viewport,
-    screenshot: async (o: any) => { shots.push(o); return viewportPng(view.width * (opts.dpr ?? 1), view.height * (opts.dpr ?? 1)); },
+    engineAsks: 0,
+    evaluate: async (fn: unknown) => {
+      if (fn === GECKO_JS) {
+        page.engineAsks++;
+        if (opts.gecko === 'throws') throw new Error('closed');
+        return opts.gecko ?? false;
+      }
+      return opts.inner ?? opts.viewport;
+    },
+    screenshot: async (o: any) => {
+      shots.push(o);
+      const area = o.clip ?? view;
+      return viewportPng(area.width * (opts.dpr ?? 1), area.height * (opts.dpr ?? 1));
+    },
   };
   const el: any = {
     box: opts.box,
@@ -148,4 +161,23 @@ test('a context without a viewport asks the window', async () => {
 test('an element with no box reads as a stale handle', async () => {
   const { solver, el, out } = rig({ viewport: { width: 160, height: 120 }, box: null });
   await assert.rejects(() => solver.shot(el, out), (e: Error) => isStaleHandleError(e.message));
+});
+
+test('firefox takes the clip it draws offscreen', async () => {
+  const { solver, page, el, shots, out } = rig({ viewport: { width: 160, height: 120 }, dpr: 2,
+    box: { x: 10.5, y: 20, width: 50, height: 25 }, gecko: true });
+  for (let i = 0; i < 3; i++) await solver.shot(el, out, 1234);
+  const clip = { x: 10, y: 20, width: 51, height: 25 };
+  assert.deepEqual(shots, Array(3).fill({ timeout: 1234, animations: 'disabled', style: undefined, clip }));
+  assert.equal(el.elementShots, 0);
+  assert.equal(page.engineAsks, 1, 'the engine is asked once per page, not once per capture');
+  const crop = readCrop(fs.readFileSync(out).length ? cropPng(fs.readFileSync(out), { x: 0, y: 0, width: 51, height: 25 }, 51) : Buffer.alloc(0));
+  assert.deepEqual([crop.width, crop.height], [102, 50], 'the clip lost the device pixel ratio');
+});
+
+test('a page that cannot say its engine is cropped', async () => {
+  const { solver, el, shots, out } = rig({ viewport: { width: 160, height: 120 }, box: { x: 0, y: 0, width: 30, height: 20 },
+    gecko: 'throws' });
+  await solver.shot(el, out);
+  assert.deepEqual(shots, [{ timeout: 2500, animations: 'disabled', style: undefined }]);
 });

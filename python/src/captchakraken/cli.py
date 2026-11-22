@@ -347,13 +347,19 @@ def _fetch_setup(args):
 
     parser = argparse.ArgumentParser(prog="captchakraken fetch",
                                      description="Choose a model, a GPU and a startup mode, then install and start it.")
+    parser.add_argument("name", nargs="?", default=None,
+                        help="set up this model with the defaults, e.g. `abyss` (needs an Abyss Licence)")
     parser.add_argument("--yes", "-y", action="store_true", help="ask nothing: previous choices, then the defaults")
-    parser.add_argument("--model", default=None, help="with --yes: " + ", ".join(
-        m.repo.split("/")[-1] for m in selfhost.MODELS))
+    parser.add_argument("--model", default=None, help="with --yes: abyss, " + ", ".join(
+        m.repo.split("/")[-1] for m in selfhost.listed_models()))
     parser.add_argument("--gpu", type=int, default=None, help="with --yes: the nvidia-smi GPU index")
     parser.add_argument("--startup", default=None, choices=[selfhost.ALWAYS_ON, selfhost.FIRST_SOLVE],
                         help="with --yes: always on, or start on the first solve")
     opts = parser.parse_args(args)
+    if opts.name:
+        if opts.model:
+            parser.error("name the model once: as a word or with --model")
+        opts.model = opts.name
     if not opts.yes and (opts.model or opts.gpu is not None or opts.startup):
         opts.yes = True
     sys.exit(selfhost.fetch(yes=opts.yes, model=opts.model, gpu=opts.gpu, startup=opts.startup))

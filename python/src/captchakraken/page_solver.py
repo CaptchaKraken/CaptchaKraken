@@ -23,7 +23,7 @@ from . import config, planner
 from .action_types import CaptchaAction
 from .humanize import Humanizer, hold, resolve as resolve_humanizer
 from .kinds import (ActionKind, FrameRole, HumanizationMode, KeyframeMode, PauseKind, Phase, PromptFamily,
-                    RecaptchaBanner, RetryMode, SettleVerdict, Vendor, Verdict)
+                    RecaptchaBanner, RetryMode, SettleVerdict, Speed, Vendor, Verdict)
 from .selectors import DEFAULT_CONFIG_PATH, DEFAULT_TABLE, SelectorTable, VendorSelectors, WidgetProbe
 from .server_manager import ensure_server
 from .solver import AnimatedRecording, CaptchaSolver, UnsupportedCaptchaError, cut_recording
@@ -128,6 +128,22 @@ _FRAME_JS = ("() => ({ width: window.innerWidth, height: window.innerHeight,"
 def _viewport_of(page: Any) -> Dict[str, float]:
     """`viewport_size` is None on a context launched without one (camoufox), where only the window knows."""
     return page.viewport_size or page.evaluate(_VIEWPORT_JS)
+
+
+# Gecko answers with a number and Chromium/WebKit have no such property. Camoufox spoofs the user agent, not this.
+_GECKO_JS = "() => typeof mozInnerScreenX === 'number'"
+
+
+def _draws_clips_offscreen(page: Any) -> bool:
+    """Is this Firefox, whose clipped capture renders the rect offscreen (`drawSnapshot`) and repaints nothing?
+
+    Chromium is the engine that flashes on a clip, and the reason every other capture is viewport-and-crop. On Firefox
+    the full viewport costs ~420ms to the clip's ~100ms; a still Yidun board took 8 of them, 2.6s of its solve.
+    """
+    try:
+        return page.evaluate(_GECKO_JS) is True
+    except Exception:
+        return False
 
 
 def _layout_is_the_viewport(page: Any, view: Dict[str, float]) -> bool:
@@ -321,6 +337,11 @@ HOLD_MAX_MS = 12000
 class PageSolverConfig:
     humanization: Optional[HumanizationMode] = None
     humanizer: Optional[Humanizer] = None
+    # "human" (default) or "fast": fast plays myuri's recorded paths 2.5x faster and halves the waits between
+    # gestures. CAPTCHA_SPEED sets it when this is None.
+    speed: Optional[Speed] = None
+    # myuri settings laid over the speed's, e.g. {"mouse": {"speed_factor": 3}}; an unknown key raises at construction.
+    humanize_settings: Optional[Dict[str, Any]] = None
     # Every URL pattern and selector the solver detects and drives with: a path to a config file of the shape of the
     # repository's `captchakraken.config.json`, or the parsed object. What it gives is laid over the shipped default,
     # so a file holding only a `custom` entry adds that entry and keeps every built-in vendor.
@@ -418,6 +439,9 @@ VENDORS_WITH_BESPOKE_HANDLING: frozenset[Vendor] = frozenset({Vendor.HCAPTCHA, V
 
 # Long enough to resolve a locator `all()` just returned, short enough that a widget gone in between reads as stale, not hung.
 HANDLE_TIMEOUT_MS = 1000
+# How many frames deep a widget is looked for. Imperva's block page wrapping hCaptcha's enclave is two; the rest is room
+# for a site that frames such a page. Mirrors solver.ts FRAME_DEPTH.
+FRAME_DEPTH = 4
 
 
 def _visible(scope: Any, selectors: Sequence[str]) -> List[Any]:
@@ -478,10 +502,26 @@ def _still_shown(element: Any) -> bool:
         return False
 
 
-def _host_scopes(page: Any, enclaves: Sequence[str]) -> List[Any]:
-    """Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave
-    is skipped because Playwright judges an element visible within its own document, whatever its frame's visibility."""
-    return [page, *(f for f in map(_frame_of, _visible(page, enclaves)) if f is not None)]
+def _holds_any(scope: Any, selector: str) -> bool:
+    """The scope holds a match of `selector`. A scope that cannot be asked is kept: dropping it could hide a widget."""
+    try:
+        return scope.locator(selector).count() > 0
+    except Exception:
+        return True
+
+
+def _host_scopes(page: Any, sel: SelectorTable) -> List[Any]:
+    """Where the host-page selectors are read: the page, then the inside of every VISIBLE frame a widget may sit in, a
+    level at a time, to FRAME_DEPTH levels. A hidden frame is not entered because Playwright judges an element visible
+    within its own document, whatever its frame's visibility. A frame holding nothing of any vendor's is walked through
+    but not kept, so a page of ads costs a count per frame, not every probe per frame."""
+    scopes, level = [page], [page]
+    for _ in range(FRAME_DEPTH):
+        level = [f for scope in level for f in map(_frame_of, _visible(scope, sel.frames)) if f is not None]
+        if not level:
+            break
+        scopes.extend(f for f in level if _holds_any(f, sel.markers))
+    return scopes
 
 
 def _visible_in(scopes: Sequence[Any], selectors: Sequence[str]) -> List[Any]:
@@ -653,6 +693,8 @@ class PageSolver:
 
     def _reset_animated_state(self) -> None:
         self._acted_on_board = False
+        # (page, is Firefox), asked once per page: see _draws_clips_offscreen.
+        self._gecko: Optional[Tuple[Any, bool]] = None
         self._submitted_on_board = False
         self._known_animated = False
         self._animated_probe_armed = False
@@ -1539,7 +1581,7 @@ class PageSolver:
 
     def detect_captcha(self, page: Any) -> Optional[Widget]:
         """Open challenges first, then unsolved checkboxes, then the inline vendors."""
-        scopes = _host_scopes(page, self._sel.enclave)
+        scopes = _host_scopes(page, self._sel)
         for probe in self._sel.widget_probes:
             at = next(iter(_visible_in(scopes, (probe.selector,))), None)
             if at is None or self._already_accepted(scopes, at, probe):
@@ -1567,7 +1609,7 @@ class PageSolver:
     def _unmatched_vendor_frames(self, page: Any) -> List[Vendor]:
         """Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame
         (an invisible badge, an enclave) is not a widget, so what is left is markup the table no longer matches."""
-        scopes = _host_scopes(page, self._sel.enclave)
+        scopes = _host_scopes(page, self._sel)
         return [vendor for vendor, s in self._sel.vendors if s.hosts and len(_visible_in(scopes, [f'iframe[src*="{h}"]' for h in s.hosts]))
                 > len(_visible_in(scopes, s.passive))]
 
@@ -1600,7 +1642,7 @@ class PageSolver:
 
     def _is_blocked(self, page: Any) -> bool:
         """The vendor showing its refusal screen: rate-limited or flagged, with no board to answer."""
-        scopes = _host_scopes(page, self._sel.enclave)
+        scopes = _host_scopes(page, self._sel)
         for probe in self._sel.widget_probes:
             blocked = self._sel.selectors[probe.vendor].blocked
             if probe.role != FrameRole.CHALLENGE or not blocked:
@@ -1619,7 +1661,7 @@ class PageSolver:
     def is_captcha_solved(self, page: Any) -> bool:
         """The vendor's own done signal: a response token, a painted success state, or a checked box."""
         try:
-            scopes = _host_scopes(page, self._sel.enclave)
+            scopes = _host_scopes(page, self._sel)
             if any(self._has_value(scopes, s) for s in self._sel.response) or _visible_in(scopes, self._sel.accepted):
                 return True
             for probe in self._sel.widget_probes:
@@ -1642,7 +1684,7 @@ class PageSolver:
     def _is_challenge_freshly_rendered(self, page: Any) -> bool:
         """A next round has painted, as opposed to the answered frame animating closed."""
         try:
-            scopes = _host_scopes(page, self._sel.enclave)
+            scopes = _host_scopes(page, self._sel)
             for probe in self._sel.widget_probes:
                 fresh = self._sel.selectors[probe.vendor].fresh
                 if probe.role != FrameRole.CHALLENGE or not fresh:
@@ -1663,7 +1705,7 @@ class PageSolver:
     def _banner_kind(self, page: Any) -> Optional[RecaptchaBanner]:
         """Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error."""
         try:
-            scopes = _host_scopes(page, self._sel.enclave)
+            scopes = _host_scopes(page, self._sel)
             for probe in self._sel.widget_probes:
                 banners = self._sel.selectors[probe.vendor].banners
                 if probe.role != FrameRole.CHALLENGE or not banners:
@@ -1783,9 +1825,10 @@ class PageSolver:
                     animations: str = "disabled", style: Optional[str] = None, scale: str = "device") -> None:
         """Every capture the driver takes: the whole viewport, cropped here to the element.
 
-        Never a clipped capture. An element screenshot, or any `clip`, makes a headed Chromium repaint the page at
-        the clip's size for that frame, which the user watches as the page flashing and jumping; a viewport
-        capture repaints nothing, and measured twice as fast. Short timeout; `disabled` freezes CSS animation,
+        Never a clipped capture on Chromium. An element screenshot, or any `clip`, makes a headed Chromium repaint
+        the page at the clip's size for that frame, which the user watches as the page flashing and jumping; a
+        viewport capture repaints nothing, and measured twice as fast. Firefox is the exception: it draws a clip
+        offscreen, and there the clip is four times faster than the viewport (see `_draws_clips_offscreen`). Short timeout; `disabled` freezes CSS animation,
         so bursts and the keyframe gate pass `allow`. `style` is CSS applied for this capture only. `scale="css"`
         takes one pixel per CSS pixel: the slide loop's choice, since on a phone (DPR 2.6) a device-pixel frame is
         seven times the pixels and its tracking took 4.7 s of an 11.6 s solve.
@@ -1801,8 +1844,13 @@ class PageSolver:
             # coordinates, so the element photographs itself.
             _shot(element.screenshot, style, path=path, timeout=timeout, animations=animations, **kw)
             return
-        png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations, **kw), rect,
-                       view["width"])
+        if self._gecko is None or self._gecko[0] is not page:
+            self._gecko = (page, _draws_clips_offscreen(page))
+        if self._gecko[1]:
+            png = _shot(page.screenshot, style, timeout=timeout, animations=animations, clip=rect._asdict(), **kw)
+        else:
+            png = crop_png(_shot(page.screenshot, style, timeout=timeout, animations=animations, **kw), rect,
+                           view["width"])
         with open(path, "wb") as fh:
             fh.write(png)
 

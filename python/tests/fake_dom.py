@@ -112,4 +112,4 @@ def iframe_matches(src: str, selectors: Sequence[str]) -> List[str]:
         positive, _, negative = sel.partition(":not(")
         return all(s in src for s in wants(positive)) and not any(s in src for s in wants(negative))
 
-    return [sel for sel in selectors if sel.startswith("iframe[src") and hit(sel)]
+    return [sel for sel in selectors if sel.startswith(("iframe[src", "iframe:not(")) and hit(sel)]

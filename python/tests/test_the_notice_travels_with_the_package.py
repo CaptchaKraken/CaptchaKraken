@@ -21,7 +21,7 @@ def test_the_copies_have_not_drifted():
 
 def test_it_names_what_it_is_for():
     text = COPIES[0].read_text()
-    for needle in ("cursory", "cursory-js", "LGPL-3.0-or-later", "Vinyzu"):
+    for needle in ("myuri", "@jwriter20/myuri", "cursory", "cursory-js", "LGPL-3.0-or-later", "Vinyzu"):
         assert needle in text, f"the notice does not mention {needle!r}"
 
 

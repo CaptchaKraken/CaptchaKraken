@@ -8,6 +8,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -352,7 +353,7 @@ def test_a_slow_round_trip_alone_is_not_taken_for_a_browser_that_draws_its_own_p
 
 
 class TestNoTeleport:
-    """cursory's samples were up to 250 ms and 560 px apart, and a 5 px reach swung 61 px wide: a cursor that
+    """myuri's recorded reports can be 70 ms and 230 px apart, and a 5 px reach once swung 61 px wide: a cursor that
     vanished and reappeared, and darted about while it waited."""
 
     REACHES = [((100.0, 100.0), (104.0, 103.0)), ((100.0, 100.0), (130.0, 110.0)),
@@ -376,3 +377,48 @@ class TestNoTeleport:
             for p in points:
                 q = humanize._nearest_on_segment(p, start, end)
                 assert ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5 <= limit + 1e-6
+
+
+class TestSpeed:
+    """A customer's three-icon board spent 2-3.6s of a 5s budget on the mouse; `fast` is the lever."""
+
+    @staticmethod
+    def _mean_move_ms(motion):
+        return sum(humanize.trajectory((100, 100), (300, 250), motion)[1][-1] for _ in range(30)) / 30
+
+    def test_fast_reaches_in_well_under_the_time_a_human_speed_takes(self):
+        human = self._mean_move_ms(humanize.Motion(seed=3, speed="human"))
+        fast = self._mean_move_ms(humanize.Motion(seed=3, speed="fast"))
+        assert fast < human * 0.6, f"fast {fast:.0f}ms vs human {human:.0f}ms"
+
+    def test_fast_still_never_teleports(self):
+        points, timings = humanize.trajectory((50, 50), (900, 600), humanize.Motion(seed=5, speed="fast"))
+        for (a, ta), (b, tb) in zip(zip(points, timings), zip(points[1:], timings[1:])):
+            assert tb - ta <= humanize.MAX_EVENT_GAP_MS + 1e-9
+            assert ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5 <= humanize.MAX_EVENT_STEP_PX + 1e-9
+
+    def test_fast_halves_the_waits_between_gestures(self):
+        assert humanize.Motion(seed=1, speed="fast").pause_scale == 0.5
+        assert humanize.Motion(seed=1, speed="human").pause_scale == 1.0
+
+    def test_settings_reach_myuri_and_win_over_the_speed_preset(self):
+        slow = humanize.Motion({"mouse": {"speed_factor": 0.5}, "variation": 0}, seed=1, speed="fast")
+        assert slow.settings["mouse"]["speed_factor"] == 0.5
+        h = humanize.resolve(SimpleNamespace(speed="fast", humanize_settings={"variation": 0}))
+        assert h.motion.settings["mouse"]["speed_factor"] == 2.5
+        assert h.motion.settings["typing"]["wpm"] == 110
+
+    def test_an_unknown_settings_key_is_refused_at_construction(self):
+        with pytest.raises(ValueError, match="unknown settings key 'speed'"):
+            humanize.resolve(SimpleNamespace(humanize_settings={"mouse": {"speed": 2}}))
+        with pytest.raises(ValueError, match="humanize_settings"):
+            humanize.Motion({"nope": 1})
+
+    def test_speed_comes_from_config_then_the_env_and_an_unknown_one_is_refused(self, monkeypatch):
+        monkeypatch.delenv("CAPTCHA_SPEED", raising=False)
+        assert humanize.resolve_speed(SimpleNamespace()) == "human"
+        monkeypatch.setenv("CAPTCHA_SPEED", "FAST")
+        assert humanize.resolve_speed(SimpleNamespace()) == "fast"
+        assert humanize.resolve_speed(SimpleNamespace(speed="human")) == "human"
+        with pytest.raises(ValueError, match="unknown speed 'ludicrous'"):
+            humanize.resolve_speed(SimpleNamespace(speed="ludicrous"))
