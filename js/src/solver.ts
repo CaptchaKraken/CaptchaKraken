@@ -188,12 +188,34 @@ export const boardFrame = async (element: ElementHandle, frame: Frame | null): P
   }
   return null;
 };
+// How many frames deep a widget is looked for. Imperva's block page wrapping hCaptcha's enclave is two; the rest is room
+// for a site that frames such a page. Mirrors page_solver.py FRAME_DEPTH.
+const FRAME_DEPTH = 4;
+/** The scope holds a match of `selector`. A scope that cannot be asked is kept: dropping it could hide a widget. */
+const holdsAny = async (scope: Scope, selector: string): Promise<boolean> => {
+  try {
+    return (await scope.locator(selector).count()) > 0;
+  } catch {
+    return true;
+  }
+};
 /**
- * Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave is
- * skipped because Playwright judges an element visible within its own document, whatever its frame's visibility.
+ * Where the host-page selectors are read: the page, then the inside of every VISIBLE frame a widget may sit in, a level
+ * at a time, to FRAME_DEPTH levels. A hidden frame is not entered because Playwright judges an element visible within
+ * its own document, whatever its frame's visibility. A frame holding nothing of any vendor's is walked through but not
+ * kept, so a page of ads costs a count per frame, not every probe per frame.
  */
-const hostScopes = async (page: Page, enclaves: readonly string[]): Promise<Scope[]> =>
-  [page, ...(await Promise.all((await visible(page, enclaves)).map(frameOf))).filter((f): f is Frame => f !== null)];
+export const hostScopes = async (page: Page, sel: SelectorTable): Promise<Scope[]> => {
+  const scopes: Scope[] = [page];
+  let level: Scope[] = [page];
+  for (let depth = 0; depth < FRAME_DEPTH && level.length; depth++) {
+    const found = (await Promise.all(level.map((scope) => visible(scope, sel.frames)))).flat();
+    level = (await Promise.all(found.map(frameOf))).filter((f): f is Frame => f !== null);
+    const kept = await Promise.all(level.map((f) => holdsAny(f, sel.markers)));
+    scopes.push(...level.filter((_, i) => kept[i]));
+  }
+  return scopes;
+};
 const visibleIn = async (scopes: readonly Scope[], selectors: readonly string[]): Promise<Locator[]> =>
   (await Promise.all(scopes.map((scope) => visible(scope, selectors)))).flat();
 const hasText = async (el: ElementHandle): Promise<boolean> => !!((await el.textContent().catch(() => null)) ?? '').trim();
@@ -816,7 +838,7 @@ export class CaptchaKrakenSolver {
   private async isBlocked(page: Page): Promise<boolean> {
     try {
       const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].blocked);
-      const scopes = await hostScopes(page, this.sel.enclave);
+      const scopes = await hostScopes(page, this.sel);
       const shown = await Promise.all(probes.map(async (p) => {
         const [at] = await visibleIn(scopes, [p.selector]);
         const frame = at && await frameOf(at);
@@ -1343,7 +1365,7 @@ export class CaptchaKrakenSolver {
   /** Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error. */
   private async bannerKind(page: Page): Promise<RecaptchaBanner | null> {
     const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].banners);
-    const scopes = await hostScopes(page, this.sel.enclave);
+    const scopes = await hostScopes(page, this.sel);
     const kinds = await Promise.all(probes.map(async (p) => {
       const [at] = await visibleIn(scopes, [p.selector]);
       const frame = at && await frameOf(at);
@@ -1361,7 +1383,7 @@ export class CaptchaKrakenSolver {
       // A vendor that draws its whole challenge in one frame (DataDome) paints its pass in there, then reloads the
       // page about a second later: unread, the next round filmed the closing frame.
       const challenges = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].accepted);
-      const scopes = await hostScopes(page, this.sel.enclave);
+      const scopes = await hostScopes(page, this.sel);
       const signals = await Promise.all([
         ...this.sel.response.map((s) => this.hasValue(scopes, s)),
         visibleIn(scopes, this.sel.accepted).then((found) => found.length > 0),
@@ -1385,7 +1407,7 @@ export class CaptchaKrakenSolver {
   private async isChallengeFreshlyRendered(page: Page): Promise<boolean> {
     try {
       const probes = this.sel.widgetProbes.filter((p) => p.role === FrameRole.CHALLENGE && this.sel.selectors[p.vendor].fresh);
-      const scopes = await hostScopes(page, this.sel.enclave);
+      const scopes = await hostScopes(page, this.sel);
       const fresh = await Promise.all(probes.map(async (p) => {
         const [at] = await visibleIn(scopes, [p.selector]);
         const el = at && await handleOf(at);
@@ -1440,7 +1462,7 @@ export class CaptchaKrakenSolver {
 
   /** Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame (an invisible badge, an enclave) is not a widget, so what is left is markup the table no longer matches. */
   private async unmatchedVendorFrames(page: Page): Promise<Vendor[]> {
-    const scopes = await hostScopes(page, this.sel.enclave);
+    const scopes = await hostScopes(page, this.sel);
     const counts = await Promise.all(this.sel.vendors.map(async ([vendor, s]) => {
       if (!s.hosts.length) return null;
       const [frames, passive] = await Promise.all([visibleIn(scopes, s.hosts.map((h) => `iframe[src*="${h}"]`)), visibleIn(scopes, s.passive ?? [])]);
@@ -1472,7 +1494,7 @@ export class CaptchaKrakenSolver {
 
   /** Open challenges first, then unsolved checkboxes, then the inline vendors; every probe is queried at once. */
   public async detectCaptcha(page: Page): Promise<Widget | null> {
-    const scopes = await hostScopes(page, this.sel.enclave);
+    const scopes = await hostScopes(page, this.sel);
     const found = await Promise.all(this.sel.widgetProbes.map(async (p) => {
       const [at] = await visibleIn(scopes, [p.selector]);
       return at && !(await this.alreadyAccepted(scopes, at, p)) ? { ...p, at } : null;

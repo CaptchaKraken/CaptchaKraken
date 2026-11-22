@@ -362,9 +362,7 @@ is self-hosted and has no vendor host.
 live page was found loading a vendor's enclave loader, which draws no frame on
 the host page: each render gets a full-viewport enclave iframe, and the
 challenge and checkbox frames live inside it. Every host-page selector still matched inside its frame, so the
-table was not stale; it was being read in the wrong document. The enclave is a
-row field (`enclave`) rather than a recursive frame walk, because a walk would
-also descend into every ad and login frame on the page. Only a visible enclave
+table was not stale; it was being read in the wrong document. Only a visible frame
 is read: Playwright judges an element's visibility within its own document, so
 a frame inside a hidden enclave measures as visible unless the enclave's own
 document hides it too. Playwright's
@@ -373,6 +371,18 @@ which is what lets the crop and the clicks work unchanged; that was checked on
 the recorded page in Chromium and in a Firefox-based browser. The enclave itself is `passive`,
 or a page showing nothing but an idle enclave would be reported as markup the
 table no longer matches.
+
+**A widget inside another site's frame is found too.** Imperva's block page is
+one same-origin iframe and nothing else, and the captcha is drawn inside that
+iframe's document, so reading the page plus the vendor's enclaves found nothing
+while a challenge was open on screen. Detection now walks every visible frame
+that no vendor serves, up to `FRAME_DEPTH` (4) levels. A vendor's own frame is
+never entered: it is the widget, read through the probes. The walk was first
+ruled out because it also enters every ad and login frame on the page. It is
+affordable because a frame holding none of the table's `markers` (any probe,
+response, enclave, passive or vendor-host frame) is walked through but no probe
+is read in it. Detection with ten ad frames costs ~110 ms instead of ~380 ms,
+against ~17 ms with none.
 
 **A modal opened by a box on the page is a `challenge`, not a `widget`.**
 CaptchaFox's "I am human" box stays on screen under the puzzle it opens, and

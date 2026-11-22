@@ -418,6 +418,9 @@ VENDORS_WITH_BESPOKE_HANDLING: frozenset[Vendor] = frozenset({Vendor.HCAPTCHA, V
 
 # Long enough to resolve a locator `all()` just returned, short enough that a widget gone in between reads as stale, not hung.
 HANDLE_TIMEOUT_MS = 1000
+# How many frames deep a widget is looked for. Imperva's block page wrapping hCaptcha's enclave is two; the rest is room
+# for a site that frames such a page. Mirrors solver.ts FRAME_DEPTH.
+FRAME_DEPTH = 4
 
 
 def _visible(scope: Any, selectors: Sequence[str]) -> List[Any]:
@@ -478,10 +481,26 @@ def _still_shown(element: Any) -> bool:
         return False
 
 
-def _host_scopes(page: Any, enclaves: Sequence[str]) -> List[Any]:
-    """Where the host-page selectors are read: the page, then the inside of every VISIBLE vendor enclave. A hidden enclave
-    is skipped because Playwright judges an element visible within its own document, whatever its frame's visibility."""
-    return [page, *(f for f in map(_frame_of, _visible(page, enclaves)) if f is not None)]
+def _holds_any(scope: Any, selector: str) -> bool:
+    """The scope holds a match of `selector`. A scope that cannot be asked is kept: dropping it could hide a widget."""
+    try:
+        return scope.locator(selector).count() > 0
+    except Exception:
+        return True
+
+
+def _host_scopes(page: Any, sel: SelectorTable) -> List[Any]:
+    """Where the host-page selectors are read: the page, then the inside of every VISIBLE frame a widget may sit in, a
+    level at a time, to FRAME_DEPTH levels. A hidden frame is not entered because Playwright judges an element visible
+    within its own document, whatever its frame's visibility. A frame holding nothing of any vendor's is walked through
+    but not kept, so a page of ads costs a count per frame, not every probe per frame."""
+    scopes, level = [page], [page]
+    for _ in range(FRAME_DEPTH):
+        level = [f for scope in level for f in map(_frame_of, _visible(scope, sel.frames)) if f is not None]
+        if not level:
+            break
+        scopes.extend(f for f in level if _holds_any(f, sel.markers))
+    return scopes
 
 
 def _visible_in(scopes: Sequence[Any], selectors: Sequence[str]) -> List[Any]:
@@ -1539,7 +1558,7 @@ class PageSolver:
 
     def detect_captcha(self, page: Any) -> Optional[Widget]:
         """Open challenges first, then unsolved checkboxes, then the inline vendors."""
-        scopes = _host_scopes(page, self._sel.enclave)
+        scopes = _host_scopes(page, self._sel)
         for probe in self._sel.widget_probes:
             at = next(iter(_visible_in(scopes, (probe.selector,))), None)
             if at is None or self._already_accepted(scopes, at, probe):
@@ -1567,7 +1586,7 @@ class PageSolver:
     def _unmatched_vendor_frames(self, page: Any) -> List[Vendor]:
         """Vendors showing a frame no selector names. Only asked once detection has found nothing, and a passive frame
         (an invisible badge, an enclave) is not a widget, so what is left is markup the table no longer matches."""
-        scopes = _host_scopes(page, self._sel.enclave)
+        scopes = _host_scopes(page, self._sel)
         return [vendor for vendor, s in self._sel.vendors if s.hosts and len(_visible_in(scopes, [f'iframe[src*="{h}"]' for h in s.hosts]))
                 > len(_visible_in(scopes, s.passive))]
 
@@ -1600,7 +1619,7 @@ class PageSolver:
 
     def _is_blocked(self, page: Any) -> bool:
         """The vendor showing its refusal screen: rate-limited or flagged, with no board to answer."""
-        scopes = _host_scopes(page, self._sel.enclave)
+        scopes = _host_scopes(page, self._sel)
         for probe in self._sel.widget_probes:
             blocked = self._sel.selectors[probe.vendor].blocked
             if probe.role != FrameRole.CHALLENGE or not blocked:
@@ -1619,7 +1638,7 @@ class PageSolver:
     def is_captcha_solved(self, page: Any) -> bool:
         """The vendor's own done signal: a response token, a painted success state, or a checked box."""
         try:
-            scopes = _host_scopes(page, self._sel.enclave)
+            scopes = _host_scopes(page, self._sel)
             if any(self._has_value(scopes, s) for s in self._sel.response) or _visible_in(scopes, self._sel.accepted):
                 return True
             for probe in self._sel.widget_probes:
@@ -1642,7 +1661,7 @@ class PageSolver:
     def _is_challenge_freshly_rendered(self, page: Any) -> bool:
         """A next round has painted, as opposed to the answered frame animating closed."""
         try:
-            scopes = _host_scopes(page, self._sel.enclave)
+            scopes = _host_scopes(page, self._sel)
             for probe in self._sel.widget_probes:
                 fresh = self._sel.selectors[probe.vendor].fresh
                 if probe.role != FrameRole.CHALLENGE or not fresh:
@@ -1663,7 +1682,7 @@ class PageSolver:
     def _banner_kind(self, page: Any) -> Optional[RecaptchaBanner]:
         """Which verdict banner the open challenge shows; `dynamic-more` is the dynamic board's normal flow, not an error."""
         try:
-            scopes = _host_scopes(page, self._sel.enclave)
+            scopes = _host_scopes(page, self._sel)
             for probe in self._sel.widget_probes:
                 banners = self._sel.selectors[probe.vendor].banners
                 if probe.role != FrameRole.CHALLENGE or not banners:

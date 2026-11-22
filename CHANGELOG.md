@@ -3,6 +3,18 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [Unreleased]
+
+### Fixed
+
+- **A captcha inside another site's frame is detected.** A widget drawn
+  inside a frame the vendor does not serve, such as a bot-protection block
+  page that frames its security check, a modal or an embedded form, was never
+  found: detection read only the top page and the vendor's own frames. Every
+  visible frame is now searched, up to four levels deep, in both clients. A
+  frame with nothing of a vendor's in it, such as an ad, is passed through
+  without reading every selector in it, so pages full of ads stay fast.
+
 ## [5.1.0] - 2026-11-16
 
 ### Added
