@@ -4,6 +4,7 @@ import os
 import stat
 import sys
 import types
+from pathlib import Path
 
 import pytest
 import requests
@@ -167,7 +168,7 @@ def test_the_yidun_model_sends_a_refused_account_to_the_team_not_the_plans_page(
     with pytest.raises(RuntimeError) as exc:
         selfhost.ensure_access(YIDUN, interactive=False, http=_hub(user="someone", readable=False), access=model.access)
     message = str(exc.value)
-    assert "someone" in message and "CaptchaKraken team" in message
+    assert "someone" in message and "access token the CaptchaKraken team sent" in message
     assert updater.PLANS_URL not in message
 
 
@@ -179,3 +180,23 @@ def test_a_refused_yidun_account_installs_nothing(hub_home, monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_good")
     monkeypatch.setattr(selfhost, "install", lambda *a: pytest.fail("installed without access"))
     assert selfhost.fetch(yes=True, model="custom-yidun") == 1
+
+
+def test_the_yidun_repo_is_probed_and_downloaded_from_its_q4_folder_only(hub_home, monkeypatch, tmp_path):
+    """The repo also holds bf16/ and lora/: a fetch that took the whole repo would pull 13 GB, and a probe of the root config would read as no access."""
+    monkeypatch.setenv("HF_TOKEN", "hf_good")
+    model = next(m for m in selfhost.MODELS if m.repo == YIDUN)
+    assert model.subfolder == "q4"
+    hub = _hub()
+    selfhost.ensure_access(YIDUN, interactive=False, http=hub, access=model.access, subfolder=model.subfolder)
+    assert any(url.endswith(f"/{YIDUN}/resolve/main/q4/config.json") for _, url, _ in hub.calls)
+
+    fake = tmp_path / "huggingface_hub"
+    fake.mkdir()
+    (fake / "__init__.py").write_text(
+        "def snapshot_download(repo, allow_patterns=None):\n"
+        "    print('patterns', allow_patterns)\n"
+        "    return '/snap/' + repo\n")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    assert selfhost.download(Path(sys.executable), YIDUN, "q4") == f"/snap/{YIDUN}/q4"
+    assert selfhost.download(Path(sys.executable), "CaptchaKraken/AbyssV2-q4") == "/snap/CaptchaKraken/AbyssV2-q4"
