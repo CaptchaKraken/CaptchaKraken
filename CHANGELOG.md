@@ -3,6 +3,52 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [5.2.0] - Unreleased
+
+### Added
+
+- **`speed: 'fast'`** (`PageSolverConfig(speed="fast")`, or `CAPTCHA_SPEED=fast`)
+  plays the same recorded human paths 2.5x faster, types at about 110 wpm, and
+  halves the waits between gestures. On a three-icon click-in-order board it cut
+  the board from 3.8–6.0 s to 2.7–2.9 s, all solved on the first try. The
+  default, `human`, is unchanged.
+- **`humanizeSettings`** (`humanize_settings` in Python) passes any
+  [myuri setting](https://github.com/JWriter20/Myuri#settings) straight through,
+  laid over the speed's values. An unknown key raises when the solver is
+  constructed.
+- `Speed` and `Motion` are exported from both packages.
+- **`captchakraken fetch custom-yidun`** installs CaptchaKraken-Custom-Yidun-Commision, Abyss tuned for
+  Yidun icon click-in-order boards. It is sold separately and reached only by
+  name, never offered in the `fetch` menu; an account without access is told to
+  ask the CaptchaKraken team rather than sent to the Abyss Licence page.
+
+### Changed
+
+- **The mouse and keyboard now run on myuri** (`myuri` 5.1.0 on PyPI,
+  `@jwriter20/myuri` 5.1.0 on npm), the same move camoufox made. The paths are
+  still cursory's recordings. myuri plays them at the mouse's own report rate,
+  draws one consistent person per solve, and types with timed key presses,
+  rollover and corrected typos instead of one `type()` per character. Both
+  ports still agree exactly on a seed.
+- The JS client needs **Node 20.19 or newer**: myuri is ESM-only, and our
+  CommonJS build loads it with `require()`. `engines` now says so.
+- `MouseHumanizer` and `MobileHumanizer` still accept `frequency` but ignore
+  it, because myuri samples at the recording's own rate. Pass
+  `motion=Motion(...)` (`new Motion(...)` in JS) to control the hand.
+- A page object handed to the JS solver needs `keyboard.down`, `keyboard.up`
+  and `keyboard.insertText`. Playwright has them, and the Puppeteer adapter
+  maps them.
+
+### Fixed
+
+- **A captcha inside another site's frame is detected.** A widget drawn
+  inside a frame the vendor does not serve, such as a bot-protection block
+  page that frames its security check, a modal or an embedded form, was never
+  found: detection read only the top page and the vendor's own frames. Every
+  visible frame is now searched, up to four levels deep, in both clients. A
+  frame with nothing of a vendor's in it, such as an ad, is passed through
+  without reading every selector in it, so pages full of ads stay fast.
+
 ## [5.1.0] - 2026-11-16
 
 ### Added

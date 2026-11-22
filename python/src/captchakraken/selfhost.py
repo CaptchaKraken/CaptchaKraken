@@ -49,6 +49,10 @@ class Model:
     small_card_utilization: float = 0.72
     # Other names `fetch <name>` and `--model` accept, besides the repo and its last part.
     aliases: Tuple[str, ...] = ()
+    # False keeps it out of the interactive menu: a single-purpose model is reached by name, never offered to everyone.
+    listed: bool = True
+    # How an account without access gets it; empty means the Abyss Licence.
+    access: str = ""
 
     @property
     def licensed(self) -> bool:
@@ -68,7 +72,15 @@ MODELS = (
     Model("CaptchaKraken/AbyssV2-q4", "Abyss V2 Q4", "our most accurate model, needs an Abyss Licence",
           3.8, 8, aliases=("abyss",)),
     Model("CaptchaKraken/AbyssV2", "Abyss V2", "Abyss at full precision, needs an Abyss Licence", 9.1, 16),
+    Model("CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision", "CaptchaKraken Custom Yidun", "Abyss tuned for Yidun icon click-in-order boards",
+          3.8, 8, aliases=("custom-yidun",), listed=False,
+          access="  Access to this model is granted by hand once its purchase is confirmed: send the CaptchaKraken team\n"
+                 "  your Hugging Face username. Then run this again."),
 )
+
+
+def listed_models() -> Tuple[Model, ...]:
+    return tuple(m for m in MODELS if m.listed)
 
 
 class Gpu(NamedTuple):
@@ -190,12 +202,13 @@ def choose(title: str, options: Sequence[Option], default: int = 0) -> int:
 def ask(gpus: Sequence[Gpu], saved: dict) -> Choice:
     """Model, then GPU, then startup. A previous choice is where the cursor starts."""
     biggest = max(gpus, key=lambda g: g.total_mib)
-    default_model = next((i for i, m in enumerate(MODELS) if m.repo == saved.get("model")), 0)
-    picked = MODELS[choose("Which model do you want to run?", [
+    menu = listed_models()
+    default_model = next((i for i, m in enumerate(menu) if m.repo == saved.get("model")), 0)
+    picked = menu[choose("Which model do you want to run?", [
         Option(m.title, f"{m.blurb}, {m.download_gb:.1f} GB download, needs {m.min_vram_gb} GB of VRAM",
                "" if _fits(m, biggest) else f"needs {m.min_vram_gb} GB of VRAM, your largest has "
                                             f"{biggest.total_mib / 1024:.0f} GB")
-        for m in MODELS], default_model)]
+        for m in menu], default_model)]
 
     fitting = [g for g in gpus if _fits(picked, g)]
     default_gpu = next((i for i, g in enumerate(gpus) if g.index == saved.get("gpu")), None)
@@ -264,14 +277,14 @@ def _licence_steps() -> str:
 
 
 def ensure_access(repo: str, *, interactive: bool, http: Optional[Callable] = None,
-                  read_secret: Callable[[str], str] = getpass.getpass) -> str:
+                  read_secret: Callable[[str], str] = getpass.getpass, access: str = "") -> str:
     """The Hugging Face account that will download `repo`, once it is known to be allowed to. A token typed here is saved where huggingface_hub looks, so the download and later updates use it."""
     http = http or _HUB_REQUEST
     token, typed = hub_token(), False
     if not token:
         if not interactive:
             raise RuntimeError(f"{repo} downloads as your Hugging Face account, and none is signed in here.\n"
-                               "  Set HF_TOKEN, or run `hf auth login`, then run this again.\n" + _licence_steps())
+                               "  Set HF_TOKEN, or run `hf auth login`, then run this again.\n" + (access or _licence_steps()))
         print(f"{repo} downloads as your Hugging Face account. Paste a token from "
               f"{HUB}/settings/tokens (read access is enough).")
         token, typed = read_secret("Hugging Face token: ").strip(), True
@@ -288,6 +301,8 @@ def ensure_access(repo: str, *, interactive: bool, http: Optional[Callable] = No
 
     probe = _hub(http, "HEAD", f"{HUB}/{repo}/resolve/main/config.json", token)
     if probe.status_code in (401, 403, 404):
+        if access:
+            raise RuntimeError(f"Hugging Face account {user} cannot download {repo} yet.\n" + access)
         raise RuntimeError(f"Hugging Face account {user} cannot download {repo} yet.\n"
                            f"  If you have an Abyss Licence, set your Hugging Face username to {user} at {PLANS_URL};\n"
                            "  access follows within a couple of minutes. Then run this again.\n" + _licence_steps())
@@ -473,7 +488,7 @@ def _from_flags(gpus: Sequence[Gpu], saved: dict, model: Optional[str], gpu: Opt
     found = next((m for m in MODELS if m.named(wanted)), None)
     if found is None:
         raise RuntimeError(f"Unknown model {wanted!r}. Choose from: abyss, "
-                           + ", ".join(m.repo.split("/")[-1] for m in MODELS))
+                           + ", ".join(m.repo.split("/")[-1] for m in listed_models()))
     index = gpu if gpu is not None else saved.get("gpu")
     if index is None:
         fitting = [g for g in gpus if _fits(found, g)]
@@ -514,7 +529,7 @@ def fetch(*, yes: bool = False, model: Optional[str] = None, gpu: Optional[int] 
             choice = ask(gpus, saved)
         if choice.model.licensed:
             # A sign-in, not a choice: asked for whenever there is a terminal, --yes or not.
-            ensure_access(choice.model.repo, interactive=interactive)
+            ensure_access(choice.model.repo, interactive=interactive, access=choice.model.access)
         values = install(choice, saved)
     except Cancelled:
         print("Cancelled. Nothing was changed.")

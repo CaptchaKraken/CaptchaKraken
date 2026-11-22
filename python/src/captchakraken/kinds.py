@@ -102,6 +102,13 @@ class HumanizationMode(StrEnum):
     NONE = "none"
 
 
+class Speed(StrEnum):
+    """How fast the hand goes. HUMAN is an ordinary person; FAST is one who has done this captcha a hundred times."""
+
+    HUMAN = "human"
+    FAST = "fast"
+
+
 class PauseKind(StrEnum):
     TAP = "tap"
     BETWEEN = "between"

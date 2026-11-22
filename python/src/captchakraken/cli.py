@@ -351,7 +351,7 @@ def _fetch_setup(args):
                         help="set up this model with the defaults, e.g. `abyss` (needs an Abyss Licence)")
     parser.add_argument("--yes", "-y", action="store_true", help="ask nothing: previous choices, then the defaults")
     parser.add_argument("--model", default=None, help="with --yes: abyss, " + ", ".join(
-        m.repo.split("/")[-1] for m in selfhost.MODELS))
+        m.repo.split("/")[-1] for m in selfhost.listed_models()))
     parser.add_argument("--gpu", type=int, default=None, help="with --yes: the nvidia-smi GPU index")
     parser.add_argument("--startup", default=None, choices=[selfhost.ALWAYS_ON, selfhost.FIRST_SOLVE],
                         help="with --yes: always on, or start on the first solve")

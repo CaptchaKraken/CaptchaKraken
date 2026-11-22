@@ -1,7 +1,7 @@
 import type { RoundVerdict } from './verdicts';
-import type { Humanizer, TouchTransform } from './humanize.js';
+import type { HumanizeSettings, Humanizer, TouchTransform } from './humanize.js';
 import type { CustomSelectors, SelectorConfigFile } from './selectors';
-import type { ActionKind, FrameRole, HumanizationMode, PromptFamily, SolveStage, Vendor } from './kinds';
+import type { ActionKind, FrameRole, HumanizationMode, PromptFamily, SolveStage, Speed, Vendor } from './kinds';
 
 /** One intermediate stage of a solve, handed to `CaptchaKrakenConfig.onStep`. */
 export interface SolveStepEvent {
@@ -24,6 +24,13 @@ export interface CaptchaKrakenConfig {
   humanization?: HumanizationMode;
   /** Your own gesture implementation; overrides `humanization`. */
   humanizer?: Humanizer;
+  /**
+   * `human` (default) or `fast`: fast plays myuri's recorded paths 2.5x faster and halves the waits between
+   * gestures. Falls back to CAPTCHA_SPEED.
+   */
+  speed?: Speed;
+  /** myuri settings laid over the speed's, e.g. `{ mouse: { speedFactor: 3 } }`; an unknown key throws at construction. */
+  humanizeSettings?: HumanizeSettings;
   /**
    * Every URL pattern and selector the solver detects and drives with: a path to a config file of the shape of the
    * repository's `captchakraken.config.json`, or the parsed object. What it gives is laid over the shipped default, so

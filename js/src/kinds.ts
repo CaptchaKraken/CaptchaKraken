@@ -54,6 +54,10 @@ export type PromptFamily = (typeof PromptFamily)[keyof typeof PromptFamily];
 export const HumanizationMode = { MOUSE: 'mouse', MOBILE: 'mobile', NONE: 'none' } as const;
 export type HumanizationMode = (typeof HumanizationMode)[keyof typeof HumanizationMode];
 
+/** How fast the hand goes. HUMAN is an ordinary person; FAST is one who has done this captcha a hundred times. */
+export const Speed = { HUMAN: 'human', FAST: 'fast' } as const;
+export type Speed = (typeof Speed)[keyof typeof Speed];
+
 export const PauseKind = { TAP: 'tap', BETWEEN: 'between', GRAB: 'grab', DROP: 'drop', PROBE: 'probe', SETTLE: 'settle', KEY: 'key' } as const;
 export type PauseKind = (typeof PauseKind)[keyof typeof PauseKind];
 

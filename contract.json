@@ -1,6 +1,6 @@
 {
   "python": {
-    "version": "5.1.0",
+    "version": "5.2.0",
     "exports": [
       "ActionKind",
       "CaptchaAction",
@@ -15,6 +15,7 @@
       "HumanizationMode",
       "Humanizer",
       "MobileHumanizer",
+      "Motion",
       "MouseHumanizer",
       "NullHumanizer",
       "Outcome",
@@ -26,6 +27,7 @@
       "RoundVerdict",
       "SelectorConfigError",
       "SolveResult",
+      "Speed",
       "TouchBackend",
       "TypeAction",
       "Vendor",
@@ -65,6 +67,7 @@
       "grid_load_timeout_ms",
       "hcaptcha_images_timeout_ms",
       "humanization",
+      "humanize_settings",
       "humanizer",
       "keyframe_wait_poll_ms",
       "keyframe_wait_timeout_ms",
@@ -91,6 +94,7 @@
       "slide_max_corrections",
       "slide_tolerance_px",
       "speculative_burst_enabled",
+      "speed",
       "stale_element_backoff_ms",
       "stale_frame_diff_threshold",
       "stale_frame_resolve_enabled",
@@ -304,6 +308,10 @@
     "CAPTCHA_REQUEST_PRIORITY": [
       "python/src/captchakraken/planner.py"
     ],
+    "CAPTCHA_SPEED": [
+      "js/src/humanize.ts",
+      "python/src/captchakraken/humanize.py"
+    ],
     "CAPTCHA_TIMINGS": [
       "js/src/timing.ts",
       "python/src/captchakraken/timing.py"
@@ -369,6 +377,7 @@
       "CaptchaKraken/Abyss-video",
       "CaptchaKraken/AbyssV2",
       "CaptchaKraken/AbyssV2-q4",
+      "CaptchaKraken/CaptchaKraken-Custom-Yidun-Commision",
       "CaptchaKraken/CaptchaKraken-Lora-v1.2",
       "CaptchaKraken/CaptchaKraken-v1.2-GGUF",
       "CaptchaKraken/CaptchaKrakenV1_Lora",
@@ -464,6 +473,7 @@
       "FrameRole",
       "HumanizationMode",
       "MobileHumanizer",
+      "Motion",
       "MouseHumanizer",
       "NullHumanizer",
       "Outcome",
@@ -471,6 +481,7 @@
       "PromptFamily",
       "SelectorConfigError",
       "SolveStage",
+      "Speed",
       "Vendor",
       "Verdict",
       "fromPuppeteer",
@@ -499,6 +510,7 @@
       "gridLoadTimeoutMs",
       "hcaptchaImagesTimeoutMs",
       "humanization",
+      "humanizeSettings",
       "humanizer",
       "idleMouseWander",
       "keyframeWaitPollMs",
@@ -528,6 +540,7 @@
       "settlePollMs",
       "settleTimeoutMs",
       "speculativeBurstEnabled",
+      "speed",
       "staleElementBackoffMs",
       "staleFrameDiffThreshold",
       "staleFrameReSolveEnabled",

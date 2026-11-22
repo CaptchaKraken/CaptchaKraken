@@ -1,0 +1,11 @@
+<!doctype html>
+<!-- The document the block page's iframe loads, reduced to what the driver reads: a form holding the widget, and the
+     widget as hCaptcha's secure-api.js draws it on any host page, a full-viewport enclave with its challenge open.
+     The enclave and the challenge are the recorded ones; FRAMES_ORIGIN is a second origin when served. -->
+<html lang="en"><head><meta charset="utf-8"><title>Additional security check is required</title></head>
+<body style="margin: 0; font: 16px sans-serif;">
+<h1 style="margin: 40px;">Additional security check is required</h1>
+<form id="captcha-form" style="margin: 0 40px;"><div class="h-captcha" data-sitekey="00000000-0000-0000-0000-000000000000" data-callback="onCaptchaFinished"></div></form>
+<iframe sandbox="allow-scripts allow-same-origin" title="Widget containing checkbox for hCaptcha security challenge" frameborder="0" scrolling="no" src="FRAMES_ORIGIN/live/hcaptcha-enclave.html#frame=enclave&amp;_channel=1vx5ycvkplus&amp;host=example.com" style="position: fixed; top: 0px; left: 0px; width: 100%; height: 100%; z-index: 2147483647; visibility: visible;"></iframe>
+</body>
+</html>

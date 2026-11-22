@@ -38,11 +38,12 @@ interface PuppeteerPage {
     press(key: string, options?: any): Promise<void>;
     down(key: string, options?: any): Promise<void>;
     up(key: string): Promise<void>;
+    sendCharacter(char: string): Promise<void>;
   };
   waitForSelector(selector: string, options?: any): Promise<PuppeteerElementHandle | null>;
   viewport(): ViewportSize | null;
-  screenshot(options?: { type?: 'png' }): Promise<Uint8Array>;
-  evaluate<R>(pageFunction: () => R): Promise<R>;
+  screenshot(options?: { type?: 'png'; clip?: { x: number; y: number; width: number; height: number } }): Promise<Uint8Array>;
+  evaluate<R>(pageFunction: (() => R) | string): Promise<R>;
   $$(selector: string): Promise<PuppeteerElementHandle[]>;
   isClosed(): boolean;
   evaluate(pageFunction: () => any): Promise<any>;
@@ -161,13 +162,18 @@ export function fromPuppeteer(page: PuppeteerPage): PlaywrightPage {
         await page.keyboard.press(target);
         for (const mod of parts.reverse()) await page.keyboard.up(mod);
       },
+      down: (key) => page.keyboard.down(key),
+      up: (key) => page.keyboard.up(key),
+      insertText: (text) => page.keyboard.sendCharacter(text),
     },
     waitForTimeout: (timeout) => new Promise<void>((resolve) => setTimeout(resolve, timeout)),
     waitForSelector: async (selector, options) =>
       wrapHandle(await page.waitForSelector(selector, toPuppeteerSelectorOptions(options))),
     viewportSize: () => page.viewport(),
     // Puppeteer has no `animations` option, and its own timeout; the capture is PNG either way.
-    screenshot: async ({ style } = {}) => styled(async () => page.frames().map((frame) => ({ frame })), style, async () => Buffer.from(await page.screenshot({ type: 'png' }))),
+    // A clip is only asked of Firefox (see drawsClipsOffscreen), which Puppeteer can drive too.
+    screenshot: async ({ style, clip } = {}) => styled(async () => page.frames().map((frame) => ({ frame })), style,
+      async () => Buffer.from(await page.screenshot({ type: 'png', ...(clip ? { clip } : {}) }))),
     evaluate: (pageFunction) => page.evaluate(pageFunction),
     locator: (selector) => locatorOver(() => page.$$(selector)),
     // Forwarded explicitly: without it the watcher polls a dead page forever.

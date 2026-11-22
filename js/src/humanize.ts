@@ -6,15 +6,15 @@
  *
  * Pluggable because camoufox's juggler re-humanises every mouse.move() it is handed, and running
  * both measured 82s against 13s on one GeeTest slider; and a touch widget needs touch events, not
- * mousemove. See TRIBAL_KNOWLEDGE.md. The 2026-09 cut removed our drag-overshoot redraw and swipe
- * wobble in favour of Cursory's raw recordings; the one-pixel tap wobble stayed because a
- * motionless tap is a synthetic one.
+ * mousemove. See TRIBAL_KNOWLEDGE.md. Paths and keystrokes are myuri's (recorded human movement on
+ * cursory-js); the one-pixel tap wobble is ours, because a motionless tap is a synthetic one.
  */
 
 import type { ViewportSize, Page, PlaywrightElementHandle } from './playwright-types.js';
-import { generateTrajectory } from 'cursory-js';
-import { HumanizationMode, PauseKind, isOneOf } from './kinds.js';
-export type { HumanizationMode, PauseKind } from './kinds.js';
+import { generateProfile, generateRandomSeed, makeRng, planMove, planType } from '@jwriter20/myuri';
+import type { MyuriSettings, Rng } from '@jwriter20/myuri';
+import { HumanizationMode, PauseKind, Speed, isOneOf } from './kinds.js';
+export type { HumanizationMode, PauseKind, Speed } from './kinds.js';
 
 export type Point = [number, number];
 
@@ -30,12 +30,13 @@ export const gauss = (sigma: number) => {
 };
 const closedError = (e: unknown) => /Target closed|Session closed/.test(e instanceof Error ? e.message : String(e));
 
-// What one mouse event may cover. cursory's samples are up to 250 ms and 560 px apart, which the page sees as a
+// What one mouse event may cover. myuri plays one sample per recorded report, but a recording's reports can be
+// 70 ms and 230 px apart, which the page sees as a
 // cursor that vanishes and reappears: a teleport. A real mouse reports every 8 ms (125 Hz).
 export const MAX_EVENT_GAP_MS = 8;
 export const MAX_EVENT_STEP_PX = 16;
 // How far a reach may swing off the straight line between its endpoints: a fraction of its length, at least a few
-// pixels. cursory morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px wide and a
+// pixels. cursory (under myuri) morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px wide and a
 // 140 px one 300 px.
 export const MAX_DEVIATION = 0.15;
 export const MIN_DEVIATION_PX = 3;
@@ -73,12 +74,70 @@ function densify(points: Point[], timings: number[]): [Point[], number[]] {
   return [outP, outT];
 }
 
-/** A recorded human movement morphed onto the endpoints, held near the line between them and sampled at least
- * once per mouse report; timings are cumulative ms. */
-export function trajectory(start: Point, end: Point, frequency: number): [Point[], number[]] {
-  const { points, timings } = generateTrajectory(start, end, { frequency });
+type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
+export type HumanizeSettings = DeepPartial<MyuriSettings>;
+
+/**
+ * What each speed changes. `settings` is laid under the caller's `humanizeSettings` (theirs win, key by key);
+ * `pauses` scales every wait between gestures. FAST is myuri's recorded human path played 2.5x faster, still a
+ * path and still one event per mouse report. On a three-icon Yidun board it took the mouse from 1.9-3.3s to 1.0-1.2s.
+ */
+export const SPEEDS: Readonly<Record<Speed, { settings: HumanizeSettings; pauses: number }>> = {
+  [Speed.HUMAN]: { settings: {}, pauses: 1 },
+  [Speed.FAST]: { settings: { mouse: { speedFactor: 2.5 }, typing: { wpm: 110 } }, pauses: 0.5 },
+};
+
+const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+function merge(under: Record<string, unknown>, over: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = structuredClone(under);
+  for (const [k, v] of Object.entries(over)) out[k] = isPlain(v) && isPlain(out[k]) ? merge(out[k] as Record<string, unknown>, v) : v;
+  return out;
+}
+
+/**
+ * One person's hand: myuri's profile for a seed, and the random stream every path and keystroke draws from.
+ * The seed draws the person (each speed within myuri's `variation` of the value set), so one solver moves like
+ * one person throughout. An unknown settings key throws here, at construction, not mid-solve.
+ */
+export class Motion {
+  readonly speed: Speed;
+  readonly seed: number;
+  readonly settings: MyuriSettings;
+  readonly pauseScale: number;
+  readonly rng: Rng;
+
+  constructor(settings?: HumanizeSettings | null, seed?: number, speed: Speed = Speed.HUMAN) {
+    if (settings != null && !isPlain(settings)) throw new Error(`humanizeSettings must be an object of myuri settings, not ${typeof settings}`);
+    if (!isOneOf(Speed, speed)) throw new Error(`unknown speed '${speed}'; expected one of ${Object.values(Speed).join(', ')}`);
+    this.speed = speed;
+    this.seed = seed ?? generateRandomSeed();
+    const merged = merge(SPEEDS[speed].settings as Record<string, unknown>, (settings ?? {}) as Record<string, unknown>);
+    try {
+      this.settings = generateProfile(this.seed, merged as HumanizeSettings);
+    } catch (e) {
+      throw new Error(`humanizeSettings: ${e instanceof Error ? e.message : e}. See https://github.com/JWriter20/Myuri#settings for every key`);
+    }
+    this.pauseScale = SPEEDS[speed].pauses;
+    this.rng = makeRng(this.seed);
+  }
+}
+
+/** myuri's human movement from `start` to `end`, held near the line between them and sampled at least once per
+ * mouse report; timings are cumulative ms. */
+export function trajectory(start: Point, end: Point, motion: Motion = new Motion()): [Point[], number[]] {
   const s: Point = [Number(start[0]), Number(start[1])], e: Point = [Number(end[0]), Number(end[1])];
-  return densify(tame(points.map((q) => [Number(q[0]), Number(q[1])] as Point), s, e), timings.map(Number));
+  if (samePoint(s, e)) return [[e], [0]];
+  const planned = planMove({ x: s[0], y: s[1] }, { x: e[0], y: e[1] }, motion.rng, { settings: motion.settings });
+  const points = tame([s, ...planned.map((q) => [Number(q.x), Number(q.y)] as Point)], s, e);
+  points[points.length - 1] = e;
+  return densify(points, [0, ...planned.map((q) => Number(q.t))]);
+}
+
+/** `config.speed`, else CAPTCHA_SPEED, else human. */
+export function resolveSpeed(config: { speed?: Speed | string } = {}): Speed {
+  const raw = (config.speed || process.env.CAPTCHA_SPEED || Speed.HUMAN).toString().trim().toLowerCase();
+  if (!isOneOf(Speed, raw)) throw new Error(`unknown speed '${raw}'; expected one of ${Object.values(Speed).join(', ')}`);
+  return raw;
 }
 
 /** Every inter-gesture wait the driver takes, named, so each device supplies its own table. */
@@ -133,9 +192,11 @@ export abstract class BaseHumanizer implements Humanizer {
   abstract readonly hovers: boolean;
   protected abstract readonly pauses: PauseTable;
   at: Point;
+  readonly motion: Motion;
 
-  constructor(start: Point = [0, 0]) {
+  constructor(start: Point = [0, 0], motion?: Motion) {
     this.at = [Number(start[0]), Number(start[1])];
+    this.motion = motion ?? new Motion();
   }
 
   async reset(_page: Page): Promise<void> {}
@@ -154,7 +215,7 @@ export abstract class BaseHumanizer implements Humanizer {
   /** An unknown kind waits nothing, so adding a pause site cannot break a custom humanizer written against an older release. */
   protected pauseMs(kind: PauseKind): number {
     const range = this.pauses[kind];
-    return range ? uniform(range[0], range[1]) : 0;
+    return range ? uniform(range[0], range[1]) * this.motion.pauseScale : 0;
   }
 
   async pause(kind: PauseKind): Promise<void> {
@@ -188,14 +249,13 @@ export class MouseHumanizer extends BaseHumanizer {
     tap: [20, 50], between: [80, 160], grab: [50, 100], drop: [50, 100],
     probe: [40, 80], settle: [90, 210], key: [45, 135],
   };
-  private frequency: number;
   private viewportCache: ViewportSize | null | undefined;
   /** Undefined until the first move of a solve measures it. */
   private browserDrawsPath: boolean | undefined;
 
-  constructor(start: Point = [0, 0], frequency = 60) {
-    super(start);
-    this.frequency = frequency;
+  /** A number in place of `motion` is the pre-5.2.0 `frequency`, accepted and ignored: myuri samples at the recording's own rate. */
+  constructor(start: Point = [0, 0], motion?: Motion | number) {
+    super(start, motion instanceof Motion ? motion : undefined);
   }
 
   async reset(_page: Page): Promise<void> {
@@ -266,7 +326,7 @@ export class MouseHumanizer extends BaseHumanizer {
     if (samePoint(this.at, to)) return;
     this.browserDrawsPath ??= await this.measureBrowserPath(page, to);
     if (this.browserDrawsPath) return this.drift(page, await this.clamp(page, to));
-    const [points, timings] = trajectory(this.at, to, this.frequency);
+    const [points, timings] = trajectory(this.at, to, this.motion);
     const startTime = Date.now();
     for (let i = 0; i < points.length; i++) {
       const [cx, cy] = await this.clamp(page, points[i]);
@@ -284,18 +344,25 @@ export class MouseHumanizer extends BaseHumanizer {
   async press(page: Page): Promise<void> { await page.mouse.down(); }
   async release(page: Page): Promise<void> { await page.mouse.up(); }
 
-  /** Per character with a humanised pause, not type(text, {delay}): a constant inter-key delay is itself a signal these vendors score. */
+  /**
+   * myuri's keystrokes, not type(text, {delay}): a constant inter-key delay is itself a signal these vendors score.
+   * Each key is pressed and released at its planned time, rollover and the odd corrected typo included.
+   */
   async typeText(page: Page, _field: PlaywrightElementHandle, text: string): Promise<boolean> {
     // Clear first: a retry round arrives with the previous attempt still in the box, and typing would append.
-    try { await page.keyboard.press('Control+A'); } catch { /* the type below still replaces on most */ }
-    for (const ch of text) {
+    try { await page.keyboard.press('Control+A'); } catch { /* the keys below still replace on most */ }
+    const typing = this.motion.settings.typing;
+    const steps = planType(text, this.motion.rng, { wpm: typing.wpm, mistakeMultiplier: typing.mistakeMultiplier, pauses: typing.pauses });
+    const start = Date.now();
+    for (const [t, kind, key] of steps) {
+      await delay(start + t - Date.now());
       try {
-        await page.keyboard.type(ch);
+        if (kind === 'insert') await page.keyboard.insertText(key);
+        else await page.keyboard[kind](key);
       } catch (e) {
         log(`could not type into the captcha field: ${e}`);
         return false;
       }
-      await this.pause(PauseKind.KEY);
     }
     return true;
   }
@@ -479,16 +546,14 @@ export class MobileHumanizer extends BaseHumanizer {
   private backend: TouchBackend | null;
   private driver: any;
   private transform: TouchTransform | undefined;
-  private frequency: number;
   private down = false;
 
   constructor(start: Point = [0, 0],
-              options: { backend?: TouchBackend; driver?: any; transform?: TouchTransform; frequency?: number } = {}) {
-    super(start);
+              options: { backend?: TouchBackend; driver?: any; transform?: TouchTransform; motion?: Motion; /** Ignored since 5.2.0. */ frequency?: number } = {}) {
+    super(start, options.motion);
     this.backend = options.backend ?? null;
     this.driver = options.driver;
     this.transform = options.transform;
-    this.frequency = options.frequency ?? 90;
   }
 
   /** A solve that ended mid-gesture leaves a pointer down in the session's input state; lift it before the next one. */
@@ -506,7 +571,7 @@ export class MobileHumanizer extends BaseHumanizer {
   async move(page: Page, to: Point): Promise<void> {
     const dest: Point = [Number(to[0]), Number(to[1])];
     if (this.down) {
-      const [points, timings] = trajectory(this.at, dest, this.frequency);
+      const [points, timings] = trajectory(this.at, dest, this.motion);
       await (await this.touch(page)).move(points.map(([x, y], i) => [x, y, timings[i] - (i ? timings[i - 1] : 0)]));
     }
     this.at = dest;
@@ -605,6 +670,8 @@ export interface HumanizerOptions {
   touchDriver?: any;
   touchTransform?: TouchTransform;
   startingMousePosition?: { x: number; y: number };
+  speed?: Speed;
+  humanizeSettings?: HumanizeSettings;
 }
 
 /**
@@ -621,7 +688,8 @@ export function resolveHumanizer(config: HumanizerOptions = {}): Humanizer {
   }
   const p = config.startingMousePosition;
   const start: Point = p ? [p.x, p.y] : [0, 0];
-  if (raw === HumanizationMode.MOBILE) return new MobileHumanizer(start, { driver: config.touchDriver, transform: config.touchTransform });
-  if (raw === HumanizationMode.NONE) return new NullHumanizer(start);
-  return new MouseHumanizer(start);
+  const motion = new Motion(config.humanizeSettings, undefined, resolveSpeed(config));
+  if (raw === HumanizationMode.MOBILE) return new MobileHumanizer(start, { driver: config.touchDriver, transform: config.touchTransform, motion });
+  if (raw === HumanizationMode.NONE) return new NullHumanizer(start, motion);
+  return new MouseHumanizer(start, motion);
 }

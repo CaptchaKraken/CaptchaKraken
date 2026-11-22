@@ -8,15 +8,17 @@ touch mode that dispatches no motion between taps still has to say where the nex
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import math
 import os
 import random
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from cursory import generate_trajectory
+from myuri import Vector, generate_random_seed, make_rng, plan_move, plan_type, profile_from_seed
 
-from .kinds import HumanizationMode, PauseKind
+from .kinds import HumanizationMode, PauseKind, Speed
 
 Point = Tuple[float, float]
 
@@ -25,6 +27,15 @@ Point = Tuple[float, float]
 PAUSE_KINDS = tuple(PauseKind)
 # How often a held press looks at the widget, in ms: a frame hash per look, so not every frame.
 HOLD_POLL_MS = (180.0, 320.0)
+
+# What each speed changes. `settings` is laid under the caller's `humanize_settings` (theirs win, key by key);
+# `pauses` scales every wait between gestures. FAST is a person who has done this captcha a hundred times: the
+# reach is myuri's recorded human path played 2.5x faster, which is still a path and still one event per mouse
+# report. On a three-icon Yidun board it took the mouse from 1.9-3.3s to 1.0-1.2s.
+SPEEDS: Dict[Speed, Dict[str, Any]] = {
+    Speed.HUMAN: {"settings": {}, "pauses": 1.0},
+    Speed.FAST: {"settings": {"mouse": {"speed_factor": 2.5}, "typing": {"wpm": 110}}, "pauses": 0.5},
+}
 
 
 def _delay(ms: float) -> None:
@@ -41,13 +52,14 @@ def _same_point(a: Point, b: Point) -> bool:
     return abs(float(a[0]) - float(b[0])) < 1e-6 and abs(float(a[1]) - float(b[1])) < 1e-6
 
 
-# What one mouse event may cover. cursory's samples are up to 250 ms and 560 px apart, which the page sees as a
-# cursor that vanishes and reappears: a teleport. A real mouse reports every 8 ms (125 Hz).
-MAX_EVENT_GAP_MS = 8.0
-MAX_EVENT_STEP_PX = 16.0
+# What one mouse event may cover. myuri plays one sample per recorded report, but a recording's reports can be 70 ms
+# and 230 px apart, which the page sees as a cursor that vanishes and reappears: a teleport. A real mouse reports
+# every 8 ms (125 Hz).
+MAX_EVENT_GAP_MS = 8
+MAX_EVENT_STEP_PX = 16
 # How far a reach may swing off the straight line between its endpoints: a fraction of its length, at least a few
-# pixels. cursory morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px wide and a
-# 140 px one 300 px.
+# pixels. cursory (under myuri) morphs a long recorded movement onto any pair of points, so a 5 px move swung 61 px
+# wide and a 140 px one 300 px.
 MAX_DEVIATION = 0.15
 MIN_DEVIATION_PX = 3.0
 
@@ -75,23 +87,68 @@ def _tame(points: List[Point], start: Point, end: Point) -> List[Point]:
 def _densify(points: List[Point], timings: List[float]) -> Tuple[List[Point], List[float]]:
     """Fill every gap wider than one mouse report with evenly timed samples along it."""
     out_p, out_t = points[:1], timings[:1]
-    for (a, ta), (b, tb) in zip(zip(points, timings), zip(points[1:], timings[1:])):
-        dist = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
-        n = max(1, int(-(-(tb - ta) // MAX_EVENT_GAP_MS)), int(-(-dist // MAX_EVENT_STEP_PX)))
+    for j in range(1, len(points)):
+        (ax, ay), (bx, by), ta, tb = points[j - 1], points[j], timings[j - 1], timings[j]
+        n = max(1, math.ceil((tb - ta) / MAX_EVENT_GAP_MS), math.ceil(math.hypot(bx - ax, by - ay) / MAX_EVENT_STEP_PX))
         for i in range(1, n + 1):
             f = i / n
-            out_p.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+            out_p.append((ax + (bx - ax) * f, ay + (by - ay) * f))
             out_t.append(ta + (tb - ta) * f)
     return out_p, out_t
 
 
-def trajectory(start: Point, end: Point, frequency: int = 60) -> Tuple[List[Point], List[float]]:
-    """A recorded human movement morphed onto the endpoints, held near the line between them and sampled at
-    least once per mouse report; timings are cumulative ms."""
-    points, timings = generate_trajectory(start, end, frequency=frequency)
+def _merge(under: Mapping[str, Any], over: Mapping[str, Any]) -> Dict[str, Any]:
+    out = copy.deepcopy(dict(under))
+    for key, value in over.items():
+        out[key] = _merge(out[key], value) if isinstance(value, Mapping) and isinstance(out.get(key), Mapping) else value
+    return out
+
+
+class Motion:
+    """One person's hand: myuri's profile for a seed, and the random stream every path and keystroke draws from.
+
+    The seed draws the person (each speed within myuri's `variation` of the value set), so one solver moves like
+    one person throughout. An unknown settings key raises here, at construction, not mid-solve.
+    """
+
+    def __init__(self, settings: Optional[Mapping[str, Any]] = None, seed: Optional[int] = None,
+                 speed: Speed = Speed.HUMAN) -> None:
+        if settings is not None and not isinstance(settings, Mapping):
+            raise ValueError(f"humanize_settings must be a dict of myuri settings, not {type(settings).__name__}")
+        self.speed = Speed(speed)
+        self.seed = int(seed) if seed is not None else int(generate_random_seed())
+        merged = _merge(SPEEDS[self.speed]["settings"], settings or {})
+        try:
+            profile = profile_from_seed(self.seed, merged)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"humanize_settings: {exc.args[0] if exc.args else exc}. See "
+                             "https://github.com/JWriter20/Myuri#settings for every key") from None
+        self.profile = profile
+        self.settings: Dict[str, Any] = dataclasses.asdict(profile)
+        self.pause_scale = float(SPEEDS[self.speed]["pauses"])
+        self.rng = make_rng(self.seed)
+
+
+def trajectory(start: Point, end: Point, motion: Optional[Motion] = None) -> Tuple[List[Point], List[float]]:
+    """myuri's human movement from `start` to `end`, held near the line between them and sampled at least once per
+    mouse report; timings are ms from the start of the move."""
+    motion = motion or Motion()
     start, end = (float(start[0]), float(start[1])), (float(end[0]), float(end[1]))
-    pts = _tame([(float(x), float(y)) for x, y in points], start, end)
-    return _densify(pts, [float(t) for t in timings])
+    if _same_point(start, end):
+        return [end], [0.0]
+    planned = plan_move(Vector(*start), Vector(*end), motion.rng, settings=motion.settings)
+    points = _tame([start] + [(float(p.x), float(p.y)) for p in planned], start, end)
+    points[-1] = end
+    return _densify(points, [0.0] + [float(p.t) for p in planned])
+
+
+def resolve_speed(config: Any = None) -> Speed:
+    """`config.speed`, else CAPTCHA_SPEED, else human."""
+    raw = str(getattr(config, "speed", None) or os.getenv("CAPTCHA_SPEED") or Speed.HUMAN).strip().lower()
+    try:
+        return Speed(raw)
+    except ValueError:
+        raise ValueError(f"unknown speed {raw!r}; expected one of {', '.join(s.value for s in Speed)}") from None
 
 
 class Humanizer:
@@ -101,8 +158,9 @@ class Humanizer:
     hovers = False
     PAUSES: Dict[PauseKind, Tuple[float, float]] = {}
 
-    def __init__(self, start: Point = (0.0, 0.0)) -> None:
+    def __init__(self, start: Point = (0.0, 0.0), *, motion: Optional[Motion] = None) -> None:
         self.at: Point = (float(start[0]), float(start[1]))
+        self.motion = motion or Motion()
 
     def reset(self, page: Any) -> None:
         pass
@@ -126,7 +184,8 @@ class Humanizer:
 
     def _pause_ms(self, kind: PauseKind) -> float:
         lo, hi = self.PAUSES.get(kind, (0.0, 0.0))
-        return random.uniform(lo, hi)
+        motion = getattr(self, "motion", None)
+        return random.uniform(lo, hi) * (motion.pause_scale if motion is not None else 1.0)
 
     def pause(self, kind: PauseKind) -> None:
         _delay(self._pause_ms(kind))
@@ -183,9 +242,10 @@ class MouseHumanizer(Humanizer):
               PauseKind.DROP: (50.0, 100.0), PauseKind.PROBE: (40.0, 80.0), PauseKind.SETTLE: (90.0, 210.0),
               PauseKind.KEY: (45.0, 135.0)}
 
-    def __init__(self, start: Point = (0.0, 0.0), frequency: int = 60) -> None:
-        super().__init__(start)
-        self._frequency = frequency
+    def __init__(self, start: Point = (0.0, 0.0), frequency: Optional[int] = None, *,
+                 motion: Optional[Motion] = None) -> None:
+        # `frequency` is accepted and ignored since 5.2.0: myuri samples at the recording's own report rate.
+        super().__init__(start, motion=motion)
         self._viewport_cache: Optional[Dict[str, float]] = None
         self._down = False
         self._cursor_seeded = False
@@ -271,7 +331,7 @@ class MouseHumanizer(Humanizer):
         if self._browser_draws_path:
             self._trace(page, [to], [0.0])
             return
-        points, timings = trajectory(self.at, to, self._frequency)
+        points, timings = trajectory(self.at, to, self.motion)
         self._trace(page, points, timings)
 
     def drift(self, page: Any, to: Point) -> None:
@@ -305,14 +365,23 @@ class MouseHumanizer(Humanizer):
             page.keyboard.press("Control+A")
         except Exception:
             pass
-        # Per character, not `type(text, delay=…)`: a constant inter-key delay is itself a signal these vendors score.
-        for ch in text:
+        # myuri's keystrokes, not `type(text, delay=…)`: a constant inter-key delay is itself a signal these vendors
+        # score. Each key is pressed and released at its planned time, rollover and the odd corrected typo included.
+        typing = self.motion.profile.typing
+        steps = plan_type(text, self.motion.rng, wpm=typing.wpm, mistake_multiplier=typing.mistake_multiplier,
+                          pauses=typing.pauses)
+        start = time.monotonic() * 1000.0
+        keyboard = page.keyboard
+        for t, kind, key in steps:
+            _delay(start + t - time.monotonic() * 1000.0)
             try:
-                page.keyboard.type(ch)
+                if kind == "insert":
+                    keyboard.insert_text(key)
+                else:
+                    getattr(keyboard, kind)(key)
             except Exception as exc:
                 _log(f"could not type into the captcha field: {exc}")
                 return False
-            self.pause(PauseKind.KEY)
         return True
 
 
@@ -490,12 +559,12 @@ class MobileHumanizer(Humanizer):
               PauseKind.KEY: (110.0, 320.0)}
 
     def __init__(self, start: Point = (0.0, 0.0), backend: Any = None, driver: Any = None,
-                 frequency: int = 90, **backend_kwargs: Any) -> None:
-        super().__init__(start)
+                 frequency: Optional[int] = None, *, motion: Optional[Motion] = None, **backend_kwargs: Any) -> None:
+        # `frequency` is accepted and ignored since 5.2.0, as on MouseHumanizer.
+        super().__init__(start, motion=motion)
         self._backend: Optional[TouchBackend] = backend
         self._driver = driver
         self._backend_kwargs = backend_kwargs
-        self._frequency = frequency
         self._down = False
 
     def reset(self, page: Any) -> None:
@@ -515,7 +584,7 @@ class MobileHumanizer(Humanizer):
     def move(self, page: Any, to: Point) -> None:
         to = (float(to[0]), float(to[1]))
         if self._down:
-            points, timings = trajectory(self.at, to, self._frequency)
+            points, timings = trajectory(self.at, to, self.motion)
             self._touch(page).move([(x, y, timings[i] - (timings[i - 1] if i else 0.0))
                                     for i, (x, y) in enumerate(points)])
         self.at = to
@@ -631,7 +700,8 @@ def resolve(config: Any) -> Humanizer:
         raise ValueError(f"unknown humanization mode {raw!r}; expected one of {', '.join(sorted(MODES))}, "
                          "or pass your own object as PageSolverConfig.humanizer") from None
     start = getattr(config, "starting_mouse_position", None) or (0.0, 0.0)
+    motion = Motion(getattr(config, "humanize_settings", None), speed=resolve_speed(config))
     if mode is HumanizationMode.MOBILE:
-        return MobileHumanizer(start, driver=getattr(config, "touch_driver", None),
+        return MobileHumanizer(start, driver=getattr(config, "touch_driver", None), motion=motion,
                                **(getattr(config, "touch_transform", None) or {}))
-    return MODES[mode](start)
+    return MODES[mode](start, motion=motion)
