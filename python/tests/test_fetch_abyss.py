@@ -147,3 +147,35 @@ def test_a_free_model_never_asks_the_hub(hub_home, monkeypatch):
     monkeypatch.setattr(selfhost, "install", lambda choice, saved: {"model": choice.model.repo})
     monkeypatch.setattr(selfhost, "_summary", lambda values: None)
     assert selfhost.fetch(yes=True, model="MidnightV2-4B-q4") == 0
+
+
+YIDUN = "CaptchaKraken/AbyssV2-Yidun-q4"
+
+
+def test_the_yidun_model_is_fetched_by_name_and_never_offered_in_the_menu():
+    assert selfhost._from_flags([GPU], {}, "abyss-yidun", None, None).model.repo == YIDUN
+    assert prompts.resolve(YIDUN).pointer and prompts.is_licensed(YIDUN)
+    assert YIDUN not in {m.repo for m in selfhost.listed_models()}
+    with pytest.raises(RuntimeError) as exc:
+        selfhost._from_flags([GPU], {}, "nonsense", None, None)
+    assert "Yidun" not in str(exc.value)
+
+
+def test_the_yidun_model_sends_a_refused_account_to_the_team_not_the_plans_page(hub_home, monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "hf_good")
+    model = next(m for m in selfhost.MODELS if m.repo == YIDUN)
+    with pytest.raises(RuntimeError) as exc:
+        selfhost.ensure_access(YIDUN, interactive=False, http=_hub(user="someone", readable=False), access=model.access)
+    message = str(exc.value)
+    assert "someone" in message and "CaptchaKraken team" in message
+    assert updater.PLANS_URL not in message
+
+
+def test_a_refused_yidun_account_installs_nothing(hub_home, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(selfhost, "detect_gpus", lambda: [GPU])
+    monkeypatch.setattr(selfhost.config, "selfhost", lambda: {})
+    monkeypatch.setattr(selfhost, "_HUB_REQUEST", _hub(readable=False))
+    monkeypatch.setenv("HF_TOKEN", "hf_good")
+    monkeypatch.setattr(selfhost, "install", lambda *a: pytest.fail("installed without access"))
+    assert selfhost.fetch(yes=True, model="abyss-yidun") == 1
