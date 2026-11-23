@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import io
 import json
 import math
@@ -628,6 +629,16 @@ def _stalled(before: Tuple[Any, Sequence[float]], now: Tuple[Any, Sequence[float
     (ax, ay), (bx, by) = _offset(before[0]), _offset(now[0])
     moved = math.hypot(now[1][0] - before[1][0], now[1][1] - before[1][1])
     return math.hypot(bx - ax, by - ay) > SLIDE_PROBE_PX / 2 * k and moved < SLIDE_STALL_PX * k
+
+
+def _require_sync_page(page: Any) -> None:
+    """Refuse an async page up front: driven anyway, every call returns an unawaited coroutine and the solve dies far
+    away. AsyncPageSolver hands this class a sync view of one instead."""
+    if inspect.iscoroutinefunction(getattr(page, "evaluate", None)):
+        raise TypeError(
+            "PageSolver drives a synchronous page and was given an async one; for async_playwright, AsyncCamoufox "
+            "or patchright's async API use AsyncPageSolver (`await AsyncPageSolver().solve(page)`)."
+        )
 
 
 class PageSolver:
@@ -1280,6 +1291,7 @@ class PageSolver:
         the whole board, is checkable on a live page at no inference cost. A checkbox widget is returned with its own
         element; it is clicked, not photographed.
         """
+        _require_sync_page(page)
         self._page = page
         widget = self.detect_captcha(page)
         if widget is None:
@@ -1571,6 +1583,7 @@ class PageSolver:
 
         The inline vendors count: without them the JS port failed fast in under a second on every GeeTest/Yidun page.
         """
+        _require_sync_page(page)
         def count(selector: str) -> int:
             try:
                 return page.locator(selector).count()
@@ -1581,6 +1594,7 @@ class PageSolver:
 
     def detect_captcha(self, page: Any) -> Optional[Widget]:
         """Open challenges first, then unsolved checkboxes, then the inline vendors."""
+        _require_sync_page(page)
         scopes = _host_scopes(page, self._sel)
         for probe in self._sel.widget_probes:
             at = next(iter(_visible_in(scopes, (probe.selector,))), None)
@@ -1599,6 +1613,7 @@ class PageSolver:
 
     def vendors_on_the_wire(self, page: Any) -> List[Vendor]:
         """Which vendors' code the page loaded. Resource timing, because a request listener would have to have been attached before navigation."""
+        _require_sync_page(page)
         try:
             names = page.evaluate(_RESOURCES_JS)
         except Exception:
@@ -1660,6 +1675,7 @@ class PageSolver:
 
     def is_captcha_solved(self, page: Any) -> bool:
         """The vendor's own done signal: a response token, a painted success state, or a checked box."""
+        _require_sync_page(page)
         try:
             scopes = _host_scopes(page, self._sel)
             if any(self._has_value(scopes, s) for s in self._sel.response) or _visible_in(scopes, self._sel.accepted):
@@ -2825,11 +2841,13 @@ class PageSolver:
 
     def watch(self, page: Any, **options: Any) -> "CaptchaWatcher":
         """A watcher over `page`; `.run()` blocks, `.poll_once()` is cooperative."""
+        _require_sync_page(page)
         from .watcher import CaptchaWatcher
 
         return CaptchaWatcher(solver=self, page=page, **options)
 
     def solve(self, page: Any) -> SolveResult:
+        _require_sync_page(page)
         # Loading a model takes as long as the whole solve budget, so a cold server must not spend it.
         if config.selfhost_active():
             ensure_server(config.base_url())

@@ -116,6 +116,46 @@ answers with a frame number the driver then waits for on screen.
 | `docs/assets/demo/tencent_slide.webp` | Animated clip of a live Tencent slide jigsaw solve, shown in the npm and PyPI READMEs. |
 | `docs/assets/demo/yidun_pictureclick.webp` | Animated clip of a live NetEase Yidun characters in order solve, shown in the npm and PyPI READMEs. |
 | `docs/assets/demo/dingxiang_icon.webp` | Animated clip of a live DingXiang icon click solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/yidun_word_order.webp` | Animated clip of a live NetEase Yidun word order solve, shown in the root README. |
+| `docs/assets/demo/yidun_spatial_reasoning.webp` | Animated clip of a live NetEase Yidun spatial reasoning solve, shown in the root README. |
+| `docs/assets/demo/geetest_abstract_grid.webp` | Animated clip of a live GeeTest abstract image grid solve, shown in the root README. |
+| `docs/assets/demo/human_press_and_hold.webp` | Animated clip of a live HUMAN press and hold solve, shown in the root README. |
+| `docs/assets/demo/dingxiang_rotate.webp` | Animated clip of a live DingXiang rotate solve (work in progress), shown in the root README. |
+| `docs/assets/demo/takes/dingxiang_shuffle.webp` | Animated clip of a live DingXiang shuffled tiles solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/geetest_iconcrush.webp` | Animated clip of a live GeeTest icon crush solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/geetest_gobang.webp` | Animated clip of a live GeeTest gobang solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/yidun_iconclick.webp` | Animated clip of a live NetEase Yidun icons in order solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/yidun_pictureclick.webp` | Animated clip of a live NetEase Yidun characters in order solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/dingxiang_space.webp` | Animated clip of a live DingXiang 3D shapes solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/dingxiang_difference.webp` | Animated clip of a live DingXiang odd one out solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/dingxiang_font.webp` | Animated clip of a live DingXiang font solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/dingxiang_area.webp` | Animated clip of a live DingXiang largest area solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/recaptcha_4x4.webp` | Animated clip of a live reCAPTCHA 4×4 tile grid solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/recaptcha_3x3.webp` | Animated clip of a live reCAPTCHA 3×3 tile grid solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/recaptcha_3x3_fade.webp` | Animated clip of a live reCAPTCHA 3×3 dynamic solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/tencent_slide.webp` | Animated clip of a live Tencent slide jigsaw solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/geetest_slide.webp` | Animated clip of a live GeeTest slide jigsaw solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/dingxiang_jigsaw.webp` | Animated clip of a live DingXiang tilted-piece jigsaw solve, a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/takes/funcaptcha_claw_machine.webp` | Animated clip of a live FunCaptcha claw machine solve (work in progress), a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/boards/island_never_visited.webp` | Animated clip of a live "the island the animal never visited" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/icon_different.webp` | Animated clip of a live moving "the icon that is different" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/jumps_highest.webp` | Animated clip of a live "the character who jumps highest" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/fix_the_pattern.webp` | Animated clip of a live "drag the piece that fixes the pattern" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/x_inside_both_shapes.webp` | Animated clip of a live "drag the X inside both shapes" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/segments_complete_line.webp` | Animated clip of a live "drag the segment that completes the line" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/astronaut_to_spaceship.webp` | Animated clip of a live "drag the astronaut to the spaceship" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/drag_icon_where_it_fits.webp` | Animated clip of a live "drag the icon to where it fits" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/scattered_scene_hot_cold.webp` | Animated clip of a live "drinks that can be hot or cold" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/rings_not_linked.webp` | Animated clip of a live "the rings not linked to the circle" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/foods_eaten_hot.webp` | Animated clip of a live "foods usually eaten hot" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/identical_elements.webp` | Animated clip of a live "the elements that are identical" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/animal_icon_different.webp` | Animated clip of a live "the animal icon that is different" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/partly_blocked_by_line.webp` | Animated clip of a live "the animal partly blocked by a line" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/two_matching_shapes.webp` | Animated clip of a live "the two matching shapes" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_animal_can_fly.webp` | Animated clip of a live image grid "the animal that can fly" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_moves_like_example.webp` | Animated clip of a live image grid "animals that move like the example" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_fits_in_pocket.webp` | Animated clip of a live image grid "what fits in a pocket" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_made_of_wood.webp` | Animated clip of a live image grid "objects made of wood" board solve, widget footer cropped off, shown in the root README. |
 
 ## `js/` — the TypeScript browser driver (npm `captchakraken`)
 
@@ -298,6 +338,7 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/page_solver.py` | `PageSolver`: the Python page driver, mirror of `js/src/solver.ts`, the pointer fallback queue and refresh, and the home of `CaptchaSolveError` and its four subclasses. |
 | `python/src/captchakraken/planner.py` | `ActionPlanner`: assemble the request, call the OpenAI-compatible endpoint, parse the plan back into typed actions, and queue the pointer's other complete plans. |
 | `python/src/captchakraken/watcher.py` | The Python mirror of `js/src/watcher.ts`: solve captchas as they appear, and stop on demand. |
+| `python/src/captchakraken/async_page_solver.py` | `AsyncPageSolver`: the Python driver for an async page, run on a worker thread against a proxy that hands every page call back to the caller's event loop. |
 | `python/src/captchakraken/prompts.py` | Prompt resolution. Every model gets the prompt generation it was trained on: a drifting prompt does not error, it just makes puzzles fail silently, so the built-ins for every generation still in service ship here and `models.json` records which model wants which. |
 | `python/src/captchakraken/models.json` | The model registry: every published model, the prompt generation it was trained on, its pixel budget, and whether its weights are downloadable. |
 | `python/src/captchakraken/pinned_model.json` | The adapter this release was validated against, so a client can say what it was proved with rather than what happens to be latest. |
@@ -397,6 +438,8 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/drawing.py` | Board drawing for tests in numpy and Pillow (HSV colours, rectangles, circles, BGR writes), now that the client has no OpenCV. |
 | `python/tests/test_watcher.py` | The watcher's contract, driven against a fake solver. |
 | `python/tests/test_browser_compat.py` | The Python driver's compatibility claim, checked against a real browser. |
+| `python/tests/test_the_async_driver_drives_a_real_async_page.py` | `AsyncPageSolver` against a real async Chromium: the duck-typed members, listeners, the caller's loop staying live, and cancellation. |
+| `python/tests/test_an_async_page_is_refused_at_the_door.py` | `PageSolver` refuses an async page with a `TypeError` that names `AsyncPageSolver`, before driving anything. |
 | `python/tests/test_humanizer.py` | Humanisation is an input device, not a realism dial: the mobile device never emits a mouse event. |
 | `python/tests/test_the_film_outlives_the_answer.py` | The film of an animated board accumulates across rounds and dies with the board, not with the answer. |
 | `python/tests/test_a_new_board_ends_the_film.py` | `_fresh_board()` drops the recorded answer, the animated verdict and the slice, so none of them cross onto the next board. |

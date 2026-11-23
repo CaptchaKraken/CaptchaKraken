@@ -47,6 +47,7 @@ try:
     from .page_solver import CaptchaSolveError, PageSolver, PageSolverConfig, SolveResult, solve_captcha_on_page
     from .selectors import DEFAULT_CONFIG_PATH, SelectorConfigError, VendorSelectors, load_config
     from .watcher import CaptchaWatcher
+    from .async_page_solver import AsyncCaptchaWatcher, AsyncPageSolver, solve_captcha_on_page_async
 except ModuleNotFoundError:
     CaptchaSolver = None
     solve_captcha = None
@@ -60,6 +61,9 @@ except ModuleNotFoundError:
     SelectorConfigError = None
     load_config = None
     CaptchaWatcher = None
+    AsyncPageSolver = None
+    AsyncCaptchaWatcher = None
+    solve_captcha_on_page_async = None
 
 __all__ = [
     # Solving a page
@@ -69,6 +73,9 @@ __all__ = [
     "CaptchaSolveError",
     "solve_captcha_on_page",
     "CaptchaWatcher",
+    "AsyncPageSolver",
+    "AsyncCaptchaWatcher",
+    "solve_captcha_on_page_async",
     # Solving an image
     "CaptchaSolver",
     "solve_captcha",
