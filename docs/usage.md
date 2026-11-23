@@ -119,10 +119,27 @@ Everything that decides **accuracy** — the prompts, the CV, the pixel budget,
 the model — lives in the shared Python half and is identical by construction.
 The differences above are all in the driving layer.
 
-> **The Python driver is synchronous only.** A sync Playwright handle cannot be
-> driven from inside an event loop, so `async_playwright` and `AsyncCamoufox`
-> are not supported by it — use the TypeScript driver for async work until the
-> async mirror lands.
+**Async Python.** `PageSolver` takes a sync page (`playwright.sync_api`, sync
+Camoufox). For `async_playwright`, `AsyncCamoufox` or patchright's async API use
+`AsyncPageSolver`. It takes the same arguments, and every method is awaited:
+
+```python
+from playwright.async_api import async_playwright
+from captchakraken import AsyncPageSolver
+
+async with async_playwright() as p:
+    page = await (await p.chromium.launch()).new_page()
+    await page.goto("https://example.com/login")
+    result = await AsyncPageSolver().solve(page)
+```
+
+`AsyncPageSolver().watch(page)` returns a watcher with `await .run()` and
+`await .poll_once()`, and `solve_captcha_on_page_async(page)` is the one-call
+form. It is the same driver, not a port: the solve runs on a worker thread and
+every page call is handed back to your event loop, so your other tasks keep
+running for the whole solve. Cancelling the awaiting task stops the solve at
+its next page call. Handing an async page to `PageSolver` raises a `TypeError`
+that names `AsyncPageSolver`.
 
 ### camoufox (Python)
 

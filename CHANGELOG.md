@@ -3,6 +3,24 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
+## [Unreleased]
+
+### Added
+
+- **Async Python: `AsyncPageSolver`.** `await AsyncPageSolver().solve(page)`
+  drives an `async_playwright`, `AsyncCamoufox` or patchright async page, with
+  `capture`, `detect_captcha`, `is_captcha_solved` and `watch` awaited too, and
+  `solve_captcha_on_page_async(page)` as the one-call form. It is the same
+  driver as `PageSolver`, run on a worker thread, so the caller's event loop
+  keeps running for the whole solve. Cancelling the task stops the solve.
+  ([#122](https://github.com/CaptchaKraken/CaptchaKraken/issues/122))
+
+### Fixed
+
+- An async page handed to `PageSolver` raises a `TypeError` naming
+  `AsyncPageSolver`. It used to run a whole attempt against unawaited
+  coroutines and fail with `'coroutine' object is not iterable`.
+
 ## [5.2.1] - 2026-11-22
 
 ### Fixed
