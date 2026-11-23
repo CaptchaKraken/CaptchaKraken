@@ -121,12 +121,9 @@ answers with a frame number the driver then waits for on screen.
 | `docs/assets/demo/geetest_abstract_grid.webp` | Animated clip of a live GeeTest abstract image grid solve, shown in the root README. |
 | `docs/assets/demo/human_press_and_hold.webp` | Animated clip of a live HUMAN press and hold solve, shown in the root README. |
 | `docs/assets/demo/dingxiang_rotate.webp` | Animated clip of a live DingXiang rotate solve (work in progress), shown in the root README. |
-| `docs/assets/demo/takes/animated_island.webp` | Animated clip of a live animated "island the animal never visited" board solve, a different attempt from the one on captchakraken.com, shown in the root README. |
-| `docs/assets/demo/takes/canvas_x_inside_shapes.webp` | Animated clip of a live "drag the X inside both shapes" canvas board solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/dingxiang_shuffle.webp` | Animated clip of a live DingXiang shuffled tiles solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/geetest_iconcrush.webp` | Animated clip of a live GeeTest icon crush solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/geetest_gobang.webp` | Animated clip of a live GeeTest gobang solve, a different attempt from the one on captchakraken.com, shown in the root README. |
-| `docs/assets/demo/takes/canvas_scattered_scene.webp` | Animated clip of a live scattered-scene canvas board solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/yidun_iconclick.webp` | Animated clip of a live NetEase Yidun icons in order solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/yidun_pictureclick.webp` | Animated clip of a live NetEase Yidun characters in order solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/dingxiang_space.webp` | Animated clip of a live DingXiang 3D shapes solve, a different attempt from the one on captchakraken.com, shown in the root README. |
@@ -136,11 +133,29 @@ answers with a frame number the driver then waits for on screen.
 | `docs/assets/demo/takes/recaptcha_4x4.webp` | Animated clip of a live reCAPTCHA 4×4 tile grid solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/recaptcha_3x3.webp` | Animated clip of a live reCAPTCHA 3×3 tile grid solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/recaptcha_3x3_fade.webp` | Animated clip of a live reCAPTCHA 3×3 dynamic solve, a different attempt from the one on captchakraken.com, shown in the root README. |
-| `docs/assets/demo/takes/image_grid_by_description.webp` | Animated clip of a live image grid by description solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/tencent_slide.webp` | Animated clip of a live Tencent slide jigsaw solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/geetest_slide.webp` | Animated clip of a live GeeTest slide jigsaw solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/dingxiang_jigsaw.webp` | Animated clip of a live DingXiang tilted-piece jigsaw solve, a different attempt from the one on captchakraken.com, shown in the root README. |
 | `docs/assets/demo/takes/funcaptcha_claw_machine.webp` | Animated clip of a live FunCaptcha claw machine solve (work in progress), a different attempt from the one on captchakraken.com, shown in the root README. |
+| `docs/assets/demo/boards/island_never_visited.webp` | Animated clip of a live "the island the animal never visited" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/icon_different.webp` | Animated clip of a live moving "the icon that is different" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/jumps_highest.webp` | Animated clip of a live "the character who jumps highest" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/fix_the_pattern.webp` | Animated clip of a live "drag the piece that fixes the pattern" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/x_inside_both_shapes.webp` | Animated clip of a live "drag the X inside both shapes" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/segments_complete_line.webp` | Animated clip of a live "drag the segment that completes the line" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/astronaut_to_spaceship.webp` | Animated clip of a live "drag the astronaut to the spaceship" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/drag_icon_where_it_fits.webp` | Animated clip of a live "drag the icon to where it fits" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/scattered_scene_hot_cold.webp` | Animated clip of a live "drinks that can be hot or cold" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/rings_not_linked.webp` | Animated clip of a live "the rings not linked to the circle" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/foods_eaten_hot.webp` | Animated clip of a live "foods usually eaten hot" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/identical_elements.webp` | Animated clip of a live "the elements that are identical" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/animal_icon_different.webp` | Animated clip of a live "the animal icon that is different" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/partly_blocked_by_line.webp` | Animated clip of a live "the animal partly blocked by a line" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/two_matching_shapes.webp` | Animated clip of a live "the two matching shapes" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_animal_can_fly.webp` | Animated clip of a live image grid "the animal that can fly" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_moves_like_example.webp` | Animated clip of a live image grid "animals that move like the example" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_fits_in_pocket.webp` | Animated clip of a live image grid "what fits in a pocket" board solve, widget footer cropped off, shown in the root README. |
+| `docs/assets/demo/boards/grid_made_of_wood.webp` | Animated clip of a live image grid "objects made of wood" board solve, widget footer cropped off, shown in the root README. |
 
 ## `js/` — the TypeScript browser driver (npm `captchakraken`)
 
