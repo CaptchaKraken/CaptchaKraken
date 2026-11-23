@@ -107,31 +107,20 @@ answers with a frame number the driver then waits for on screen.
 | `docs/assets/logo-light.svg` | Logo for light backgrounds; the root README's default. |
 | `docs/assets/logo-dark.svg` | Logo for dark backgrounds, picked by `prefers-color-scheme`. |
 | `docs/assets/logo-card.png` | Square raster logo, used by the npm, PyPI and MCP package READMEs, which cannot rely on relative paths. |
-| `docs/assets/demo/recaptcha_4x4.webp` | Animated clip of a live reCAPTCHA 4×4 tile grid solve, shown in the root, npm and PyPI READMEs. |
-| `docs/assets/demo/recaptcha_3x3.webp` | Animated clip of a live reCAPTCHA 3×3 tile grid solve, shown in the root, npm and PyPI READMEs. |
+| `docs/assets/demo/recaptcha_4x4.webp` | Animated clip of a live reCAPTCHA 4×4 tile grid solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/recaptcha_3x3.webp` | Animated clip of a live reCAPTCHA 3×3 tile grid solve, shown in the npm and PyPI READMEs. |
 | `docs/assets/demo/canvas_drag.webp` | Animated clip of a live Canvas drag puzzle solve, shown in the npm and PyPI READMEs. |
-| `docs/assets/demo/geetest_slide.webp` | Animated clip of a live GeeTest slide jigsaw solve, shown in the root, npm and PyPI READMEs. |
+| `docs/assets/demo/geetest_slide.webp` | Animated clip of a live GeeTest slide jigsaw solve, shown in the npm and PyPI READMEs. |
 | `docs/assets/demo/geetest_icon.webp` | Animated clip of a live GeeTest ordered icon click solve, shown in the npm and PyPI READMEs. |
 | `docs/assets/demo/geetest_nine.webp` | Animated clip of a live GeeTest 3×3 photo grid solve, shown in the npm and PyPI READMEs. |
-| `docs/assets/demo/tencent_slide.webp` | Animated clip of a live Tencent slide jigsaw solve, shown in the root, npm and PyPI READMEs. |
-| `docs/assets/demo/yidun_pictureclick.webp` | Animated clip of a live NetEase Yidun characters in order solve, shown in the root, npm and PyPI READMEs. |
+| `docs/assets/demo/tencent_slide.webp` | Animated clip of a live Tencent slide jigsaw solve, shown in the npm and PyPI READMEs. |
+| `docs/assets/demo/yidun_pictureclick.webp` | Animated clip of a live NetEase Yidun characters in order solve, shown in the npm and PyPI READMEs. |
 | `docs/assets/demo/dingxiang_icon.webp` | Animated clip of a live DingXiang icon click solve, shown in the npm and PyPI READMEs. |
-| `docs/assets/demo/animated_island.webp` | Animated clip of a live moving-board solve (the island the animal never visited), shown in the root README. |
-| `docs/assets/demo/canvas_x_inside_shapes.webp` | Animated clip of a live Drag the X inside both shapes solve, shown in the root README. |
-| `docs/assets/demo/canvas_missing_piece.webp` | Animated clip of a live Drag the missing piece into the pattern solve, shown in the root README. |
-| `docs/assets/demo/dingxiang_shuffle.webp` | Animated clip of a live DingXiang shuffled tiles solve, shown in the root README. |
-| `docs/assets/demo/geetest_iconcrush.webp` | Animated clip of a live GeeTest icon crush solve, shown in the root README. |
-| `docs/assets/demo/geetest_gobang.webp` | Animated clip of a live GeeTest gobang solve, shown in the root README. |
-| `docs/assets/demo/canvas_scattered_scene.webp` | Animated clip of a live Find it in a scattered scene solve, shown in the root README. |
-| `docs/assets/demo/yidun_iconclick.webp` | Animated clip of a live Icons in order (NetEase Yidun, GeeTest, DingXiang) solve, shown in the root README. |
-| `docs/assets/demo/dingxiang_space.webp` | Animated clip of a live DingXiang 3D shapes solve, shown in the root README. |
-| `docs/assets/demo/dingxiang_difference.webp` | Animated clip of a live DingXiang odd one out solve, shown in the root README. |
-| `docs/assets/demo/dingxiang_font.webp` | Animated clip of a live DingXiang font solve, shown in the root README. |
-| `docs/assets/demo/dingxiang_area.webp` | Animated clip of a live DingXiang largest area solve, shown in the root README. |
-| `docs/assets/demo/recaptcha_3x3_fade.webp` | Animated clip of a live reCAPTCHA 3×3 dynamic solve, shown in the root README. |
-| `docs/assets/demo/image_grid_by_description.webp` | Animated clip of a live Image grid by description solve, shown in the root README. |
-| `docs/assets/demo/dingxiang_jigsaw.webp` | Animated clip of a live DingXiang tilted piece, two notches solve, shown in the root README. |
-| `docs/assets/demo/funcaptcha_claw_machine.webp` | Animated clip of a live FunCaptcha claw machine solve, shown in the root README. |
+| `docs/assets/demo/yidun_word_order.webp` | Animated clip of a live NetEase Yidun word order solve, shown in the root README. |
+| `docs/assets/demo/yidun_spatial_reasoning.webp` | Animated clip of a live NetEase Yidun spatial reasoning solve, shown in the root README. |
+| `docs/assets/demo/geetest_abstract_grid.webp` | Animated clip of a live GeeTest abstract image grid solve, shown in the root README. |
+| `docs/assets/demo/human_press_and_hold.webp` | Animated clip of a live HUMAN press and hold solve, shown in the root README. |
+| `docs/assets/demo/dingxiang_rotate.webp` | Animated clip of a live DingXiang rotate solve (work in progress), shown in the root README. |
 
 ## `js/` — the TypeScript browser driver (npm `captchakraken`)
 
