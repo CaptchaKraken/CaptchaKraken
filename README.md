@@ -30,124 +30,103 @@
 ---
 
 <!--
-  The clips are served from captchakraken.com, NOT from this repo, and that is
-  deliberate. raw.githubusercontent.com sends `.webm` as `audio/webm` and `.mp4`
-  as `application/octet-stream` (both measured 2026-08-24), and a <video> given
-  either of those does not reliably play. The site's own /art/demo route sends
-  `video/webm`, which does. The animated WebP in the npm and PyPI READMEs is a
-  different story — `image/webp` IS served correctly from raw, so those come
-  from docs/assets/demo/ here.
-
-  Each <video> carries a plain <a> fallback so the section degrades to links
-  rather than to nothing if a renderer strips the tag.
+  Animated WebP, not <video>: GitHub strips a <video> whose source is not a
+  GitHub upload, fallback link and all, so an image is the only clip that plays
+  here. Each clip and its figures come from the same recording run as the
+  captchakraken.com demo wall.
 -->
 
 ## Watch it work
 
-Nine puzzle types, each driven on the vendor's own **public demo page**
-through the hosted API, with every attempt scored. These clips also run on
-[captchakraken.com](https://captchakraken.com) — recorded 2026-08-19 against
-**captcha-v12**, the legacy adapter used for these historical measurements.
+One live solve per puzzle, each driven end to end on the vendor's own
+**public demo page** through the hosted API (**CaptchaKraken Abyss**), one solve
+at a time, recorded 2026-11-12 to 2026-11-15.
 
-Three things worth knowing before you read the numbers:
-
-- **They are counts, not percentages.** Ten attempts is not a percentage, and
+- **Counts, not percentages.** A handful of attempts is not a percentage, and
   the count is the thing you can actually reason about.
-- **The clip runs shorter than the solve.** Stretches where the pointer is not
-  moving are cut out, so the footage stays watchable. The median beside each
-  clip is the measured whole-solve time, computed from the run and never from
-  the footage — the clip illustrates, the median asserts.
-- **It is the whole widget, not one puzzle.** A tab is named for the puzzle the
-  vendor *opened* with, and the time covers every round after it. reCAPTCHA
-  keeps going until it is satisfied, and a later round is often a different
-  shape from the one that opened, so two attempts at one puzzle can differ in
-  length several times over.
+- **The median is measured, not filmed.** It runs from the challenge opening to
+  the vendor verifying it, taken from the run. Idle time is cut from the clips,
+  so they run shorter than the solves they show.
+- **It is the whole widget, not one board.** reCAPTCHA keeps asking until it is
+  satisfied, so a clip often runs past the board it opened on. Puzzles that deal
+  a varying number of boards are timed per board.
+- **One clip stands for every vendor that ships the same puzzle**; the caption
+  names them.
 
-A round the vendor waved through without a puzzle is not in these counts, and
-neither is one we could not classify — only rounds where a challenge was on
-screen and had to be solved.
+### Moving boards — no single frame holds the answer
 
-<details open>
-<summary><b>reCAPTCHA</b> — 3 puzzle types</summary>
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/animated_island.webp" width="240" alt="Animated: the island the animal never visited, solved live end to end"><br><sub><b>Animated: the island the animal never visited</b><br>6/8 solved · median 10.7 s per board</sub></td>
+  </tr>
+</table>
 
-**4×4 tile grid** — 9/10 solved · 8.7s median
+### Drag and arrange — the answer is a path, not a point
 
-One image cut into sixteen, with the object spanning several of them. Another board normally follows.
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/canvas_x_inside_shapes.webp" width="240" alt="Drag the X inside both shapes, solved live end to end"><br><sub><b>Drag the X inside both shapes</b><br>37/37 solved · median 7.3 s per board</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/canvas_missing_piece.webp" width="240" alt="Drag the missing piece into the pattern, solved live end to end"><br><sub><b>Drag the missing piece into the pattern</b><br>7/7 solved · median 16.4 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/dingxiang_shuffle.webp" width="240" alt="DingXiang shuffled tiles, solved live end to end"><br><sub><b>DingXiang shuffled tiles</b><br>6/6 solved · median 5.9 s</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/geetest_iconcrush.webp" width="240" alt="GeeTest icon crush, solved live end to end"><br><sub><b>GeeTest icon crush</b><br>6/6 solved · median 6.1 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/geetest_gobang.webp" width="240" alt="GeeTest gobang, solved live end to end"><br><sub><b>GeeTest gobang</b><br>6/6 solved · median 6.3 s</sub></td>
+  </tr>
+</table>
 
-<video src="https://captchakraken.com/art/demo/recaptcha_4x4.webm" width="408" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the reCAPTCHA 4×4 tile grid solve</a>
-</video>
+### Find and click — icons, characters and shapes, in the order asked
 
-**3×3 tile grid** — 11/11 solved · 9.3s median
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/canvas_scattered_scene.webp" width="240" alt="Find it in a scattered scene, solved live end to end"><br><sub><b>Find it in a scattered scene</b><br>37/37 solved · median 7.3 s per board</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/yidun_iconclick.webp" width="240" alt="Icons in order (NetEase Yidun, GeeTest, DingXiang), solved live end to end"><br><sub><b>Icons in order (NetEase Yidun, GeeTest, DingXiang)</b><br>6/6 solved · median 7.8 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/yidun_pictureclick.webp" width="240" alt="Characters in order (NetEase Yidun, DingXiang), solved live end to end"><br><sub><b>Characters in order (NetEase Yidun, DingXiang)</b><br>6/6 solved · median 7.7 s</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/dingxiang_space.webp" width="240" alt="DingXiang 3D shapes, solved live end to end"><br><sub><b>DingXiang 3D shapes</b><br>6/6 solved · median 3.7 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/dingxiang_difference.webp" width="240" alt="DingXiang odd one out, solved live end to end"><br><sub><b>DingXiang odd one out</b><br>6/6 solved · median 4.1 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/dingxiang_font.webp" width="240" alt="DingXiang font, solved live end to end"><br><sub><b>DingXiang font</b><br>6/6 solved · median 4.7 s</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/dingxiang_area.webp" width="240" alt="DingXiang largest area, solved live end to end"><br><sub><b>DingXiang largest area</b><br>6/6 solved · median 5.1 s</sub></td>
+  </tr>
+</table>
 
-Nine tiles of one photo. reCAPTCHA keeps asking until it is satisfied, so the clip usually runs past the board it opened on.
+### Image grids — every matching tile, round after round
 
-<video src="https://captchakraken.com/art/demo/recaptcha_3x3.webm" width="408" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the reCAPTCHA 3×3 tile grid solve</a>
-</video>
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/recaptcha_4x4.webp" width="240" alt="reCAPTCHA 4×4 tile grid, solved live end to end"><br><sub><b>reCAPTCHA 4×4 tile grid</b><br>14/14 solved · median 6.6 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/recaptcha_3x3.webp" width="240" alt="reCAPTCHA 3×3 photo grid (also GeeTest), solved live end to end"><br><sub><b>reCAPTCHA 3×3 photo grid (also GeeTest)</b><br>20/22 solved · median 6.5 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/recaptcha_3x3_fade.webp" width="240" alt="reCAPTCHA 3×3 dynamic, solved live end to end"><br><sub><b>reCAPTCHA 3×3 dynamic</b><br>4/4 solved · median 18.7 s</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/image_grid_by_description.webp" width="240" alt="Image grid by description, solved live end to end"><br><sub><b>Image grid by description</b><br>2/2 solved · median 7.4 s</sub></td>
+  </tr>
+</table>
 
-**3×3 dynamic** — 8/10 solved · 38.2s median
+### Sliders — find the gap by eye, then drag like a hand
 
-Each tile you clear fades and is replaced. It only ends when the board comes back clean.
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/tencent_slide.webp" width="240" alt="Slide jigsaw (Tencent, NetEase Yidun), solved live end to end"><br><sub><b>Slide jigsaw (Tencent, NetEase Yidun)</b><br>6/6 solved · median 6.2 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/geetest_slide.webp" width="240" alt="GeeTest slide jigsaw on rendered art, solved live end to end"><br><sub><b>GeeTest slide jigsaw on rendered art</b><br>6/6 solved · median 7.7 s</sub></td>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/dingxiang_jigsaw.webp" width="240" alt="DingXiang tilted piece, two notches, solved live end to end"><br><sub><b>DingXiang tilted piece, two notches</b><br>6/7 solved · median 12.5 s</sub></td>
+  </tr>
+</table>
 
-<video src="https://captchakraken.com/art/demo/recaptcha_3x3_fade.webm" width="408" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the reCAPTCHA 3×3 dynamic solve</a>
-</video>
+### Puzzle games — work in progress
 
-</details>
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%"><img src="./docs/assets/demo/funcaptcha_claw_machine.webp" width="240" alt="FunCaptcha claw machine, solved live end to end"><br><sub><b>FunCaptcha claw machine</b><br>6/13 solved · median 9.5 s</sub></td>
+  </tr>
+</table>
 
-<details>
-<summary><b>GeeTest</b> — 6 puzzle types</summary>
+Full results, including puzzle types that are measured but not shown here,
+at [captchakraken.com](https://captchakraken.com).
 
-**Ordered icon click** — 10/10 solved · 9.0s median
-
-Find small icons hidden in a photo and click them in the order given.
-
-<video src="https://captchakraken.com/art/demo/geetest_icon.webm" width="348" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the GeeTest ordered icon click solve</a>
-</video>
-
-**Icon crush** — 9/10 solved · 7.1s median
-
-Match-3 on near-identical sprites: swap one pair to line up three.
-
-<video src="https://captchakraken.com/art/demo/geetest_iconcrush.webm" width="348" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the GeeTest icon crush solve</a>
-</video>
-
-**Gobang** — 10/10 solved · 6.8s median
-
-A 5×5 board. Move one stone so five identical ones line up.
-
-<video src="https://captchakraken.com/art/demo/geetest_gobang.webm" width="348" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the GeeTest gobang solve</a>
-</video>
-
-**3×3 photo grid** — 10/10 solved · 7.8s median
-
-The target is a thumbnail in the prompt bar, not a word. Nothing to read.
-
-<video src="https://captchakraken.com/art/demo/geetest_nine.webm" width="348" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the GeeTest 3×3 photo grid solve</a>
-</video>
-
-**Slide jigsaw** — 10/10 solved · 7.6s median
-
-Drag the cut-out back into its notch. Off by six pixels is a failure.
-
-<video src="https://captchakraken.com/art/demo/geetest_slide.webm" width="348" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the GeeTest slide jigsaw solve</a>
-</video>
-
-**Cycling line art** — 9/10 solved · 39.5s median
-
-The board cycles through fresh candidates. The answer is a frame and a point.
-
-<video src="https://captchakraken.com/art/demo/geetest_svg.webm" width="348" controls muted loop playsinline preload="none">
-  <a href="https://captchakraken.com/#demos">Watch the GeeTest cycling line art solve</a>
-</video>
-
-</details>
 ---
 
 ## Setup
