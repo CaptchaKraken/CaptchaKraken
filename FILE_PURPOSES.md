@@ -303,6 +303,7 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/page_solver.py` | `PageSolver`: the Python page driver, mirror of `js/src/solver.ts`, the pointer fallback queue and refresh, and the home of `CaptchaSolveError` and its four subclasses. |
 | `python/src/captchakraken/planner.py` | `ActionPlanner`: assemble the request, call the OpenAI-compatible endpoint, parse the plan back into typed actions, and queue the pointer's other complete plans. |
 | `python/src/captchakraken/watcher.py` | The Python mirror of `js/src/watcher.ts`: solve captchas as they appear, and stop on demand. |
+| `python/src/captchakraken/async_page_solver.py` | `AsyncPageSolver`: the Python driver for an async page, run on a worker thread against a proxy that hands every page call back to the caller's event loop. |
 | `python/src/captchakraken/prompts.py` | Prompt resolution. Every model gets the prompt generation it was trained on: a drifting prompt does not error, it just makes puzzles fail silently, so the built-ins for every generation still in service ship here and `models.json` records which model wants which. |
 | `python/src/captchakraken/models.json` | The model registry: every published model, the prompt generation it was trained on, its pixel budget, and whether its weights are downloadable. |
 | `python/src/captchakraken/pinned_model.json` | The adapter this release was validated against, so a client can say what it was proved with rather than what happens to be latest. |
@@ -402,6 +403,8 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/drawing.py` | Board drawing for tests in numpy and Pillow (HSV colours, rectangles, circles, BGR writes), now that the client has no OpenCV. |
 | `python/tests/test_watcher.py` | The watcher's contract, driven against a fake solver. |
 | `python/tests/test_browser_compat.py` | The Python driver's compatibility claim, checked against a real browser. |
+| `python/tests/test_the_async_driver_drives_a_real_async_page.py` | `AsyncPageSolver` against a real async Chromium: the duck-typed members, listeners, the caller's loop staying live, and cancellation. |
+| `python/tests/test_an_async_page_is_refused_at_the_door.py` | `PageSolver` refuses an async page with a `TypeError` that names `AsyncPageSolver`, before driving anything. |
 | `python/tests/test_humanizer.py` | Humanisation is an input device, not a realism dial: the mobile device never emits a mouse event. |
 | `python/tests/test_the_film_outlives_the_answer.py` | The film of an animated board accumulates across rounds and dies with the board, not with the answer. |
 | `python/tests/test_a_new_board_ends_the_film.py` | `_fresh_board()` drops the recorded answer, the animated verdict and the slice, so none of them cross onto the next board. |

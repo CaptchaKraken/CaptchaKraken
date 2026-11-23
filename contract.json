@@ -3,6 +3,8 @@
     "version": "5.2.1",
     "exports": [
       "ActionKind",
+      "AsyncCaptchaWatcher",
+      "AsyncPageSolver",
       "CaptchaAction",
       "CaptchaKrakenAPIError",
       "CaptchaSolveError",
@@ -36,7 +38,8 @@
       "WaitAction",
       "load_config",
       "solve_captcha",
-      "solve_captcha_on_page"
+      "solve_captcha_on_page",
+      "solve_captcha_on_page_async"
     ],
     "signatures": {
       "solve_captcha": "(media_path, instruction='', *, puzzle_source=<Vendor.UNKNOWN: 'unknown'>, retry_mode=None, text_mode=False, **kwargs)",
