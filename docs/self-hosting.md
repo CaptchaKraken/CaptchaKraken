@@ -44,6 +44,25 @@ finds the server through `~/.captchakraken/selfhost.json`.
 Allow about 8 GB of disk for the serving stack as well. Self-hosting needs Linux
 and an NVIDIA GPU; on anything else use the [hosted API](./hosted-api.md).
 
+### Older GPUs
+
+The serving stack is vLLM, built for compute capability 7.5 and up: RTX 20
+series and newer, GTX 16 series, T4. On an older card (GTX 10 series, Tesla
+P40 or P100, V100), `fetch` runs the model's GGUF build on llama.cpp instead,
+through the NVIDIA driver's Vulkan support, and says so. It is one download: a
+prebuilt `pointer_states` binary, about 1 GB of Python helpers instead of
+vLLM's 8 GB, and the weights. Nothing compiles.
+
+It needs the Vulkan loader, which a desktop install usually has already:
+
+```bash
+sudo apt install libvulkan1
+```
+
+Midnight V2 4B Q4 and Twilight V2 2B run on an 8 GB card, Midnight V2 4B at
+full precision on 16 GB. Abyss has no GGUF build yet, so `fetch` does not offer
+it on such a card.
+
 ### Starting and stopping
 
 ```bash
@@ -141,7 +160,27 @@ The client and all CaptchaKraken models are LGPL-3.0-only.
 
 ## Updating parts separately
 
-`captchakraken fetch` above is the normal path. For a server you manage yourself,
+`captchakraken fetch` above is the normal path. A server you manage yourself on
+a card older than compute capability 7.5 runs the same endpoint on llama.cpp.
+`--device` is the card's PCI address, as `nvidia-smi --query-gpu=pci.bus_id
+--format=csv` prints it, with the domain cut to four digits; `pointer_states
+--list-devices` prints what Vulkan sees.
+
+```bash
+pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cpu
+pip install "captchakraken[serve-llamacpp]"
+curl -fL -o pointer_states https://github.com/CaptchaKraken/CaptchaKraken/releases/download/pointer-states-b12819/pointer_states-linux-x86_64
+chmod +x pointer_states
+hf download CaptchaKraken/TwilightV2-2B-GGUF --include "*-Q4_K_M.gguf" "mmproj-*.gguf" pointer_heads.safetensors --local-dir TwilightV2-2B-GGUF
+hf download CaptchaKraken/TwilightV2-2B tokenizer.json tokenizer_config.json processor_config.json chat_template.jinja config.json --local-dir TwilightV2-2B
+python -m captchakraken.pointer.server --engine llamacpp --model TwilightV2-2B-GGUF --processor TwilightV2-2B \
+  --pointer-states ./pointer_states --device 0000:01:00.0 --port 8000
+```
+
+To build `pointer_states` yourself (another CPU architecture, or a newer
+llama.cpp), see [`native/pointer_states`](../native/pointer_states).
+
+For a vLLM server you manage yourself,
 `captchakraken fetch --engine-only` upgrades the serving stack, and
 `captchakraken fetch --weights-only --no-restart` pulls weight revisions; restart
 the server afterward to load them.
@@ -193,6 +232,13 @@ vllm serve "$CAPTCHA_BASE_MODEL" \
 - **"The CaptchaKraken server is stopped":** run `captchakraken start`.
 - **The server did not come up:** the command prints the end of
   `~/.captchakraken/vllm.log`, which holds the whole story.
+- **"no kernel image is available for execution on the device", or "Minimum
+  capability: 70":** the server was installed by a `captchakraken` that did not
+  yet read the card's compute capability. Run `npx captchakraken@latest fetch`
+  (or `pipx run captchakraken fetch`) again.
+- **"Vulkan does not see the GTX 1070":** the NVIDIA driver's Vulkan part is
+  missing. On Ubuntu it is in `libnvidia-gl-<driver version>`; `vulkaninfo
+  --summary` (from `vulkan-tools`) lists what Vulkan sees.
 - **Out of memory while starting:** another job holds the card. Stop it, or run
   `captchakraken fetch` and pick a different GPU. Cards under 12 GB already get a
   smaller memory reservation and graph set automatically.

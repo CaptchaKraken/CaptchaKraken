@@ -124,10 +124,12 @@
       "base_model",
       "base_url",
       "credentials_path",
+      "engine",
       "extra_serve_args",
       "gpu_memory_utilization",
       "hosted_hosts",
       "is_hosted_endpoint",
+      "llamacpp_args",
       "lora_adapter",
       "lora_name",
       "lora_revision",
@@ -295,8 +297,15 @@
     "CAPTCHA_PIXEL_BOX_HALF": [
       "python/src/captchakraken/solver.py"
     ],
+    "CAPTCHA_POINTER_ENGINE": [
+      "python/src/captchakraken/config.py"
+    ],
     "CAPTCHA_POINTER_HOST": [
       "python/src/captchakraken/server_manager.py"
+    ],
+    "CAPTCHA_POINTER_STATES": [
+      "python/src/captchakraken/config.py",
+      "python/src/captchakraken/selfhost.py"
     ],
     "CAPTCHA_PROMPTS_FILE": [
       "python/src/captchakraken/prompts.py"

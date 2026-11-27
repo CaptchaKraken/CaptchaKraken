@@ -36,6 +36,25 @@ RUNTIME_GB = 8.0
 SMALL_CARD_MIB = 12_000
 SMALL_CARD_CAPTURE_SIZE = 16
 
+VLLM = "vllm"
+LLAMACPP = "llamacpp"
+# The serving stack's torch is built for compute capability 7.5 and up (RTX 20 series, GTX 16 series, T4).
+VLLM_MIN_COMPUTE = 7.5
+# Older cards run a GGUF build on llama.cpp's Vulkan backend, which the NVIDIA driver serves on any card
+# since Kepler. Torch there only prepares the board and runs the small heads, so it is the CPU build: the
+# same versions as the `serve-llamacpp` extra (a test checks), from PyTorch's index, without CUDA.
+TORCH_CPU = ("torch==2.13.0", "torchvision==0.28.0")
+TORCH_CPU_INDEX = "https://download.pytorch.org/whl/cpu"
+# pointer_states (native/pointer_states): llama.cpp's language model and vision encoder returning every
+# token's hidden state, one static binary built per llama.cpp release.
+POINTER_STATES_RELEASE = "b12819"
+POINTER_STATES_URL = ("https://github.com/CaptchaKraken/CaptchaKraken/releases/download/"
+                      f"pointer-states-{POINTER_STATES_RELEASE}/pointer_states-linux-x86_64")
+POINTER_STATES_SHA256 = "70fd71385e92f567daadaaf1827beb30e2f08419c5b454acfb68bbf55e5133b9"
+# The files of a full-precision repo the GGUF builds leave out: what turns a board into token ids.
+PROCESSOR_FILES = ("tokenizer.json", "tokenizer_config.json", "processor_config.json", "chat_template.jinja",
+                   "config.json", "preprocessor_config.json", "video_preprocessor_config.json")
+
 
 @dataclass(frozen=True)
 class Model:
@@ -55,6 +74,11 @@ class Model:
     access: str = ""
     # The folder of the repo that is served, when the repo holds several builds; empty means the whole repo.
     subfolder: str = ""
+    # Its llama.cpp build, for a card older than VLLM_MIN_COMPUTE: a GGUF repo and which of its files to load.
+    # The tokenizer and processor files come from `processor_repo`, or `repo` when that is empty.
+    gguf: str = ""
+    gguf_quant: str = "Q4_K_M"
+    processor_repo: str = ""
 
     @property
     def licensed(self) -> bool:
@@ -68,9 +92,11 @@ class Model:
 # Sunlight is absent on purpose: its published heads predate this client's layout and refuse to load.
 MODELS = (
     Model("CaptchaKraken/MidnightV2-4B-q4", "Midnight V2 4B Q4", "the default: best balance of speed and accuracy",
-          3.8, 8),
-    Model("CaptchaKraken/TwilightV2-2B", "Twilight V2 2B", "smaller model, full precision", 4.5, 8, 0.80),
-    Model("CaptchaKraken/MidnightV2-4B", "Midnight V2 4B", "the same model at full precision", 9.1, 16),
+          3.8, 8, gguf="CaptchaKraken/MidnightV2-4B-GGUF"),
+    Model("CaptchaKraken/TwilightV2-2B", "Twilight V2 2B", "smaller model, full precision", 4.5, 8, 0.80,
+          gguf="CaptchaKraken/TwilightV2-2B-GGUF"),
+    Model("CaptchaKraken/MidnightV2-4B", "Midnight V2 4B", "the same model at full precision", 9.1, 16,
+          gguf="CaptchaKraken/MidnightV2-4B-GGUF", gguf_quant="BF16"),
     Model("CaptchaKraken/AbyssV2-q4", "Abyss V2 Q4", "our most accurate model, needs an Abyss Licence",
           3.8, 8, aliases=("abyss",)),
     Model("CaptchaKraken/AbyssV2", "Abyss V2", "Abyss at full precision, needs an Abyss Licence", 9.1, 16),
@@ -90,10 +116,17 @@ class Gpu(NamedTuple):
     name: str
     total_mib: int
     free_mib: int
+    compute: float
+    # As Vulkan writes it, 0000:01:00.0: the only number nvidia-smi and llama.cpp agree on.
+    pci: str = ""
 
     @property
     def label(self) -> str:
         return f"{self.name} ({self.total_mib / 1024:.0f} GB, {self.free_mib / 1024:.1f} GB free)"
+
+    @property
+    def engine(self) -> str:
+        return VLLM if self.compute >= VLLM_MIN_COMPUTE else LLAMACPP
 
 
 class Choice(NamedTuple):
@@ -106,9 +139,19 @@ class Cancelled(Exception):
     pass
 
 
-def _fits(model: Model, gpu: Gpu) -> bool:
+def _unfit(model: Model, gpu: Gpu) -> str:
+    """Why `model` cannot run on `gpu`, or "" when it can."""
+    if gpu.engine == LLAMACPP and not model.gguf:
+        return (f"it has no llama.cpp build yet, which the {gpu.name} needs: vLLM runs on compute capability "
+                f"{VLLM_MIN_COMPUTE}+ and it has {gpu.compute}")
     # Cards are sold in GB and report a little under it: an "8 GB" 5060 reports 8151 MiB, a 7.96.
-    return gpu.total_mib >= model.min_vram_gb * 1024 * 0.95
+    if gpu.total_mib < model.min_vram_gb * 1024 * 0.95:
+        return f"needs {model.min_vram_gb} GB of VRAM, the {gpu.name} has {gpu.total_mib / 1024:.0f} GB"
+    return ""
+
+
+def _fits(model: Model, gpu: Gpu) -> bool:
+    return not _unfit(model, gpu)
 
 
 def _busy_note(model: Model, gpu: Gpu) -> str:
@@ -116,20 +159,35 @@ def _busy_note(model: Model, gpu: Gpu) -> str:
     return "" if gpu.free_mib >= model.min_vram_gb * 1024 * 0.7 else "too full right now unless you free it up"
 
 
+def _pci(bus_id: str) -> str:
+    """nvidia-smi's 00000000:01:00.0 as Vulkan writes it, 0000:01:00.0."""
+    domain, _, rest = bus_id.strip().lower().partition(":")
+    try:
+        return f"{int(domain, 16):04x}:{rest}" if rest else ""
+    except ValueError:
+        return ""
+
+
 def detect_gpus(run: Callable = subprocess.run) -> List[Gpu]:
     """Numbered as nvidia-smi numbers them, which is PCI order, so the server is pinned with that same order."""
     try:
-        out = run(["nvidia-smi", "--query-gpu=index,name,memory.total,memory.free", "--format=csv,noheader,nounits"],
+        out = run(["nvidia-smi", "--query-gpu=index,name,memory.total,memory.free,compute_cap,pci.bus_id",
+                   "--format=csv,noheader,nounits"],
                   capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return []
     if out.returncode != 0:
+        # A driver too old to report compute_cap is also too old for any CUDA 12 build.
+        if "compute_cap" in (out.stderr or "") + (out.stdout or ""):
+            raise RuntimeError("This NVIDIA driver is too old to self-host: update it (any driver from 2022 on "
+                               "reports compute capability), or use the hosted API.")
         return []
     gpus = []
     for line in out.stdout.splitlines():
         fields = [f.strip() for f in line.split(",")]
-        if len(fields) == 4 and fields[0].isdigit() and fields[2].isdigit() and fields[3].isdigit():
-            gpus.append(Gpu(int(fields[0]), fields[1], int(fields[2]), int(fields[3])))
+        if len(fields) == 6 and fields[0].isdigit() and fields[2].isdigit() and fields[3].isdigit():
+            gpus.append(Gpu(int(fields[0]), fields[1], int(fields[2]), int(fields[3]), float(fields[4]),
+                            _pci(fields[5])))
     return gpus
 
 
@@ -203,21 +261,23 @@ def choose(title: str, options: Sequence[Option], default: int = 0) -> int:
 
 def ask(gpus: Sequence[Gpu], saved: dict) -> Choice:
     """Model, then GPU, then startup. A previous choice is where the cursor starts."""
-    biggest = max(gpus, key=lambda g: g.total_mib)
     menu = listed_models()
-    default_model = next((i for i, m in enumerate(menu) if m.repo == saved.get("model")), 0)
+    runnable = [any(_fits(m, g) for g in gpus) for m in menu]
+    if not any(runnable):
+        raise RuntimeError(_no_model_fits(gpus))
+    default_model = next((i for i, m in enumerate(menu) if m.repo == saved.get("model") and runnable[i]),
+                         runnable.index(True))
     picked = menu[choose("Which model do you want to run?", [
         Option(m.title, f"{m.blurb}, {m.download_gb:.1f} GB download, needs {m.min_vram_gb} GB of VRAM",
-               "" if _fits(m, biggest) else f"needs {m.min_vram_gb} GB of VRAM, your largest has "
-                                            f"{biggest.total_mib / 1024:.0f} GB")
-        for m in menu], default_model)]
+               "" if ok else _unfit(m, max(gpus, key=lambda g: g.total_mib)))
+        for m, ok in zip(menu, runnable)], default_model)]
 
     fitting = [g for g in gpus if _fits(picked, g)]
     default_gpu = next((i for i, g in enumerate(gpus) if g.index == saved.get("gpu")), None)
     if default_gpu is None or gpus[default_gpu] not in fitting:
         default_gpu = gpus.index(max(fitting, key=lambda g: g.free_mib))
     gpu = gpus[choose("Which GPU should the server run on?", [
-        Option(f"GPU {g.index}: {g.label}", _busy_note(picked, g), "" if g in fitting else f"too small for {picked.title}")
+        Option(f"GPU {g.index}: {g.label}", _busy_note(picked, g), _unfit(picked, g))
         for g in gpus], default_gpu)]
 
     modes = [ALWAYS_ON, FIRST_SOLVE]
@@ -351,6 +411,10 @@ def make_venv(where: Path) -> Path:
 def install_client(python: Path, extra: str = "") -> None:
     """This same version from PyPI, or from the source beside this file when that version is not on PyPI."""
     subprocess.run([str(python), "-m", "pip", "install", "--quiet", "--upgrade", "pip"], check=True)
+    if extra == "[serve-llamacpp]":
+        # Before the client, so its torch pins are met by the CPU build and pip skips the 3 GB of CUDA libraries.
+        subprocess.run([str(python), "-m", "pip", "install", "--quiet", *TORCH_CPU, "--index-url", TORCH_CPU_INDEX],
+                       check=True)
     wanted = f"captchakraken{extra}=={__version__}"
     if subprocess.run([str(python), "-m", "pip", "install", "--quiet", wanted]).returncode == 0:
         return
@@ -363,16 +427,71 @@ def install_client(python: Path, extra: str = "") -> None:
 _DOWNLOAD = """
 import os, sys
 from huggingface_hub import snapshot_download
-repo, sub = sys.argv[1], sys.argv[2]
-path = snapshot_download(repo, allow_patterns=[sub + "/*"] if sub else None)
+repo, sub, patterns = sys.argv[1], sys.argv[2], sys.argv[3:]
+path = snapshot_download(repo, allow_patterns=patterns or ([sub + "/*"] if sub else None))
 print(os.path.join(path, sub) if sub else path)
 """
 
 
-def download(python: Path, repo: str, subfolder: str = "") -> str:
-    """The model directory. Stored as a path so a server never asks the Hub again. Only `subfolder` is fetched when one is given."""
-    out = subprocess.run([str(python), "-c", _DOWNLOAD, repo, subfolder], stdout=subprocess.PIPE, text=True, check=True)
+def download(python: Path, repo: str, subfolder: str = "", patterns: Sequence[str] = ()) -> str:
+    """The model directory. Stored as a path so a server never asks the Hub again. Only `subfolder`, or the
+    files matching `patterns`, are fetched when given."""
+    out = subprocess.run([str(python), "-c", _DOWNLOAD, repo, subfolder, *patterns], stdout=subprocess.PIPE,
+                         text=True, check=True)
     return out.stdout.strip().splitlines()[-1]
+
+
+def gguf_patterns(model: Model) -> Tuple[str, ...]:
+    """One language model of the GGUF repo, its vision encoder and the pointer heads."""
+    return (f"*-{model.gguf_quant}.gguf", "mmproj-*.gguf", "pointer_heads.safetensors")
+
+
+def pointer_states_path() -> Path:
+    return config.state_dir() / "bin" / f"pointer_states-{POINTER_STATES_RELEASE}"
+
+
+def fetch_pointer_states(http=requests) -> Path:
+    """The release binary, checked against its pinned digest. CAPTCHA_POINTER_STATES names a local build instead."""
+    import hashlib
+    local = os.getenv("CAPTCHA_POINTER_STATES")
+    if local:
+        return Path(local)
+    path = pointer_states_path()
+    if path.is_file():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    response = http.get(POINTER_STATES_URL, timeout=600)
+    response.raise_for_status()
+    digest = hashlib.sha256(response.content).hexdigest()
+    if digest != POINTER_STATES_SHA256:
+        raise RuntimeError(f"{POINTER_STATES_URL} has sha256 {digest}, not the {POINTER_STATES_SHA256} this "
+                           "release pins. Nothing was installed.")
+    temporary = path.with_suffix(".tmp")
+    temporary.write_bytes(response.content)
+    temporary.chmod(0o755)
+    os.replace(temporary, path)
+    return path
+
+
+NO_VULKAN = ("llama.cpp runs the {gpu} through Vulkan, and this machine has no Vulkan loader. "
+             "On Debian or Ubuntu: sudo apt install libvulkan1")
+NO_VULKAN_GPU = ("Vulkan does not see the {gpu} (PCI {pci}); it sees {seen}. The NVIDIA driver's Vulkan part "
+                 "may be missing: on Ubuntu it is in libnvidia-gl-<driver version>, and `vulkaninfo --summary` "
+                 "(apt install vulkan-tools) lists what Vulkan sees.")
+
+
+def check_vulkan(binary: Path, gpu: Gpu, run: Callable = subprocess.run) -> None:
+    """That llama.cpp can reach `gpu`, before gigabytes of weights download for it."""
+    out = run([str(binary), "--list-devices"], capture_output=True, text=True, timeout=60)
+    if out.returncode != 0:
+        if "libvulkan" in (out.stderr or ""):
+            raise RuntimeError(NO_VULKAN.format(gpu=gpu.name))
+        raise RuntimeError(f"{binary} --list-devices failed: {(out.stderr or '').strip()[-500:]}")
+    lines = [line for line in out.stdout.splitlines() if line.startswith("{")]
+    seen = json.loads(lines[-1])["gpus"] if lines else []
+    if not any(d.get("pci", "").lower() == gpu.pci for d in seen):
+        raise RuntimeError(NO_VULKAN_GPU.format(gpu=gpu.name, pci=gpu.pci,
+                                                seen=", ".join(d["name"] for d in seen) or "no GPU"))
 
 
 def free_port(start: int = 8000) -> int:
@@ -395,6 +514,8 @@ def settings(choice: Choice, model_path: str, saved: dict) -> dict:
         "model_path": model_path,
         "gpu": choice.gpu.index,
         "gpu_name": choice.gpu.name,
+        "engine": choice.gpu.engine,
+        "gpu_pci": choice.gpu.pci,
         "startup": choice.startup,
         "port": saved.get("port") or free_port(),
         # The client and the server both read it from this file, which only its owner can open.
@@ -447,14 +568,30 @@ def install(choice: Choice, saved: dict) -> dict:
     _disk_check(choice.model)
     server_manager.stop()
 
-    _step("Installing the serving stack (torch and vLLM)")
+    engine = choice.gpu.engine
+    llama: dict = {}
+    if engine == LLAMACPP:
+        _step(f"Checking that llama.cpp can reach the {choice.gpu.name} (vLLM has no kernels for it)")
+        binary = fetch_pointer_states()
+        check_vulkan(binary, choice.gpu)
+        llama = {"pointer_states": str(binary), "quant": choice.model.gguf_quant}
+    # The two engines need different torch builds of one version, and pip calls either one installed already.
+    if (saved.get("engine") or VLLM) != engine:
+        shutil.rmtree(config.runtime_dir(), ignore_errors=True)
+    _step("Installing the serving stack (torch and vLLM)" if engine == VLLM
+          else "Installing the serving stack (llama.cpp's helpers, on CPU torch)")
     python = make_venv(config.runtime_dir())
-    install_client(python, "[serve]")
+    install_client(python, "[serve]" if engine == VLLM else "[serve-llamacpp]")
 
     _step(f"Downloading {choice.model.title}")
-    model_path = download(python, choice.model.repo, choice.model.subfolder)
+    if engine == LLAMACPP:
+        model_path = download(python, choice.model.gguf, patterns=gguf_patterns(choice.model))
+        llama["processor_path"] = download(python, choice.model.processor_repo or choice.model.repo,
+                                           choice.model.subfolder, PROCESSOR_FILES)
+    else:
+        model_path = download(python, choice.model.repo, choice.model.subfolder)
 
-    values = settings(choice, model_path, saved)
+    values = {**settings(choice, model_path, saved), **llama}
     write_settings(values)
     config.selfhost.cache_clear()
 
@@ -486,9 +623,16 @@ def _summary(values: dict) -> None:
         print(f"VLLM_BASE_URL is set in this shell, and it wins over this install: {os.environ['VLLM_BASE_URL']}\n")
 
 
+def _no_model_fits(gpus: Sequence[Gpu]) -> str:
+    return ("No model runs on " + ", ".join(g.name for g in gpus) + ": "
+            + "; ".join(sorted({_unfit(m, g) for m in listed_models() for g in gpus})) + ".\n"
+            "The hosted API needs no GPU: https://github.com/CaptchaKraken/CaptchaKraken/blob/main/docs/hosted-api.md")
+
+
 def _from_flags(gpus: Sequence[Gpu], saved: dict, model: Optional[str], gpu: Optional[int],
                 startup: Optional[str]) -> Choice:
-    wanted = model or saved.get("model") or MODELS[0].repo
+    wanted = model or saved.get("model") or next((m.repo for m in listed_models() if any(_fits(m, g) for g in gpus)),
+                                                 MODELS[0].repo)
     found = next((m for m in MODELS if m.named(wanted)), None)
     if found is None:
         raise RuntimeError(f"Unknown model {wanted!r}. Choose from: abyss, "
@@ -497,13 +641,22 @@ def _from_flags(gpus: Sequence[Gpu], saved: dict, model: Optional[str], gpu: Opt
     if index is None:
         fitting = [g for g in gpus if _fits(found, g)]
         if not fitting:
-            raise RuntimeError(f"{found.title} needs {found.min_vram_gb} GB of VRAM.")
+            raise RuntimeError(f"{found.title} cannot run here: {_unfit(found, max(gpus, key=lambda g: g.total_mib))}."
+                               + _runs_here_hint(gpus))
         chosen = max(fitting, key=lambda g: g.free_mib)
     else:
         chosen = next((g for g in gpus if g.index == index), None)
         if chosen is None:
             raise RuntimeError(f"There is no GPU {index}. Found: {[g.index for g in gpus]}")
+        if _unfit(found, chosen):
+            raise RuntimeError(f"{found.title} cannot run on GPU {index}: {_unfit(found, chosen)}."
+                               + _runs_here_hint(gpus))
     return Choice(found, chosen, startup or saved.get("startup") or ALWAYS_ON)
+
+
+def _runs_here_hint(gpus: Sequence[Gpu]) -> str:
+    here = [m.repo.split("/")[-1] for m in listed_models() if any(_fits(m, g) for g in gpus)]
+    return f" These run here: --model {', '.join(here)}" if here else ""
 
 
 NO_GPU = ("No NVIDIA GPU was found, and self-hosting needs one on Linux.\n"
@@ -515,7 +668,11 @@ def fetch(*, yes: bool = False, model: Optional[str] = None, gpu: Optional[int] 
     if sys.platform != "linux":
         print(NO_GPU, file=sys.stderr)
         return 1
-    gpus = detect_gpus()
+    try:
+        gpus = detect_gpus()
+    except RuntimeError as e:
+        print(f"\033[1;31m✗\033[0m {e}", file=sys.stderr)
+        return 1
     if not gpus:
         print(NO_GPU, file=sys.stderr)
         return 1

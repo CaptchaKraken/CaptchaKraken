@@ -13,7 +13,7 @@ from captchakraken import cli, prompts, selfhost, updater
 
 ABYSS_Q4 = "CaptchaKraken/AbyssV2-q4"
 ABYSS = "CaptchaKraken/AbyssV2"
-GPU = selfhost.Gpu(0, "RTX 5090", 32607, 30000)
+GPU = selfhost.Gpu(0, "RTX 5090", 32607, 30000, 12.0)
 
 
 @pytest.fixture
