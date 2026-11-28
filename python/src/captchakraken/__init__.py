@@ -111,4 +111,4 @@ __all__ = [
     "PauseKind",
 ]
 
-__version__ = "5.2.1"
+__version__ = "5.3.0"
