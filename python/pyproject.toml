@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "captchakraken"
-version = "5.2.1"
+version = "5.3.0"
 description = "Captcha-solving engine and CLI: a v2 pointer model for image grids, click and drag puzzles, sliders, distorted text and animated challenges. Hosted API or self-hosted on vLLM."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -85,6 +85,18 @@ serve = [
   "torch==2.13.0",
   "transformers==5.17.0",
   "accelerate==1.15.0",
+  "huggingface_hub==1.30.0",
+]
+# Self-hosting on a GPU older than compute capability 7.5, which the vLLM build has no
+# kernels for: llama.cpp (the pointer_states binary) runs the model there, and this
+# prepares the board and runs the pointer heads. `fetch` first installs torch and
+# torchvision from PyTorch's CPU index, so these pins skip the CUDA libraries.
+serve-llamacpp = [
+  "torch==2.13.0",
+  "torchvision==0.28.0",
+  "transformers==5.17.0",
+  "gguf==0.19.0",
+  "safetensors==0.8.0",
   "huggingface_hub==1.30.0",
 ]
 dev = [

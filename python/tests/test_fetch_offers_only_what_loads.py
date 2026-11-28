@@ -22,8 +22,8 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-SMALL = selfhost.Gpu(1, "RTX 5060", 8151, 7900)
-LARGE = selfhost.Gpu(0, "RTX 5090", 32607, 2400)
+SMALL = selfhost.Gpu(1, "RTX 5060", 8151, 7900, 12.0)
+LARGE = selfhost.Gpu(0, "RTX 5090", 32607, 2400, 12.0)
 
 
 def _write(**over):
@@ -50,8 +50,8 @@ def test_a_model_whose_heads_do_not_load_is_not_offered():
 
 def test_nvidia_smi_is_read_and_its_absence_is_no_gpus():
     def smi(*a, **k):
-        return types.SimpleNamespace(returncode=0, stdout="0, NVIDIA GeForce RTX 5090, 32607, 2400\n"
-                                                          "1, NVIDIA GeForce RTX 5060, 8151, 7900\n")
+        return types.SimpleNamespace(returncode=0, stdout="0, NVIDIA GeForce RTX 5090, 32607, 2400, 12.0, 00000000:01:00.0\n"
+                                                          "1, NVIDIA GeForce RTX 5060, 8151, 7900, 12.0, 00000000:02:00.0\n")
     assert [g.index for g in selfhost.detect_gpus(smi)] == [0, 1]
     assert selfhost.detect_gpus(smi)[1].total_mib == 8151
 

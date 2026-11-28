@@ -346,7 +346,7 @@ def _fetch_setup(args):
     from . import selfhost
 
     parser = argparse.ArgumentParser(prog="captchakraken fetch",
-                                     description="Choose a model, a GPU and a startup mode, then install and start it.")
+                                     description="Choose a model, a GPU, an engine and a startup mode, then install and start it.")
     parser.add_argument("name", nargs="?", default=None,
                         help="set up this model with the defaults, e.g. `abyss` (needs an Abyss Licence)")
     parser.add_argument("--yes", "-y", action="store_true", help="ask nothing: previous choices, then the defaults")
@@ -355,14 +355,18 @@ def _fetch_setup(args):
     parser.add_argument("--gpu", type=int, default=None, help="with --yes: the nvidia-smi GPU index")
     parser.add_argument("--startup", default=None, choices=[selfhost.ALWAYS_ON, selfhost.FIRST_SOLVE],
                         help="with --yes: always on, or start on the first solve")
+    parser.add_argument("--engine", default=None, choices=list(selfhost.ENGINES),
+                        help="with --yes: vllm (the default where the card has kernels for it) or llamacpp "
+                             "(any GPU with Vulkan, a smaller install)")
     opts = parser.parse_args(args)
     if opts.name:
         if opts.model:
             parser.error("name the model once: as a word or with --model")
         opts.model = opts.name
-    if not opts.yes and (opts.model or opts.gpu is not None or opts.startup):
+    if not opts.yes and (opts.model or opts.gpu is not None or opts.startup or opts.engine):
         opts.yes = True
-    sys.exit(selfhost.fetch(yes=opts.yes, model=opts.model, gpu=opts.gpu, startup=opts.startup))
+    sys.exit(selfhost.fetch(yes=opts.yes, model=opts.model, gpu=opts.gpu, startup=opts.startup,
+                            engine=opts.engine))
 
 
 def _fetch(args):

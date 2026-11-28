@@ -3,7 +3,7 @@
 All notable changes to CaptchaKraken are documented here. This project follows
 semantic versioning; v2 is a major, **breaking** release.
 
-## [Unreleased]
+## [5.3.0] - 2026-11-27
 
 ### Added
 
@@ -14,6 +14,21 @@ semantic versioning; v2 is a major, **breaking** release.
   driver as `PageSolver`, run on a worker thread, so the caller's event loop
   keeps running for the whole solve. Cancelling the task stops the solve.
   ([#122](https://github.com/CaptchaKraken/CaptchaKraken/issues/122))
+- **Self-hosting on older NVIDIA GPUs.** `captchakraken fetch` reads each
+  card's compute capability. A card older than 7.5 (GTX 10 series, Tesla P40,
+  V100), which the vLLM build has no kernels for, runs the model's GGUF build
+  on llama.cpp through Vulkan: a prebuilt `pointer_states` binary
+  (`native/pointer_states`), the new `captchakraken[serve-llamacpp]` extra on
+  CPU torch, and the weights, with nothing to compile. Midnight V2 4B Q4 and
+  Twilight V2 2B run on an 8 GB card; Abyss has no GGUF build yet and is not
+  offered there. `fetch` checks that Vulkan sees the chosen card before it
+  downloads anything, and the server runs on that card by its PCI address.
+- **Choose the engine.** On a card both engines run, `captchakraken fetch`
+  asks whether to serve with vLLM (the default, several solves at once) or
+  llama.cpp (a 1 GB install through Vulkan, one solve at a time), and
+  `--engine vllm|llamacpp` chooses without asking. The last choice is kept.
+  `python -m captchakraken.pointer.server --engine llamacpp` runs it on a
+  server you manage.
 
 ### Fixed
 

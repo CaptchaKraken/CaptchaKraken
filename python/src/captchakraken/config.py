@@ -2,7 +2,7 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 _PINNED_MODEL_PATH = Path(__file__).with_name("pinned_model.json")
 
@@ -239,6 +239,20 @@ def max_cudagraph_capture_size() -> Optional[int]:
     """vLLM reserves memory for a compiled graph per batch size up to this; unset leaves vLLM's own default."""
     value = os.getenv("VLLM_MAX_CUDAGRAPH_CAPTURE_SIZE", "").strip() or selfhost_active().get("max_cudagraph_capture_size")
     return int(value) if value else None
+
+
+def engine() -> str:
+    """What runs the pointer model: "vllm", or "llamacpp" on a card vLLM's build has no kernels for."""
+    return os.getenv("CAPTCHA_POINTER_ENGINE") or selfhost_active().get("engine") or "vllm"
+
+
+def llamacpp_args() -> List[str]:
+    """The llamacpp engine's server flags, from what `fetch` installed."""
+    active = selfhost_active()
+    return ["--processor", str(active.get("processor_path", "")),
+            "--pointer-states", os.getenv("CAPTCHA_POINTER_STATES") or str(active.get("pointer_states", "")),
+            "--quant", str(active.get("quant") or "Q4_K_M"),
+            *(["--device", str(active["gpu_pci"])] if active.get("gpu_pci") else [])]
 
 
 def serve_model() -> str:
