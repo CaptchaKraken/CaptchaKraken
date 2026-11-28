@@ -88,12 +88,17 @@ def build_serve_command() -> "list[str]":
     from . import prompts
 
     if prompts.resolve(config.lora_adapter()).pointer:
-        capture = config.max_cudagraph_capture_size()
-        return [
+        server = [
             _serve_python(), "-m", "captchakraken.pointer.server",
             "--model", config.serve_model(),
             "--host", os.getenv("CAPTCHA_POINTER_HOST", "127.0.0.1"),
             "--port", str(config.port()),
+        ]
+        if config.engine() == "llamacpp":
+            return [*server, "--engine", "llamacpp", *config.llamacpp_args()]
+        capture = config.max_cudagraph_capture_size()
+        return [
+            *server,
             "--gpu-memory-utilization", str(config.gpu_memory_utilization()),
             *(["--max-cudagraph-capture-size", str(capture)] if capture else []),
         ]

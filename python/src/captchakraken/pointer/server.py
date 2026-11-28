@@ -131,14 +131,24 @@ def main():
     ap.add_argument("--letters", default=None, help=argparse.SUPPRESS)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8001)
+    ap.add_argument("--engine", choices=("vllm", "llamacpp"), default="vllm",
+                    help="llamacpp runs a GGUF build on any GPU with a Vulkan driver, for cards vLLM has no kernels for")
+    ap.add_argument("--processor", default=None, help="llamacpp: the folder with the tokenizer and processor files")
+    ap.add_argument("--pointer-states", default=None, help="llamacpp: the pointer_states binary")
+    ap.add_argument("--quant", default="Q4_K_M", help="llamacpp: which GGUF in --model to load")
+    ap.add_argument("--device", default="", help="llamacpp: the GPU's PCI address, as 0000:01:00.0")
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.45)
     ap.add_argument("--max-cudagraph-capture-size", type=int, default=None,
                     help="largest batch vLLM compiles a graph for; each one holds GPU memory (small cards need this)")
     a = ap.parse_args()
-    from .service import PointerService
-    capture = a.max_cudagraph_capture_size
-    svc = PointerService(a.model, gpu_memory_utilization=a.gpu_memory_utilization,
-                         **({"compilation_config": {"max_cudagraph_capture_size": capture}} if capture else {}))
+    if a.engine == "llamacpp":
+        from .llamacpp_engine import LlamaCppPointerService
+        svc = LlamaCppPointerService(a.model, a.pointer_states, quant=a.quant, processor=a.processor, device=a.device)
+    else:
+        from .service import PointerService
+        capture = a.max_cudagraph_capture_size
+        svc = PointerService(a.model, gpu_memory_utilization=a.gpu_memory_utilization,
+                             **({"compilation_config": {"max_cudagraph_capture_size": capture}} if capture else {}))
     ThreadingHTTPServer((a.host, a.port), make_handler(svc)).serve_forever()
 
 

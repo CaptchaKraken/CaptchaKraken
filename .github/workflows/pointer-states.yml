@@ -1,0 +1,42 @@
+# Builds native/pointer_states, the llama.cpp binary `captchakraken fetch`
+# downloads for GPUs the vLLM build has no kernels for, and attaches it to the
+# GitHub release `pointer-states-<llama.cpp tag>` as a draft.
+#
+# Run by hand, only when the llama.cpp pin or the tool changes. The draft is
+# published by a maintainer after the GGUF models are scored through it, and its
+# sha256 (printed in the job summary) goes into selfhost.POINTER_STATES_SHA256.
+# Docker builds are not byte-reproducible, so the sha256 is always the one of
+# the asset actually published.
+name: pointer_states binary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build in Ubuntu 22.04
+        run: docker build --output native/pointer_states/dist native/pointer_states
+      - name: Check it links only libvulkan and glibc
+        run: |
+          bin=native/pointer_states/dist/pointer_states
+          extra=$(ldd "$bin" | grep -vE 'linux-vdso|libvulkan\.so\.1|libc\.so|libm\.so|ld-linux' || true)
+          test -z "$extra" || { echo "unexpected runtime libraries: $extra"; exit 1; }
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
+          "$bin" --list-devices
+      - name: Attach to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="pointer-states-$(sed -n 's/^LLAMA_CPP_TAG=//p' native/pointer_states/build.sh)"
+          cp native/pointer_states/dist/pointer_states pointer_states-linux-x86_64
+          sum=$(sha256sum pointer_states-linux-x86_64 | cut -d' ' -f1)
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --draft --title "$tag" \
+            --notes "pointer_states for self-hosting on GPUs vLLM cannot run on. See native/pointer_states."
+          gh release upload "$tag" pointer_states-linux-x86_64 --clobber
+          echo "$tag: sha256 $sum" >> "$GITHUB_STEP_SUMMARY"

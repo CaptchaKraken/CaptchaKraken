@@ -86,6 +86,7 @@ answers with a frame number the driver then waits for on screen.
 | `.github/scripts/mcp-smoke.mjs` | A twenty-line MCP client, so CI can prove the built server actually speaks the protocol: initialize over stdio, then assert `tools/list` comes back non-empty. |
 | `.github/scripts/check-file-purposes.mjs` | The stage-1 gate: compares `git ls-files` against the entries in this file and exits non-zero on drift in either direction — a tracked file with no entry, an entry naming a path that is gone, or a path listed twice. No dependencies, so it runs before anything is installed. |
 | `.github/workflows/ci.yml` | The hermetic gate on every PR into `main` or `dev` — no GPU, no network, no weights: the whole Python suite on 3.11 and 3.12, the TypeScript driver's type-check and `node:test` suite, and the MCP server's build plus the smoke test above. Also reused by `publish.yml`. |
+| `.github/workflows/pointer-states.yml` | Run by hand: builds `native/pointer_states` in Docker, checks it links only libvulkan and glibc, and attaches it to a draft `pointer-states-<llama.cpp tag>` release with its sha256 in the job summary. A maintainer publishes the draft after the GGUF models are scored through it. |
 | `.github/workflows/promote.yml` | The required check that `main` only ever takes a pull request from this repository's own `dev` branch. Branch protection cannot express which branch may be the *source* of a merge, so it lives here. |
 | `.github/workflows/publish.yml` | On a push to `main`: run the CI gate, then publish both ports and the MCP server at the version in their own manifests. Tokenless via OIDC trusted publishing, and idempotent — a version already on the registry is skipped, not failed. |
 | `.github/workflows/tier3-request.yml` | Asks the repository named by the `GATE_REPO` variable to run the Tier 3 driver gate against this pull request's exact commit, and to post a redacted result back: the `tier3/driver-gate` commit status plus a comment with per-port and per-vendor pass rates. The fixtures are not in this repo, so the gate is not run here. |
@@ -371,6 +372,7 @@ something every browser-driver install should pay for.
 | `python/src/captchakraken/pointer/vllm_plugin.py` | The vLLM plugin that serves the pointer as a pooling model: one prefill per board, and the heads' packed decision is the output. |
 | `python/src/captchakraken/pointer/service.py` | Board in, answers out: one vLLM prefill of the bare board, decode, the three likeliest distinct plans. |
 | `python/src/captchakraken/pointer/server.py` | The `/v1/pointer` HTTP endpoint in front of `PointerService`; returns the three likeliest actions and the first as `answer`. |
+| `python/src/captchakraken/pointer/llamacpp_engine.py` | `PointerService` with llama.cpp (the `pointer_states` binary) as the forward pass, for a GPU the vLLM build has no kernels for; checks llama.cpp's token layout against the processor's on every board. |
 
 ### `python/tests/`
 
@@ -417,6 +419,7 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_private_models.py` | The third availability value: private weights are never a download and never a substitution, however the request is phrased. |
 | `python/tests/test_pinned_model.py` | The pinned adapter entry is internally consistent and resolvable to a prompt generation. |
 | `python/tests/test_a_pin_reads_its_own_entry.py` | A pinned model's fields must be read from its own registry entry, not from whichever entry is latest. |
+| `python/tests/test_a_gpu_vllm_cannot_run_is_served_by_llamacpp.py` | `fetch` reads each card's compute capability: below 7.5 it fetches the pinned `pointer_states`, checks Vulkan sees the card, installs CPU torch and starts the llama.cpp engine on that card's PCI address; models without a GGUF build are refused. |
 | `python/tests/test_fetch_offers_only_what_loads.py` | `captchakraken fetch`: the models it offers load, the choices reach the server and the client with no environment variables, and `stop` stays stopped. |
 | `python/tests/test_min_pixels_upscale.py` | Images below the resolution the adapters were trained at are upscaled, because a too-small image is answered badly rather than refused. |
 | `python/tests/test_pixel_parser.py` | Parser robustness on the click and drag path: the model's output has to survive every shape it legitimately comes back in. |
@@ -521,6 +524,17 @@ happened. There is no `conftest.py`: nothing here needs a fixture that
 | `python/tests/test_cli_stdout_is_the_wire_between_the_ports.py` | The CLI's stdout is a wire protocol the TypeScript driver `JSON.parse`s. Pins one JSON document on stdout and nothing else, diagnostics on stderr, a non-zero exit on refusal, and that each handler declines a command that is not its own. |
 | `python/tests/test_a_refusal_keeps_its_machine_readable_half.py` | The Python half of the same boundary: an HTTP refusal becomes a typed error carrying code, status, resolution URL and retry-after, a self-hosted error page stays a plain `RuntimeError`, and the payload the driver reads survives a JSON round trip. |
 | `python/tests/test_the_worker_protocol_survives_a_bad_request.py` | `captchakraken serve` is a long-lived worker the driver polls while the mouse is held down. Pins the readiness line, the echoed request id, and above all that a malformed or unknown request is answered rather than fatal — a worker that dies mid-drag fails every later poll against a dead pipe. |
+
+## `native/pointer_states/` — llama.cpp for GPUs vLLM cannot run on
+
+| File | Purpose |
+| --- | --- |
+| `native/pointer_states/pointer_states.cpp` | Stock libllama + libmtmd returning the final hidden state of every prompt token, which the pointer heads read; one JSON line each way per board, and the token layout so the caller can check it against the model's processor. `--list-devices` is what `fetch` checks Vulkan with. |
+| `native/pointer_states/CMakeLists.txt` | Builds it static against the pinned llama.cpp source with the Vulkan backend, so the binary needs only `libvulkan.so.1` and glibc. |
+| `native/pointer_states/build.sh` | Downloads the pinned llama.cpp release and builds; its tag is the one `selfhost.POINTER_STATES_RELEASE` names (a test checks). |
+| `native/pointer_states/Dockerfile` | The release build: Ubuntu 22.04 and the LunarG Vulkan SDK, so the binary runs on glibc 2.35 and newer. |
+| `native/pointer_states/README.md` | How to build it, publish it, and the protocol. |
+| `native/pointer_states/.gitignore` | The build and release output. |
 
 ## `python/examples/`
 
