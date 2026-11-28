@@ -133,25 +133,43 @@ class Choice(NamedTuple):
     model: Model
     gpu: Gpu
     startup: str
+    # "" is the card's own default: vLLM where it has kernels, else llama.cpp.
+    engine: str = ""
+
+    @property
+    def runs_on(self) -> str:
+        return self.engine or self.gpu.engine
+
+
+ENGINES = (VLLM, LLAMACPP)
 
 
 class Cancelled(Exception):
     pass
 
 
-def _unfit(model: Model, gpu: Gpu) -> str:
-    """Why `model` cannot run on `gpu`, or "" when it can."""
-    if gpu.engine == LLAMACPP and not model.gguf:
-        return (f"it has no llama.cpp build yet, which the {gpu.name} needs: vLLM runs on compute capability "
-                f"{VLLM_MIN_COMPUTE}+ and it has {gpu.compute}")
+def _unfit(model: Model, gpu: Gpu, engine: str = "") -> str:
+    """Why `model` cannot run on `gpu` with `engine` (the card's default when empty), or "" when it can."""
+    engine = engine or gpu.engine
+    if engine == VLLM and gpu.compute < VLLM_MIN_COMPUTE:
+        return f"vLLM runs on compute capability {VLLM_MIN_COMPUTE}+ and the {gpu.name} has {gpu.compute}"
+    if engine == LLAMACPP and not model.gguf:
+        return "it has no llama.cpp build yet" + (
+            f", which the {gpu.name} needs: vLLM runs on compute capability {VLLM_MIN_COMPUTE}+ and it has "
+            f"{gpu.compute}" if gpu.engine == LLAMACPP else "")
     # Cards are sold in GB and report a little under it: an "8 GB" 5060 reports 8151 MiB, a 7.96.
     if gpu.total_mib < model.min_vram_gb * 1024 * 0.95:
         return f"needs {model.min_vram_gb} GB of VRAM, the {gpu.name} has {gpu.total_mib / 1024:.0f} GB"
     return ""
 
 
-def _fits(model: Model, gpu: Gpu) -> bool:
-    return not _unfit(model, gpu)
+def _fits(model: Model, gpu: Gpu, engine: str = "") -> bool:
+    return not _unfit(model, gpu, engine)
+
+
+def _engines(model: Model, gpu: Gpu) -> List[str]:
+    """The engines that run `model` on `gpu`, the default first."""
+    return [e for e in ENGINES if _fits(model, gpu, e)]
 
 
 def _busy_note(model: Model, gpu: Gpu) -> str:
@@ -197,6 +215,13 @@ class Option(NamedTuple):
     label: str
     detail: str = ""
     disabled: str = ""
+
+
+ENGINE_OPTIONS = {
+    VLLM: Option("vLLM", "the default: serves several solves at once; about 8 GB of serving stack, "
+                         f"NVIDIA compute capability {VLLM_MIN_COMPUTE}+"),
+    LLAMACPP: Option("llama.cpp", "about 1 GB of serving stack, through Vulkan; one solve at a time"),
+}
 
 
 def _read_key() -> str:
@@ -280,12 +305,19 @@ def ask(gpus: Sequence[Gpu], saved: dict) -> Choice:
         Option(f"GPU {g.index}: {g.label}", _busy_note(picked, g), _unfit(picked, g))
         for g in gpus], default_gpu)]
 
+    # Asked only where there is a choice: a card vLLM has no kernels for, or a model with no GGUF, has one engine.
+    engines = _engines(picked, gpu)
+    engine = engines[0]
+    if len(engines) > 1:
+        engine = engines[choose("Which engine should serve it?", [ENGINE_OPTIONS[e] for e in engines],
+                                engines.index(saved["engine"]) if saved.get("engine") in engines else 0)]
+
     modes = [ALWAYS_ON, FIRST_SOLVE]
     startup = modes[choose("When should the server run?", [
         Option("Always on", "starts with this machine and restarts if it crashes"),
         Option("Warm start", "starts now and after a reboot on the first solve, then stays loaded"),
     ], modes.index(saved["startup"]) if saved.get("startup") in modes else 0)]
-    return Choice(picked, gpu, startup)
+    return Choice(picked, gpu, startup, engine)
 
 
 # ── a licensed model's Hugging Face access ───────────────────────────────────
@@ -514,7 +546,7 @@ def settings(choice: Choice, model_path: str, saved: dict) -> dict:
         "model_path": model_path,
         "gpu": choice.gpu.index,
         "gpu_name": choice.gpu.name,
-        "engine": choice.gpu.engine,
+        "engine": choice.runs_on,
         "gpu_pci": choice.gpu.pci,
         "startup": choice.startup,
         "port": saved.get("port") or free_port(),
@@ -568,10 +600,11 @@ def install(choice: Choice, saved: dict) -> dict:
     _disk_check(choice.model)
     server_manager.stop()
 
-    engine = choice.gpu.engine
+    engine = choice.runs_on
     llama: dict = {}
     if engine == LLAMACPP:
-        _step(f"Checking that llama.cpp can reach the {choice.gpu.name} (vLLM has no kernels for it)")
+        _step(f"Checking that llama.cpp can reach the {choice.gpu.name}"
+              + (" (vLLM has no kernels for it)" if choice.gpu.engine == LLAMACPP else ""))
         binary = fetch_pointer_states()
         check_vulkan(binary, choice.gpu)
         llama = {"pointer_states": str(binary), "quant": choice.model.gguf_quant}
@@ -614,7 +647,8 @@ def _summary(values: dict) -> None:
     command = link_command()
     bare = bool(command) and _on_path(command)
     name = "captchakraken" if bare else str(command or config.runtime_dir() / "bin" / "captchakraken")
-    _ok(f"{values['title']} is running on GPU {values['gpu']} at http://127.0.0.1:{values['port']}")
+    engine = ENGINE_OPTIONS.get(values.get("engine") or VLLM, ENGINE_OPTIONS[VLLM]).label
+    _ok(f"{values['title']} is running on GPU {values['gpu']} with {engine} at http://127.0.0.1:{values['port']}")
     print(f"\nTry it:\n  {name} demo\n")
     print(f"Start and stop the server:\n  {name} start\n  {name} stop\n")
     if command and not bare:
@@ -630,28 +664,36 @@ def _no_model_fits(gpus: Sequence[Gpu]) -> str:
 
 
 def _from_flags(gpus: Sequence[Gpu], saved: dict, model: Optional[str], gpu: Optional[int],
-                startup: Optional[str]) -> Choice:
+                startup: Optional[str], engine: Optional[str] = None) -> Choice:
     wanted = model or saved.get("model") or next((m.repo for m in listed_models() if any(_fits(m, g) for g in gpus)),
                                                  MODELS[0].repo)
     found = next((m for m in MODELS if m.named(wanted)), None)
     if found is None:
         raise RuntimeError(f"Unknown model {wanted!r}. Choose from: abyss, "
                            + ", ".join(m.repo.split("/")[-1] for m in listed_models()))
+    if engine and engine not in ENGINES:
+        raise RuntimeError(f"Unknown engine {engine!r}. Choose from: {', '.join(ENGINES)}")
+    asked = engine or ""
     index = gpu if gpu is not None else saved.get("gpu")
     if index is None:
-        fitting = [g for g in gpus if _fits(found, g)]
+        fitting = [g for g in gpus if _fits(found, g, asked)]
         if not fitting:
-            raise RuntimeError(f"{found.title} cannot run here: {_unfit(found, max(gpus, key=lambda g: g.total_mib))}."
+            biggest = max(gpus, key=lambda g: g.total_mib)
+            raise RuntimeError(f"{found.title} cannot run here: {_unfit(found, biggest, asked)}."
                                + _runs_here_hint(gpus))
         chosen = max(fitting, key=lambda g: g.free_mib)
     else:
         chosen = next((g for g in gpus if g.index == index), None)
         if chosen is None:
             raise RuntimeError(f"There is no GPU {index}. Found: {[g.index for g in gpus]}")
-        if _unfit(found, chosen):
-            raise RuntimeError(f"{found.title} cannot run on GPU {index}: {_unfit(found, chosen)}."
+        if _unfit(found, chosen, asked):
+            raise RuntimeError(f"{found.title} cannot run on GPU {index}: {_unfit(found, chosen, asked)}."
                                + _runs_here_hint(gpus))
-    return Choice(found, chosen, startup or saved.get("startup") or ALWAYS_ON)
+    if not engine:
+        # The last engine, while it still runs this model on this card; else the card's default.
+        engines = _engines(found, chosen)
+        engine = saved.get("engine") if saved.get("engine") in engines else engines[0]
+    return Choice(found, chosen, startup or saved.get("startup") or ALWAYS_ON, engine)
 
 
 def _runs_here_hint(gpus: Sequence[Gpu]) -> str:
@@ -664,7 +706,7 @@ NO_GPU = ("No NVIDIA GPU was found, and self-hosting needs one on Linux.\n"
 
 
 def fetch(*, yes: bool = False, model: Optional[str] = None, gpu: Optional[int] = None,
-          startup: Optional[str] = None) -> int:
+          startup: Optional[str] = None, engine: Optional[str] = None) -> int:
     if sys.platform != "linux":
         print(NO_GPU, file=sys.stderr)
         return 1
@@ -680,11 +722,11 @@ def fetch(*, yes: bool = False, model: Optional[str] = None, gpu: Optional[int] 
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
     if not yes and not interactive:
         print("`captchakraken fetch` asks its questions in a terminal. Without one, pass --yes, "
-              "plus --model, --gpu and --startup to choose other than the defaults.", file=sys.stderr)
+              "plus --model, --gpu, --engine and --startup to choose other than the defaults.", file=sys.stderr)
         return 2
     try:
         if yes:
-            choice = _from_flags(gpus, saved, model, gpu, startup)
+            choice = _from_flags(gpus, saved, model, gpu, startup, engine)
         else:
             print("\n\033[1mCaptchaKraken self-hosted setup\033[0m\n")
             choice = ask(gpus, saved)

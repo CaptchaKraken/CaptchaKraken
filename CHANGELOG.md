@@ -23,6 +23,10 @@ semantic versioning; v2 is a major, **breaking** release.
   Twilight V2 2B run on an 8 GB card; Abyss has no GGUF build yet and is not
   offered there. `fetch` checks that Vulkan sees the chosen card before it
   downloads anything, and the server runs on that card by its PCI address.
+- **Choose the engine.** On a card both engines run, `captchakraken fetch`
+  asks whether to serve with vLLM (the default, several solves at once) or
+  llama.cpp (a 1 GB install through Vulkan, one solve at a time), and
+  `--engine vllm|llamacpp` chooses without asking. The last choice is kept.
   `python -m captchakraken.pointer.server --engine llamacpp` runs it on a
   server you manage.
 

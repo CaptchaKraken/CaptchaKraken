@@ -190,3 +190,79 @@ def test_a_gpu_reset_restarts_the_binary_and_the_board_is_answered(tmp_path):
     assert svc._ask({"prompt": "x"})["ok"]
     assert (tmp_path / "starts").read_text() == "2"
     assert svc._ask({"prompt": "y"})["ok"], "the restarted process keeps serving"
+
+
+# ── choosing the engine on a card both can run ───────────────────────────────
+
+def _menu(monkeypatch, picks):
+    """Answers each question with the option whose label starts with `picks[question]`, else the default."""
+    asked = {}
+
+    def choose(title, options, default=0):
+        asked[title] = options
+        for word, label in picks.items():
+            if word in title:
+                return next(i for i, o in enumerate(options) if o.label.startswith(label))
+        return default
+    monkeypatch.setattr(selfhost, "choose", choose)
+    return asked
+
+
+def _engine_question(asked):
+    return next((options for title, options in asked.items() if "engine" in title.lower()), None)
+
+
+def test_a_card_both_engines_run_is_asked_which_and_llamacpp_can_be_picked(monkeypatch):
+    asked = _menu(monkeypatch, {"model": "Midnight V2 4B Q4", "engine": "llama.cpp"})
+    choice = selfhost.ask([T4], {})
+    options = _engine_question(asked)
+    assert [o.label for o in options] == ["vLLM", "llama.cpp"]
+    assert all(o.detail for o in options), "each says what it costs"
+    assert choice.engine == "llamacpp"
+    assert selfhost.settings(choice, "/w", {"port": 1})["engine"] == "llamacpp"
+
+
+def test_vllm_is_the_default_where_it_runs(monkeypatch):
+    _menu(monkeypatch, {"model": "Midnight V2 4B Q4"})
+    assert selfhost.ask([T4], {}).engine == "vllm"
+
+
+def test_the_last_engine_is_where_the_cursor_starts(monkeypatch):
+    _menu(monkeypatch, {"model": "Midnight V2 4B Q4"})
+    assert selfhost.ask([T4], {"engine": "llamacpp"}).engine == "llamacpp"
+
+
+def test_a_card_vllm_cannot_run_is_not_asked(monkeypatch):
+    asked = _menu(monkeypatch, {"model": "Midnight V2 4B Q4"})
+    assert selfhost.ask([GTX_1070], {}).engine == "llamacpp"
+    assert _engine_question(asked) is None
+
+
+def test_a_model_with_no_gguf_is_not_asked(monkeypatch):
+    asked = _menu(monkeypatch, {"model": "Abyss V2 Q4"})
+    assert selfhost.ask([T4], {}).engine == "vllm"
+    assert _engine_question(asked) is None
+
+
+def test_the_engine_flag_chooses_and_says_why_it_cannot():
+    midnight = "MidnightV2-4B-q4"
+    assert selfhost._from_flags([T4], {}, midnight, None, None, "llamacpp").engine == "llamacpp"
+    assert selfhost._from_flags([T4], {}, midnight, None, None).engine == "vllm"
+    assert selfhost._from_flags([T4], {"engine": "llamacpp"}, midnight, None, None).engine == "llamacpp"
+    with pytest.raises(RuntimeError, match="compute capability"):
+        selfhost._from_flags([GTX_1070], {}, midnight, None, None, "vllm")
+    with pytest.raises(RuntimeError, match="no llama.cpp build"):
+        selfhost._from_flags([T4], {}, "abyss", None, None, "llamacpp")
+
+
+def test_a_saved_llamacpp_engine_does_not_stick_to_a_model_without_a_gguf():
+    assert selfhost._from_flags([T4], {"engine": "llamacpp"}, "abyss", None, None).engine == "vllm"
+
+
+def test_the_cli_passes_the_engine_flag(monkeypatch):
+    from captchakraken import cli
+    seen = {}
+    monkeypatch.setattr(selfhost, "fetch", lambda **kw: seen.update(kw) or 0)
+    with pytest.raises(SystemExit):
+        cli._fetch_setup(["--engine", "llamacpp"])
+    assert seen["engine"] == "llamacpp" and seen["yes"] is True

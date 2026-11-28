@@ -14,12 +14,14 @@ Or from Python, with no Node involved:
 pipx run captchakraken fetch     # or: uvx captchakraken fetch
 ```
 
-It detects your NVIDIA GPUs and asks three things:
+It detects your NVIDIA GPUs and asks:
 
 1. **Which model.** Midnight V2 4B Q4 is the default.
 2. **Which GPU.** Each detected card is listed with its free memory, and a card
    too small for the model cannot be picked.
-3. **When the server runs.**
+3. **Which engine**, when the card and model can run on both (see
+   [Choosing the engine](#choosing-the-engine)). vLLM is the default.
+4. **When the server runs.**
    - **Always on** starts with the machine and restarts if it crashes.
    - **Warm start** starts now, and after a reboot on the first solve, then
      stays loaded.
@@ -43,6 +45,31 @@ finds the server through `~/.captchakraken/selfhost.json`.
 
 Allow about 8 GB of disk for the serving stack as well. Self-hosting needs Linux
 and an NVIDIA GPU; on anything else use the [hosted API](./hosted-api.md).
+
+### Choosing the engine
+
+| | vLLM (default) | llama.cpp |
+|---|---|---|
+| GPUs | NVIDIA, compute capability 7.5 and up | Any GPU with a Vulkan driver, GTX 10 series included |
+| Serving stack | about 8 GB | about 1 GB, plus the Vulkan loader |
+| Solves | several at once | one at a time |
+| Models | all, Abyss included | the ones with a GGUF build: Midnight V2 and Twilight V2 |
+
+llama.cpp's Q4 builds scored the same as the full-precision models on our
+test boards (Midnight V2 0.680 against 0.683, Twilight V2 0.668 against
+0.667). Pick vLLM
+unless the card is too old for it, the disk is short, or you only solve one
+captcha at a time. To switch, run `captchakraken fetch` again and pick the
+other engine, or pass `--engine`:
+
+```bash
+captchakraken fetch --engine llamacpp
+captchakraken fetch --engine vllm
+```
+
+Switching replaces the serving stack and keeps your key and port. llama.cpp
+downloads the model's GGUF build, so the first switch downloads the weights
+again.
 
 ### Older GPUs
 
@@ -87,6 +114,7 @@ matching serving stack as part of the same run.
 captchakraken fetch --yes                     # previous answers, then the defaults
 captchakraken fetch --model MidnightV2-4B-q4 --gpu 0 --startup always
 captchakraken fetch --model TwilightV2-2B --startup first-solve
+captchakraken fetch --model TwilightV2-2B --engine llamacpp
 captchakraken fetch abyss                     # Abyss V2 Q4, with an Abyss Licence
 ```
 
